@@ -1,0 +1,1 @@
+ALTER TABLE public.schedule_requests ADD COLUMN IF NOT EXISTS edit_reason text;

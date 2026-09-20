@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.get_project_notification_recipients(uuid, uuid) FROM anon, PUBLIC;

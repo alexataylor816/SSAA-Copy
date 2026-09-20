@@ -1,0 +1,1 @@
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS tooltip_flags jsonb NOT NULL DEFAULT '{}'::jsonb;

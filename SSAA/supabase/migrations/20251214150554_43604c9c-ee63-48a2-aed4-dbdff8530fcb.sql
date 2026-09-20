@@ -1,0 +1,1 @@
+ALTER TABLE public.schedule_requests ADD COLUMN employee_ids uuid[] DEFAULT '{}';

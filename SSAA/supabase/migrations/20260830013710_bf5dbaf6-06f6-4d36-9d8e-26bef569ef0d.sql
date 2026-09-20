@@ -1,0 +1,1 @@
+ALTER TABLE public.employees ALTER COLUMN email SET NOT NULL;

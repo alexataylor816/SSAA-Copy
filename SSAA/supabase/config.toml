@@ -1,0 +1,67 @@
+project_id = "fuivjjhzrewwkkmyjafy"
+
+[functions.send-project-invite]
+verify_jwt = false
+
+[functions.create-employee-user]
+verify_jwt = true
+
+[functions.send-notification]
+verify_jwt = false
+
+[functions.parse-schedule]
+verify_jwt = false
+
+[functions.delete-auth-user]
+verify_jwt = false
+
+[functions.create-checkout-session]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.update-stripe-subscription]
+verify_jwt = false
+
+[functions.send-sms]
+verify_jwt = false
+
+[functions.check-trial-reminders]
+verify_jwt = false
+
+[functions.request-password-reset]
+verify_jwt = false
+
+[functions.verify-reset-code]
+verify_jwt = false
+
+[functions.update-auth-user-email]
+verify_jwt = false
+
+[functions.process-profile-email-sync]
+verify_jwt = false
+
+[functions.delete-company]
+verify_jwt = false
+
+[functions.create-operator]
+verify_jwt = false
+
+[functions.notify-join-request]
+verify_jwt = false
+
+[functions.create-customer-portal]
+verify_jwt = false
+
+[functions.sync-plan-subscribers]
+verify_jwt = false
+
+[functions.upsert-stripe-plan]
+verify_jwt = false
+
+[functions.archive-stripe-plan]
+verify_jwt = false
+
+[functions.send-push]
+verify_jwt = false

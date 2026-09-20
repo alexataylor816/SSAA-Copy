@@ -1,0 +1,1 @@
+ALTER TABLE public.profiles ADD COLUMN language text NOT NULL DEFAULT 'en';

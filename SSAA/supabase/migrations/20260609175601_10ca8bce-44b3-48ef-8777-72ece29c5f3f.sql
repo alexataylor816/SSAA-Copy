@@ -1,0 +1,1 @@
+DROP TRIGGER IF EXISTS trg_guest_project_connections_chat_sync ON public.guest_project_connections;

@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS public.search_sub_companies_for_connection(text);

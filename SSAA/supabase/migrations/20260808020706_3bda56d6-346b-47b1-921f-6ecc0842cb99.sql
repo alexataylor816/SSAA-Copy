@@ -1,0 +1,1 @@
+DELETE FROM public.notification_log WHERE recipient_email = 'nobody@example.com' AND event_type = 'project_connection_code_share';
