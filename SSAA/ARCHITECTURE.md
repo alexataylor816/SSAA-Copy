@@ -8,7 +8,8 @@ This document maps every folder and file in the project to its purpose, and
 separates the **frontend** (app running in the browser) from the **backend**
 (hosted Supabase Postgres + edge functions).
 
-> Source template: Lovable (`vite_react_shadcn_ts`).
+Originally generated from the Lovable `vite_react_shadcn_ts` template. The app is
+now self-hosted and no longer depends on Lovable to run or develop.
 
 ---
 
@@ -16,17 +17,21 @@ separates the **frontend** (app running in the browser) from the **backend**
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
+│ LOCAL HOST  – Python 3 + Flask                                     │
+│   app.py  builds ./dist (via npm) and serves it on localhost:8080  │
+├────────────────────────────────────────────────────────────────────┤
 │ FRONTEND  – React 18 + TypeScript SPA (Vite)                       │
 │   src/  (app code)        public/ (static: favicon, sw.js)         │
 │   index.html (Vite entry)                                          │
 ├────────────────────────────────────────────────────────────────────┤
-│ BACKEND   – Supabase project  fuivjjhzrewwkkmyjafy                 │
+│ BACKEND   – Supabase project  fuivjjhzrewwkkmyjafy (hosted)        │
 │   supabase/migrations/  (DB schema, RLS, triggers, RPCs)           │
 │   supabase/functions/   (31 Deno edge functions)                  │
 │   supabase/config.toml  (function JWT settings)                    │
 ├────────────────────────────────────────────────────────────────────┤
-│ CONFIG    – package.json, vite.config.ts, tsconfig*,               │
-│             tailwind.config.ts, components.json, eslint, .env     │
+│ CONFIG    – package.json, package-lock.json, vite.config.ts,       │
+│             tsconfig*, tailwind.config.ts, components.json,        │
+│             eslint.config.js, .env, requirements.txt                │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -42,54 +47,61 @@ Auth (Supabase email/password + Google via Lovable OAuth) is global state in
 
 ---
 
-## 2. Directory tree (after reorganization)
+## 2. Directory tree (current)
 
 ```
 SSAA/
-├── index.html                  Vite entry point
-├── package.json / bun.lock     deps + scripts
-├── vite.config.ts              dev server, @ alias → ./src
-├── tsconfig*.json              TS configs (app/node)
-├── tailwind.config.ts          Tailwind theme
-├── postcss.config.js           PostCSS (tailwind + autoprefixer)
-├── components.json             shadcn/ui config
-├── eslint.config.js            ESLint flat config
-├── .env                        Supabase URL + publishable key (public, not secret)
-├── public/                     static assets served as-is
-│   ├── sw.js                   service worker for Web Push
+├── app.py                       Flask local host: builds + serves ./dist
+├── requirements.txt             Python dependency (Flask)
+├── index.html                   Vite entry point
+├── package.json                 deps + scripts
+├── package-lock.json            npm lockfile (npm is the package manager)
+├── vite.config.ts               dev server, @ alias → ./src
+├── tsconfig*.json               TS configs (app/node)
+├── tailwind.config.ts           Tailwind theme
+├── postcss.config.js            PostCSS (tailwind + autoprefixer)
+├── components.json              shadcn/ui config
+├── eslint.config.js             ESLint flat config
+├── .env                         Supabase URL + publishable key (public, not secret)
+├── public/                      static assets served as-is
+│   ├── sw.js                    service worker for Web Push
 │   ├── favicon.ico  robots.txt placeholder.svg
-├── supabase/                   BACKEND — see section 6
-│   ├── config.toml             function JWT verification flags + project_id
-│   ├── migrations/            137 SQL migrations (schema/RLS/triggers/RPCs)
-│   └── functions/             31 Deno edge functions
-└── src/                        FRONTEND app code
-    ├── main.tsx                React root bootstrap
-    ├── App.tsx                 Provider stack + route table
-    ├── index.css               Tailwind directives + global styles
-    ├── vite-env.d.ts           Vite client types
-    ├── assets/                 static imports (hero image, bulk-upload template)
-    ├── pages/                  11 router-level pages (one per route)
-    ├── features/               feature folders — the app's domain UI
-    │   ├── scheduling/         main dashboard: calendar, matrix, management…
-    │   │   ├── calendar/        calendar & request workflow components
-    │   │   ├── matrix/          personnel resource matrix (roster board)
-    │   │   ├── manage/          company/account/subscription modals
-    │   │   ├── connect/         invites, connections, guest-GC flow
-    │   │   ├── topbar/          dashboard header, notification bell, nav
-    │   │   └── correspondence/  email-template editor + helpers
-    │   ├── messaging/           chat UI (DMs, project channels, groups)
-    │   └── tours/               onboarding tour + tooltip system
+├── supabase/                    BACKEND — see section 6
+│   ├── config.toml              function JWT verification flags + project_id
+│   ├── migrations/             137 SQL migrations (schema/RLS/triggers/RPCs)
+│   └── functions/              31 Deno edge functions
+└── src/                         FRONTEND app code
+    ├── main.tsx                 React root bootstrap
+    ├── App.tsx                  Provider stack + route table
+    ├── index.css                Tailwind directives + global styles
+    ├── vite-env.d.ts            Vite client types
+    ├── assets/                  static imports (hero image, bulk-upload template)
+    ├── pages/                   11 router-level pages (one per route)
+    ├── features/                feature folders — the app's domain UI
+    │   ├── scheduling/          main dashboard: calendar, matrix, management…
+    │   │   ├── calendar/         calendar & request workflow components
+    │   │   ├── matrix/           personnel resource matrix (roster board)
+    │   │   ├── manage/           company/account/subscription modals
+    │   │   ├── connect/          invites, connections, guest-GC flow
+    │   │   ├── topbar/           dashboard header + notification bell
+    │   │   └── correspondence/   email-template editor + helpers
+    │   ├── messaging/            chat UI (DMs, project channels, groups)
+    │   └── tours/                onboarding tour + tooltip system
     ├── components/
-    │   └── ui/                  49 shadcn/ui primitives (unmodified)
-    ├── contexts/                global React context providers
-    ├── hooks/                   shared React hooks
-    ├── lib/                     pure utility modules
-    ├── i18n/                    EN/ES translation dictionary
-    └── integrations/            Supabase client + Lovable auth bridge
+    │   └── ui/                   26 shadcn/ui primitives (all in use)
+    ├── contexts/                 global React context providers
+    ├── hooks/                    shared React hooks
+    ├── lib/                      pure utility modules
+    ├── i18n/                     EN/ES translation dictionary
+    └── integrations/             Supabase client + Lovable auth bridge
 ```
 
 `components/` intentionally holds only the framework-agnostic shadcn/ui
-primitives. **Every domain component now lives under `features/`.**
+primitives. **Every domain component lives under `features/`.**
+
+The project is fully self-hosted: `app.py` serves the compiled frontend with
+Flask, and npm is the only package manager. Lovable is not required for
+running or developing the app.
 
 ---
 
@@ -142,7 +154,6 @@ Each file maps 1:1 to a route declared in `App.tsx`.
 | `MatrixSubSidebar.tsx` | Subcontractor chips sidebar, grouping selected personnel. |
 | `MatrixDraftBar.tsx` | Bottom bar listing pending draft changes with revert/publish actions. |
 | `MatrixEmployeeCard.tsx` | Draggable employee card (used by resource matrix + right panel). |
-| `MatrixQuickAddModal.tsx` | Quick-assign dialog: choose employees for a project/date. |
 
 ### 4.3 `features/scheduling/manage/` — company & account management
 
@@ -179,7 +190,6 @@ Each file maps 1:1 to a route declared in `App.tsx`.
 |---|---|
 | `DashboardHeader.tsx` | Top header: company switcher, impersonation indicator, menus, notification bell. |
 | `NotificationBell.tsx` | In-app notification bell with unread count + dropdown (realtime events). |
-| `NavLink.tsx` | Styled navigation link (currently **unused** — kept for reference). |
 
 ### 4.6 `features/scheduling/correspondence/` — email template editor
 
@@ -239,8 +249,8 @@ Each file maps 1:1 to a route declared in `App.tsx`.
 | `useNotification.ts` | `sendNotification()` — invokes `send-notification` (email, Resend) and `send-push` edge functions; logs failures to `notification_log`. |
 | `usePushNotifications.ts` | Browser Web Push subscribe via `/sw.js` + VAPID; upserts `push_subscriptions`. |
 | `usePendingCancellationCount.ts` | Badge count of pending company-deletion requests (operator only). |
-| `use-toast.ts` | shadcn toast hook (real implementation; `components/ui/use-toast.ts` re-exports it). |
-| `use-mobile.tsx` | `useIsMobile()` viewport hook (used by `ui/sidebar`). |
+| `use-toast.ts` | shadcn toast hook — the single implementation, imported app-wide (30+ files). |
+| `use-mobile.tsx` | `useIsMobile()` viewport hook (calendar, matrix, messages, company settings). |
 
 ### `src/lib/` (pure utilities)
 
@@ -276,8 +286,16 @@ Each file maps 1:1 to a route declared in `App.tsx`.
 
 ### `src/components/ui/` — shadcn/ui
 
-47+1 primitives (accordion, alert-dialog, button, dialog, sheet, table, toast,
-tooltip, …) plus `sonner.tsx` and `toaster.tsx`. Standard, unmodified.
+26 primitives, all of them imported by app code: accordion, alert-dialog, badge,
+button, calendar, card, checkbox, collapsible, command, dialog, dropdown-menu,
+input, input-otp, label, popover, scroll-area, select, separator, sonner, switch,
+table, tabs, textarea, toast, toaster, tooltip.
+
+Unused primitives (alert, aspect-ratio, avatar, breadcrumb, carousel, chart,
+context-menu, drawer, form, hover-card, menubar, navigation-menu, pagination,
+progress, radio-group, resizable, sheet, sidebar, skeleton, slider, toggle,
+toggle-group) were removed. Re-add any of them with the shadcn CLI
+(`npx shadcn@latest add <name>`) if needed later.
 
 ---
 
@@ -344,36 +362,63 @@ Records `project_id` and per-function `verify_jwt` flags. Most functions set
 
 | File | Purpose |
 |---|---|
-| `vite.config.ts` | Dev server (port 8080), SWC React plugin, `@` → `./src` alias, Lovable component tagger. |
+| `app.py` | Flask local host: builds `dist/` if missing, serves it with SPA fallback, opens the browser. `--dev` runs Vite instead. |
+| `requirements.txt` | Python dependency: Flask. |
+| `vite.config.ts` | Dev server (port 8080), SWC React plugin, `@` → `./src` alias, Lovable component tagger (dev mode only). |
 | `tsconfig.json` / `tsconfig.app.json` / `tsconfig.node.json` | TS project references. |
 | `tailwind.config.ts` + `postcss.config.js` | Tailwind 3 styling. |
 | `components.json` | shadcn/ui aliases (points at `components/ui`). |
 | `eslint.config.js` | ESLint 9 flat config (React hooks/perf + TS). |
-| `package.json` | Scripts: `dev`, `build`, `build:dev`, `lint`, `preview`. |
+| `package.json` | Scripts: `dev`, `build`, `build:dev`, `lint`, `preview`. npm is the package manager. |
+| `package-lock.json` | npm lockfile. |
+| `index.html` | Vite HTML entry; loads `/src/main.tsx`. |
 | `.env` | `VITE_SUPABASE_URL` + publishable (anon) key. These are **public** by design — do not add service-role or secret keys here. |
 | `public/sw.js` | Service worker registered by `usePushNotifications` for Web Push. |
 
 ---
 
-## 8. Known dead / generated files
+## 8. Generated files and removed code
 
-| File | Note |
+### Auto-generated — do not hand-edit
+
+| File | Generated by |
 |---|---|
-| `src/App.css` | Not imported anywhere — **unused**. |
-| `src/features/scheduling/topbar/NavLink.tsx` | No importers — **unused** (kept for reference). |
-| `src/integrations/supabase/client.ts`, `types.ts`, `previewAuthStorage.ts`, `src/integrations/lovable/index.ts` | Auto-generated by Lovable/Supabase. Re-run codegen rather than hand-editing. |
+| `src/integrations/supabase/types.ts` | Supabase codegen (from the live schema) |
+| `src/integrations/supabase/client.ts`, `previewAuthStorage.ts` | Lovable |
+| `src/integrations/lovable/index.ts` | Lovable (Google/Apple OAuth bridge) |
+
+The client-side `Database` type can lag the live schema, which is why some newer
+tables are used with `as any` casts.
+
+### Removed as dead code
+
+Verified unreachable (no imports from anything reachable) before deletion:
+
+- `src/App.css` — never imported
+- `src/features/scheduling/topbar/NavLink.tsx` — no importers
+- `src/features/scheduling/matrix/MatrixQuickAddModal.tsx` — no importers
+- 23 unused shadcn/ui primitives + the `components/ui/use-toast.ts` re-export
+  (superseded by `hooks/use-toast.ts`) — see section 5
+- `.lovable/` — Lovable agent state (memory/ and plan/), unused by the app
+- `bun.lock`, `bun.lockb` — duplicate Bun lockfiles, replaced by `package-lock.json`
+
+`src/vite-env.d.ts` looks unreachable to an import graph but is required: Vite
+generates it and TypeScript needs it for `import.meta.env`.
 
 ---
 
-## 9. Verifying the reorganization
+## 9. Verifying the project
 
-Node/npm were not available in the analysis shell, so correctness was checked
-with a static import resolver (every `from/import` in `src/` resolves to a real
-file; no references to old `components/dashboard|messages|onboarding` paths
-remain). If you have Node installed locally, confirm with:
+Run these after changing structure or dependencies:
 
 ```sh
 npm install        # if node_modules missing
-npx tsc --noEmit
-npm run build
+npx tsc --noEmit   # typecheck
+npm run build      # production build into dist/
+python3 app.py     # serve it and open the browser
 ```
+
+`npm run lint` currently reports pre-existing problems, almost all of them in
+`supabase/functions/**` (Deno edge functions linted with the browser ESLint
+config) plus `no-explicit-any` in `src/`. They predate the reorganization and
+are unrelated to it.
