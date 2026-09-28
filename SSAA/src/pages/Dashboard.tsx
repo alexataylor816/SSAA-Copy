@@ -5,22 +5,22 @@ import { useImpersonation } from '@/contexts/ImpersonationContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { sendNotification } from '@/hooks/useNotification';
-import DashboardHeader from '@/components/dashboard/DashboardHeader';
-import LeftPanel from '@/components/dashboard/LeftPanel';
-import CalendarPanel from '@/components/dashboard/CalendarPanel';
-import RightPanel from '@/components/dashboard/RightPanel';
-import ResourceMatrix from '@/components/dashboard/ResourceMatrix';
-import ScheduleModal from '@/components/dashboard/ScheduleModal';
-import CreateTaskModal from '@/components/dashboard/CreateTaskModal';
-import EditTaskModal from '@/components/dashboard/EditTaskModal';
-import UploadScheduleModal from '@/components/dashboard/UploadScheduleModal';
-import ForcePasswordChangeModal from '@/components/dashboard/ForcePasswordChangeModal';
-import GuestGCTour from '@/components/dashboard/GuestGCTour';
-import SpotlightTour from '@/components/onboarding/SpotlightTour';
-import ConnectedContractorsViewerModal from '@/components/dashboard/ConnectedContractorsViewerModal';
-import { useTooltipFlags, type TooltipKey } from '@/components/onboarding/TooltipFlagsProvider';
-import { TOUR_COPY } from '@/components/onboarding/tourSteps';
-import WelcomeDialog from '@/components/onboarding/WelcomeDialog';
+import DashboardHeader from '@/features/scheduling/topbar/DashboardHeader';
+import LeftPanel from '@/features/scheduling/calendar/LeftPanel';
+import CalendarPanel from '@/features/scheduling/calendar/CalendarPanel';
+import RightPanel from '@/features/scheduling/calendar/RightPanel';
+import ResourceMatrix from '@/features/scheduling/matrix/ResourceMatrix';
+import ScheduleModal from '@/features/scheduling/calendar/ScheduleModal';
+import CreateTaskModal from '@/features/scheduling/calendar/CreateTaskModal';
+import EditTaskModal from '@/features/scheduling/calendar/EditTaskModal';
+import UploadScheduleModal from '@/features/scheduling/calendar/UploadScheduleModal';
+import ForcePasswordChangeModal from '@/features/scheduling/manage/ForcePasswordChangeModal';
+import GuestGCTour from '@/features/scheduling/connect/GuestGCTour';
+import SpotlightTour from '@/features/tours/SpotlightTour';
+import ConnectedContractorsViewerModal from '@/features/scheduling/connect/ConnectedContractorsViewerModal';
+import { useTooltipFlags, type TooltipKey } from '@/features/tours/TooltipFlagsProvider';
+import { TOUR_COPY } from '@/features/tours/tourSteps';
+import WelcomeDialog from '@/features/tours/WelcomeDialog';
 import {
   AlertDialog,
   AlertDialogAction,
