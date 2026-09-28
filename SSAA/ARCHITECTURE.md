@@ -364,6 +364,7 @@ Records `project_id` and per-function `verify_jwt` flags. Most functions set
 |---|---|
 | `app.py` | Flask local host: builds `dist/` if missing, serves it with SPA fallback, opens the browser. `--dev` runs Vite instead. |
 | `requirements.txt` | Python dependency: Flask. |
+| `.venv/` | Python virtual environment (gitignored). Create with `python3 -m venv .venv`, then `source .venv/bin/activate`. |
 | `vite.config.ts` | Dev server (port 8080), SWC React plugin, `@` → `./src` alias, Lovable component tagger (dev mode only). |
 | `tsconfig.json` / `tsconfig.app.json` / `tsconfig.node.json` | TS project references. |
 | `tailwind.config.ts` + `postcss.config.js` | Tailwind 3 styling. |

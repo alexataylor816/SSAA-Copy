@@ -17,21 +17,47 @@ This project runs entirely on your own machine. You do not need Lovable.
 
 Requirements: **Python 3** and **Node.js 18+** (Node builds the frontend bundle).
 
-```sh
-# one-time setup
-pip3 install -r requirements.txt
+### One-time setup
 
-# every time you want to run it
+```sh
+cd /Users/alexa/SSAA-Copy/SSAA
+
+python3 -m venv .venv          # create the virtual environment
+source .venv/bin/activate      # activate it
+pip install -r requirements.txt
+```
+
+### Every time you want to run it
+
+```sh
+cd /Users/alexa/SSAA-Copy/SSAA
+source .venv/bin/activate
 python3 app.py
 ```
 
 `app.py` builds the app if needed, serves it with Flask, and opens your browser at
-<http://localhost:8080/dashboard>. Press `Ctrl+C` to stop.
+<http://localhost:8080/dashboard>. Press `Ctrl+C` to stop, then `deactivate` to
+leave the virtual environment.
 
 On the very first run it also installs npm dependencies and produces the build,
 which takes a minute. After that it starts immediately.
 
+### Virtual environment
+
+| Command | What it does |
+|---|---|
+| `python3 -m venv .venv` | Create the environment (once) |
+| `source .venv/bin/activate` | Activate it — your prompt shows `(.venv)` |
+| `deactivate` | Leave it |
+| `pip install -r requirements.txt` | Install/update Python packages (Flask) |
+| `pip list` | See what's installed |
+
+`.venv/` is gitignored, so it stays out of commits. Delete it and repeat the
+setup above if you ever need a clean environment.
+
 ### Options
+
+All of these are run while the venv is active:
 
 | Command | What it does |
 |---|---|
@@ -61,6 +87,9 @@ brew install node
 ```
 
 Or download the LTS installer from <https://nodejs.org>. Verify with `node -v`.
+
+If Node is installed somewhere unusual, `app.py` also looks in
+`~/.local/node/bin` before falling back to your `PATH`.
 
 ---
 
@@ -116,6 +145,7 @@ directory.
 SSAA/
 ├── app.py               local host: builds and serves the app with Flask
 ├── requirements.txt     Python dependency (Flask)
+├── .venv/               virtual environment (gitignored, not committed)
 ├── index.html           Vite entry point
 ├── supabase/            backend definition (migrations + edge functions)
 ├── public/              static files, including the push service worker
