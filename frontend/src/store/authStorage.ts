@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { baseApi } from '@/store/api/baseApi';
 import { clearCredentials, setCredentials, setHydrated, type AuthUser } from '@/store/authSlice';
 import type { AppDispatch } from '@/store/store';
 
@@ -34,4 +35,5 @@ export async function loadPersistedAuth(dispatch: AppDispatch) {
 export function signOut(dispatch: AppDispatch) {
   clearPersistedAuth();
   dispatch(clearCredentials());
+  dispatch(baseApi.util.resetApiState());
 }

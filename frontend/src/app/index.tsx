@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { router } from 'expo-router';
+import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { BackendStatus } from '@/components/backend-status';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/button';
-import { SeparatorWithLabel } from '@/components/ui/separator-with-label';
 import { TextField } from '@/components/ui/text-field';
 import { TextLink } from '@/components/ui/text-link';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { errorMessage } from '@/lib/api-error';
 import { setCredentials } from '@/store/authSlice';
-import { loadPersistedAuth, persistAuth, signOut } from '@/store/authStorage';
+import { persistAuth } from '@/store/authStorage';
 import { useSignInMutation, useSignUpMutation } from '@/store/api/auth';
 import type { AppDispatch, RootState } from '@/store/store';
 
@@ -22,18 +22,6 @@ const FEATURES = [
   { icon: '👥', label: 'Team management' },
   { icon: '🏢', label: 'Project tracking' },
 ];
-
-function comingSoon(feature: string) {
-  Alert.alert('Coming soon', `${feature} isn't wired up yet — it lands in a later phase.`);
-}
-
-function errorMessage(err: unknown): string {
-  if (err && typeof err === 'object' && 'data' in err) {
-    const data = (err as { data?: { error?: string } }).data;
-    if (data?.error) return data.error;
-  }
-  return 'Something went wrong. Please try again.';
-}
 
 export default function LandingScreen() {
   const theme = useTheme();
@@ -53,8 +41,10 @@ export default function LandingScreen() {
   const isLoading = signUpState.isLoading || signInState.isLoading;
 
   useEffect(() => {
-    loadPersistedAuth(dispatch);
-  }, [dispatch]);
+    if (hydrated && user) {
+      router.replace('/dashboard');
+    }
+  }, [hydrated, user]);
 
   const handleSubmit = async () => {
     setFormError(null);
@@ -66,29 +56,11 @@ export default function LandingScreen() {
       dispatch(setCredentials(result));
       persistAuth(result);
       setPassword('');
+      router.replace('/dashboard');
     } catch (err) {
       setFormError(errorMessage(err));
     }
   };
-
-  if (hydrated && user) {
-    return (
-      <ThemedView type="brandBackground" style={styles.signedInContainer}>
-        <SafeAreaView style={styles.signedInContent}>
-          <ThemedView type="card" style={[styles.card, { borderColor: theme.border }]}>
-            <ThemedText type="subtitle" themeColor="brandForeground">
-              Welcome, {user.fullName}
-            </ThemedText>
-            <ThemedText type="small" themeColor="mutedForeground">
-              Signed in as {user.email}
-            </ThemedText>
-            <Button label="Sign out" variant="outline" onPress={() => signOut(dispatch)} />
-          </ThemedView>
-          <BackendStatus />
-        </SafeAreaView>
-      </ThemedView>
-    );
-  }
 
   return (
     <ScrollView
@@ -175,10 +147,6 @@ export default function LandingScreen() {
                 loading={isLoading}
                 onPress={handleSubmit}
               />
-
-              <SeparatorWithLabel label="or" />
-
-              <Button label="Continue with Google" variant="outline" onPress={() => comingSoon('Google sign-in')} />
             </View>
 
             <View style={styles.footer}>
@@ -192,14 +160,12 @@ export default function LandingScreen() {
 
               {!isSignUp && (
                 <View style={styles.footerLinks}>
-                  <TextLink label="Forgot username?" onPress={() => comingSoon('Username recovery')} />
-                  <TextLink label="Forgot password?" onPress={() => comingSoon('Password recovery')} />
+                  <TextLink label="Forgot username?" onPress={() => router.push('/forgot-username')} />
+                  <TextLink label="Forgot password?" onPress={() => router.push('/forgot-password')} />
                 </View>
               )}
             </View>
           </ThemedView>
-
-          <BackendStatus />
         </View>
       </View>
     </ScrollView>
@@ -277,19 +243,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  signedInContainer: {
-    flex: 1,
-  },
-  signedInContent: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    flex: 1,
-    gap: Spacing.four,
-    justifyContent: 'center',
-    maxWidth: 440,
-    paddingHorizontal: Spacing.four,
-    width: '100%',
   },
   tagline: {
     marginBottom: Spacing.two,

@@ -68,4 +68,51 @@ describe("auth", () => {
     const res = await request(app).get("/auth/me");
     expect(res.status).toBe(401);
   });
+
+  it("resets a password with a valid code and rejects a wrong one", async () => {
+    await request(app)
+      .post("/auth/signup")
+      .send({ email: "reset@example.com", password: "original1", fullName: "Reset Me" });
+
+    const requested = await request(app)
+      .post("/auth/request-password-reset")
+      .send({ email: "reset@example.com" });
+    expect(requested.status).toBe(200);
+    expect(requested.body.devCode).toMatch(/^\d{6}$/);
+
+    const wrongCode = await request(app)
+      .post("/auth/verify-reset-code")
+      .send({ email: "reset@example.com", code: "000000", newPassword: "brandnew1" });
+    expect(wrongCode.status).toBe(400);
+
+    const verified = await request(app)
+      .post("/auth/verify-reset-code")
+      .send({ email: "reset@example.com", code: requested.body.devCode, newPassword: "brandnew1" });
+    expect(verified.status).toBe(200);
+
+    const oldPasswordSignIn = await request(app)
+      .post("/auth/signin")
+      .send({ email: "reset@example.com", password: "original1" });
+    expect(oldPasswordSignIn.status).toBe(401);
+
+    const newPasswordSignIn = await request(app)
+      .post("/auth/signin")
+      .send({ email: "reset@example.com", password: "brandnew1" });
+    expect(newPasswordSignIn.status).toBe(200);
+
+    // codes are single-use
+    const reused = await request(app)
+      .post("/auth/verify-reset-code")
+      .send({ email: "reset@example.com", code: requested.body.devCode, newPassword: "anotherone1" });
+    expect(reused.status).toBe(400);
+  });
+
+  it("does not reveal whether an email is registered", async () => {
+    const res = await request(app)
+      .post("/auth/request-password-reset")
+      .send({ email: "nobody@example.com" });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.devCode).toBeUndefined();
+  });
 });

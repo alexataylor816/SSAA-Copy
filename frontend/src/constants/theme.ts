@@ -87,3 +87,12 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+// Matches shadcn/ui's --radius: 0.5rem (8px) base, with md/sm derived the
+// same way (SSAA/tailwind.config.ts: lg = radius, md = radius - 2, sm = radius - 4).
+export const Radius = {
+  sm: 4,
+  md: 6,
+  lg: 8,
+  full: 9999,
+} as const;

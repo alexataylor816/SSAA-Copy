@@ -13,6 +13,9 @@ export const config = {
   jwtSecretKey: process.env.JWT_SECRET_KEY ?? "dev-jwt-secret-change-me",
   databasePath: process.env.DATABASE_PATH ?? path.join(BASE_DIR, "ssaa.db"),
   corsOrigins: process.env.CORS_ORIGINS ?? "*",
-  uploadDir: process.env.UPLOAD_DIR ?? path.join(BASE_DIR, "uploads"),
+  // `||` not `??`: an empty UPLOAD_DIR in .env means "use the default".
+  uploadDir: process.env.UPLOAD_DIR || path.join(BASE_DIR, "uploads"),
   port: Number(process.env.PORT ?? 8000),
+  resendApiKey: process.env.RESEND_API_KEY,
+  emailFrom: process.env.EMAIL_FROM ?? "SSAA <onboarding@resend.dev>",
 };
