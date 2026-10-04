@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
+import { EVENT } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,8 +50,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default function Dashboard() {
-  const { user, userRole, isAccountHolder, hasLevel1OrHigher, signOut } = useAuth();
+  const { user, userRole, isAccountHolder, hasLevel1OrHigher, signOut, refreshProfile } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const pendingJoinRequest = Boolean((location.state as { pendingJoinRequest?: boolean } | null)?.pendingJoinRequest);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [company, setCompany] = useState<Company | null>(null);
@@ -58,6 +61,8 @@ export default function Dashboard() {
   const [scheduleRequests, setScheduleRequests] = useState<Record<string, unknown>[]>([]);
   const [projectName, setProjectName] = useState("");
   const [connectCode, setConnectCode] = useState("");
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [newCompanyType, setNewCompanyType] = useState<"gc" | "sub">("gc");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -118,6 +123,21 @@ export default function Dashboard() {
     };
   }, [refresh]);
 
+  // Realtime: someone else approving/rejecting a join request, or a schedule
+  // request being created/confirmed/rejected, should show up here live.
+  useEffect(() => {
+    if (!companyId) return;
+    const channel = supabase
+      .channel(`company:${companyId}:dashboard`)
+      .on(EVENT.joinRequestCreated, () => void loadJoinRequests())
+      .on(EVENT.joinRequestResolved, () => void loadJoinRequests())
+      .on(EVENT.scheduleRequestCreated, () => void loadScheduleRequests())
+      .on(EVENT.scheduleRequestUpdated, () => void loadScheduleRequests())
+      .on(EVENT.projectConnectionChanged, () => void loadProjects())
+      .subscribe();
+    return () => channel.unsubscribe();
+  }, [companyId, loadJoinRequests, loadScheduleRequests, loadProjects]);
+
   const pendingRequests = useMemo(
     () => joinRequests.filter((r) => r.status === "pending"),
     [joinRequests],
@@ -150,6 +170,24 @@ export default function Dashboard() {
       await loadProjects();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not connect with that code.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createCompany(event: React.FormEvent) {
+    event.preventDefault();
+    if (!newCompanyName.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post("/companies", { name: newCompanyName.trim(), companyType: newCompanyType });
+      // user.companyId lives in AuthContext, not local state — refresh it so
+      // the rest of this page (gated on companyId) picks up the new company.
+      await refreshProfile();
+      setNewCompanyName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create that company.");
     } finally {
       setBusy(false);
     }
@@ -211,23 +249,40 @@ export default function Dashboard() {
         {!company ? (
           <Card>
             <CardHeader>
-              <CardTitle>Set up your company</CardTitle>
+              <CardTitle>{pendingJoinRequest ? "Request sent" : "Set up your company"}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Your account is ready, but you are not part of a company yet. Create one to start scheduling.
-              </p>
-              <form onSubmit={createProject} className="flex gap-2">
-                <Input
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="Company name"
-                  required
-                />
-                <Button type="submit" disabled={busy}>
-                  Create
-                </Button>
-              </form>
+              {pendingJoinRequest ? (
+                <p className="text-sm text-muted-foreground">
+                  Your request to join has been sent. The account holder needs to approve it before you can
+                  start scheduling with that company.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Your account is ready, but you are not part of a company yet. Create one to start scheduling.
+                  </p>
+                  <form onSubmit={createCompany} className="flex gap-2">
+                    <Input
+                      value={newCompanyName}
+                      onChange={(e) => setNewCompanyName(e.target.value)}
+                      placeholder="Company name"
+                      required
+                    />
+                    <select
+                      value={newCompanyType}
+                      onChange={(e) => setNewCompanyType(e.target.value as "gc" | "sub")}
+                      className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="gc">General contractor</option>
+                      <option value="sub">Subcontractor</option>
+                    </select>
+                    <Button type="submit" disabled={busy}>
+                      Create
+                    </Button>
+                  </form>
+                </>
+              )}
             </CardContent>
           </Card>
         ) : (

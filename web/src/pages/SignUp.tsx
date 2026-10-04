@@ -12,7 +12,9 @@ type CompanyType = "gc" | "sub";
 
 export default function SignUp() {
   const [params] = useSearchParams();
-  const inviteToken = params.get("invite");
+  // A link like /signup?invite=<companyId> skips company creation and sends a
+  // join request to that company instead, pending the account holder's approval.
+  const inviteCompanyId = params.get("invite");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,7 +23,7 @@ export default function SignUp() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { signUp } = useAuth();
+  const { signUp, refreshProfile } = useAuth();
   const navigate = useNavigate();
 
   async function handleSubmit(event: React.FormEvent) {
@@ -29,16 +31,24 @@ export default function SignUp() {
     setError(null);
 
     if (!fullName.trim()) return setError("Full name is required.");
-    if (!companyName.trim()) return setError("Company name is required.");
+    if (!inviteCompanyId && !companyName.trim()) return setError("Company name is required.");
     if (password.length < 6) return setError("Password must be at least 6 characters.");
 
     setSubmitting(true);
     try {
-      await signUp(email, password, fullName.trim());
-      // The account holder owns the company they just created, so create it
-      // before entering the app rather than deferring to a later step.
-      await api.post("/companies", { name: companyName.trim(), companyType });
-      navigate("/dashboard");
+      const { error: signUpError } = await signUp(email, password, fullName.trim());
+      if (signUpError) throw signUpError;
+
+      if (inviteCompanyId) {
+        await api.post(`/companies/${inviteCompanyId}/join-requests`);
+        navigate("/dashboard", { state: { pendingJoinRequest: true } });
+      } else {
+        // The account holder owns the company they just created, so create it
+        // before entering the app rather than deferring to a later step.
+        await api.post("/companies", { name: companyName.trim(), companyType });
+        await refreshProfile();
+        navigate("/dashboard");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create that account.");
     } finally {
@@ -52,7 +62,7 @@ export default function SignUp() {
         <CardHeader className="text-center pb-2">
           <CardTitle className="text-2xl font-bold">Create your account</CardTitle>
           <p className="text-muted-foreground text-sm mt-1">
-            {inviteToken ? "Join the company that invited you" : "Start by setting up your company"}
+            {inviteCompanyId ? "You're joining an existing company" : "Start by setting up your company"}
           </p>
         </CardHeader>
         <CardContent>
@@ -62,29 +72,33 @@ export default function SignUp() {
               <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" required />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="companyName">Company name</Label>
-              <Input
-                id="companyName"
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                placeholder="Smith Construction"
-                required
-              />
-            </div>
+            {!inviteCompanyId && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="companyName">Company name</Label>
+                  <Input
+                    id="companyName"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    placeholder="Smith Construction"
+                    required
+                  />
+                </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="companyType">What kind of company?</Label>
-              <select
-                id="companyType"
-                value={companyType}
-                onChange={(e) => setCompanyType(e.target.value as CompanyType)}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="gc">General contractor</option>
-                <option value="sub">Subcontractor</option>
-              </select>
-            </div>
+                <div className="space-y-2">
+                  <Label htmlFor="companyType">What kind of company?</Label>
+                  <select
+                    id="companyType"
+                    value={companyType}
+                    onChange={(e) => setCompanyType(e.target.value as CompanyType)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="gc">General contractor</option>
+                    <option value="sub">Subcontractor</option>
+                  </select>
+                </div>
+              </>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>

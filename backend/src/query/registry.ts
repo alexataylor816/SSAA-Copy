@@ -116,7 +116,17 @@ const TASKS: TableRule = {
     }
     const allowed = new Set(visibleProjectIds(caller));
     for (const row of rows) {
-      if (!allowed.has(String(row.project_id))) {
+      // Inserts carry project_id. Updates address the row by id instead, so
+      // fall back to the project the task already belongs to — otherwise every
+      // update would be rejected for "not accessing project undefined".
+      const projectId =
+        row.project_id ??
+        (row.id
+          ? (db.prepare("SELECT project_id FROM tasks WHERE id = ?").get(String(row.id)) as
+              | { project_id: string }
+              | undefined)?.project_id
+          : undefined);
+      if (projectId == null || !allowed.has(String(projectId))) {
         throw new ForbiddenError("You do not have access to that project.");
       }
     }

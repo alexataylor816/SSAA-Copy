@@ -9,7 +9,9 @@ import { Link } from "react-router-dom";
 import {
   DndContext,
   DragOverlay,
+  MouseSensor,
   PointerSensor,
+  TouchSensor,
   useDraggable,
   useDroppable,
   useSensor,
@@ -18,6 +20,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { api } from "@/lib/api";
+import { EVENT } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
@@ -72,6 +75,10 @@ function DraggableChip({ employee, disabled }: { employee: Employee; disabled?: 
       ref={setNodeRef}
       {...listeners}
       {...attributes}
+      // Without touch-action: none, the browser's own scroll/gesture handling
+      // can swallow the pointer-down-and-move before dnd-kit claims it, which
+      // presents as "dragging does nothing" with zero visual feedback.
+      style={{ touchAction: "none" }}
       className={`rounded-md border bg-card px-3 py-2 text-sm shadow-sm transition-opacity ${
         disabled ? "cursor-default" : "cursor-grab active:cursor-grabbing"
       } ${isDragging ? "opacity-40" : ""}`}
@@ -138,7 +145,14 @@ export default function ResourceMatrix() {
   const [activeEmployee, setActiveEmployee] = useState<Employee | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  // PointerSensor alone is occasionally not dispatched correctly in embedded
+  // webviews; Mouse/Touch cover those cases without changing normal-browser
+  // behavior (dnd-kit only activates the first sensor that fires).
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+  );
 
   const days = useMemo(() => {
     return Array.from({ length: 7 }, (_, index) => {
@@ -174,13 +188,20 @@ export default function ResourceMatrix() {
     void load();
   }, [load]);
 
-  // Realtime: other people on the same company changing availability should
-  // show up here without a refresh.
+  // Realtime: other people on the same company changing availability, or a
+  // schedule request being created/confirmed/rejected, should show up here
+  // without a manual refresh. `.on()` must be called before `.subscribe()` —
+  // the channel only forwards events it already knows about at that point.
   useEffect(() => {
     if (!companyId) return;
-    const channel = supabase.channel(`availability:${companyId}`).subscribe();
+    const channel = supabase
+      .channel(`company:${companyId}:matrix`)
+      .on(EVENT.availabilityChanged, () => void load())
+      .on(EVENT.scheduleRequestCreated, () => void load())
+      .on(EVENT.scheduleRequestUpdated, () => void load())
+      .subscribe();
     return () => channel.unsubscribe();
-  }, [companyId]);
+  }, [companyId, load]);
 
   function entriesFor(employeeId: string, date: string): Availability[] {
     return availability.filter((a) => a.employeeId === employeeId && a.date === date);

@@ -147,6 +147,51 @@ describe("query api: shape", () => {
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/must include its id/i);
   });
+
+  it("updates a task by id even though the payload carries no project_id", async () => {
+    // Regression: TASKS.canWrite used to read row.project_id unconditionally,
+    // so an update-by-id was rejected with "you do not have access to that
+    // project" because the value it compared was the string "undefined".
+    const { token } = await signUp(`task-${Date.now()}@example.com`);
+    const project = await companyWithProject(token, "Task Co");
+
+    const inserted = await query(token)({
+      table: "tasks",
+      operation: "insert",
+      data: { project_id: project.id, name: "Framing", start_date: "2026-11-02", end_date: "2026-11-06" },
+    });
+    expect(inserted.status).toBe(200);
+
+    const updated = await query(token)({
+      table: "tasks",
+      operation: "update",
+      data: { id: inserted.body.data[0].id, name: "Framing + steel", status: "in_progress" },
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body.data[0].name).toBe("Framing + steel");
+    expect(updated.body.data[0].status).toBe("in_progress");
+  });
+
+  it("refuses to update a task on a project you cannot see", async () => {
+    const owner = await signUp(`task-own-${Date.now()}@example.com`);
+    const stranger = await signUp(`task-str-${Date.now()}@example.com`);
+    const project = await companyWithProject(owner.token, "Owner Co");
+    await companyWithProject(stranger.token, "Stranger Co");
+
+    const inserted = await query(owner.token)({
+      table: "tasks",
+      operation: "insert",
+      data: { project_id: project.id, name: "Secret", start_date: "2026-11-02", end_date: "2026-11-06" },
+    });
+    const id = inserted.body.data[0].id;
+
+    const res = await query(stranger.token)({
+      table: "tasks",
+      operation: "update",
+      data: { id, name: "Hijacked" },
+    });
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("query api: row-level scoping", () => {

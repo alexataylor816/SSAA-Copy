@@ -69,3 +69,28 @@ export function getHistoricalLockDate(now = new Date()): Date {
 export function isDateLocked(date: Date, now = new Date()): boolean {
   return date < getHistoricalLockDate(now);
 }
+
+/**
+ * Parses a YYYY-MM-DD key into a local-midnight Date.
+ *
+ * `new Date('2026-11-02')` parses as UTC midnight, which lands on the previous
+ * day for anyone west of Greenwich — that bug is invisible in UTC CI and shows
+ * up as tasks shifted one day early in California. Building from parts keeps
+ * the value in local time, matching toDateKey's round trip.
+ */
+export function parseDateKey(key: string): Date {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
+
+export function addDays(date: Date, delta: number): Date {
+  const next = new Date(date);
+  next.setDate(date.getDate() + delta);
+  return next;
+}
+
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+export function formatWeekdayShort(date: Date): string {
+  return WEEKDAY_SHORT[date.getDay()];
+}

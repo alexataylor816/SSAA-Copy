@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { router } from 'expo-router';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 
 import { ThemedText } from '@/components/themed-text';
@@ -275,7 +275,10 @@ export default function DashboardScreen() {
           </View>
 
           {projectsData?.projects.map((project) => (
-            <View key={project.id} style={[styles.projectRow, { borderColor: theme.border }]}>
+            <Pressable
+              key={project.id}
+              onPress={() => router.push({ pathname: '/tasks', params: { projectId: project.id } })}
+              style={[styles.projectRow, { borderColor: theme.border }]}>
               <View style={{ flex: 1 }}>
                 <ThemedText type="small" themeColor="brandForeground">
                   {project.name}
@@ -284,7 +287,10 @@ export default function DashboardScreen() {
                   {project.companyId === companyId ? 'Owned' : 'Connected'} · Code: {project.connectionCode}
                 </ThemedText>
               </View>
-            </View>
+              <ThemedText type="small" themeColor="primary">
+                Schedule ›
+              </ThemedText>
+            </Pressable>
           ))}
 
           {projectError && (
@@ -408,7 +414,10 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
   },
   projectRow: {
+    alignItems: 'center',
     borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: Spacing.three,
     paddingTop: Spacing.two,
   },
   requestActions: {
