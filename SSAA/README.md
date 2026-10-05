@@ -1,73 +1,120 @@
-# Welcome to your Lovable project
+# SSAA
 
-## Project info
+**Schedule Someone, Anytime, Anywhere** — a construction scheduling platform that
+connects General Contractors (GCs) and Subcontractors (Subs). GCs book subcontractor
+personnel; subcontractors approve, edit, or reject those requests.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+Built with Vite + React 18 + TypeScript + Tailwind + shadcn/ui, backed by Supabase.
 
-## How can I edit this code?
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for a map of every file and the
+frontend/backend split.
 
-There are several ways of editing your application.
+---
 
-**Use Lovable**
+## Run it locally
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+You need **Node.js 18+** (a build step is required) and **Python 3**.
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+python3 app.py
 ```
 
-**Edit a file directly in GitHub**
+That single command builds the app if needed, serves it, and opens your browser at
+<http://localhost:8080/dashboard>. Stop it with `Ctrl+C`.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+On the first run only, `app.py` installs dependencies and produces the build
+(takes a minute). After that it starts instantly.
 
-**Use GitHub Codespaces**
+### Options
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+| Command | What it does |
+|---|---|
+| `python3 app.py` | Serve the build and open the browser |
+| `python3 app.py --build` | Rebuild `dist/` first, to pick up source changes |
+| `python3 app.py --dev` | Vite dev server with hot reload on <http://localhost:8080> |
+| `python3 app.py --port 3000` | Use a specific port (falls back automatically if busy) |
+| `python3 app.py --no-browser` | Don't open a browser automatically |
+| `python3 app.py --host 0.0.0.0` | Expose on your local network (phone/tablet testing) |
 
-## What technologies are used for this project?
+### If you prefer npm
 
-This project is built with:
+```sh
+npm install       # first time only
+npm run dev       # dev server with hot reload
+npm run build     # production build into dist/
+npm run preview   # preview the build
+npm run lint
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### Installing Node.js
 
-## How can I deploy this project?
+If `app.py` reports that Node.js is missing:
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+```sh
+brew install node
+```
 
-## Can I connect a custom domain to my Lovable project?
+Or download the LTS installer from <https://nodejs.org>. Verify with `node -v`.
 
-Yes, you can!
+---
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## Configuration
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+`.env` holds the Supabase connection details and is already populated:
+
+| Variable | Purpose |
+|---|---|
+| `VITE_SUPABASE_URL` | Supabase project URL |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Public anon key (safe to ship in the browser) |
+
+Never put the Supabase **service-role** key in `.env` — anything prefixed with
+`VITE_` is bundled into the browser bundle. Server-side secrets belong in
+Supabase Edge Function environment variables, configured in
+`supabase/config.toml`.
+
+---
+
+## Backend
+
+The Supabase backend is **not** run from this repo — it is hosted and already
+connected. `supabase/` contains its definition:
+
+- `supabase/migrations/` — 137 SQL migrations: tables, RLS policies, triggers, RPCs
+- `supabase/functions/` — 31 Deno edge functions (email via Resend, Web Push,
+  SMS via Twilio, Stripe billing, Excel parsing, user provisioning)
+- `supabase/config.toml` — per-function JWT verification flags
+
+To manage it, install the [Supabase CLI](https://supabase.com/docs/guides/cli) and
+run commands such as `supabase functions list` or `supabase db push` from this
+directory.
+
+---
+
+## Project layout
+
+```
+SSAA/
+├── app.py               local host: builds and serves the app
+├── index.html           Vite entry point
+├── supabase/            backend definition (migrations + edge functions)
+├── public/              static files, including the push service worker
+└── src/
+    ├── pages/           11 router-level pages
+    ├── features/        domain UI: scheduling, messaging, tours
+    ├── components/ui/   shadcn/ui primitives
+    ├── contexts/        auth, language, impersonation
+    ├── hooks/           shared React hooks
+    ├── lib/             pure utilities
+    ├── i18n/            EN/ES translations
+    └── integrations/    Supabase client + Lovable auth bridge
+```
+
+---
+
+## Notes
+
+- Push notifications and `localStorage` session storage work over `localhost`.
+- The production bundle is a single ~2.2 MB JS chunk. Code splitting would speed
+  up first load; `vite.config.ts` is where to add `manualChunks`.
+- The project was originally generated by [Lovable](https://lovable.dev); you no
+  longer need it to run or develop the app locally.
