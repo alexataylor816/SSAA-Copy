@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sparkles, Upload, GripVertical, Plus, MoreVertical, Circle, Clock, CheckCircle2, ChevronDown } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Input } from "@/components/ui/input";
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -401,30 +402,27 @@ const LeftPanel = ({
                   </div>
                   <div className="space-y-2">
                     <Label>{t('left.date')}</Label>
-                    <input 
-                      type="date" 
+                    <Input
+                      type="date"
                       value={editDate} 
                       onChange={(e) => setEditDate(e.target.value)}
-                      className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>{t('left.startTime')}</Label>
-                      <input
-                        type="time" 
+                      <Input
+                        type="time"
                         value={editStartTime} 
                         onChange={(e) => setEditStartTime(e.target.value)}
-                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
                       />
                     </div>
                     <div className="space-y-2">
                       <Label>{t('left.endTime')}</Label>
-                      <input
-                        type="time" 
+                      <Input
+                        type="time"
                         value={editEndTime} 
                         onChange={(e) => setEditEndTime(e.target.value)}
-                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
                       />
                     </div>
                   </div>

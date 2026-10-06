@@ -133,6 +133,76 @@ describe("messaging: project channels", () => {
   });
 });
 
+describe("messaging: group chats", () => {
+  it("creates a group with the people you pick and lets them talk", async () => {
+    const { gc, sub } = await connectedPair();
+    const created = await request(app)
+      .post("/conversations/group")
+      .set(authed(gc.token))
+      .send({ title: "Level 2 crew", userIds: [sub.id] });
+    expect(created.status).toBe(201);
+    const id = created.body.conversationId as string;
+
+    const subList = await request(app).get("/conversations").set(authed(sub.token));
+    const group = subList.body.conversations.find((c: { id: string }) => c.id === id);
+    expect(group.type).toBe("group");
+    expect(group.title).toBe("Level 2 crew");
+    expect(group.subtitle).toBe("2 members");
+
+    const thread = await request(app).get(`/conversations/${id}/messages`).set(authed(sub.token));
+    expect(thread.body.messages[0].kind).toBe("system");
+    expect(thread.body.messages[0].body).toContain("created the group");
+
+    const reply = await request(app).post(`/conversations/${id}/messages`).set(authed(sub.token)).send({ body: "On it" });
+    expect(reply.status).toBe(201);
+  });
+
+  it("lets a member add a contact, and refuses strangers and duplicates", async () => {
+    const { gc, sub } = await connectedPair();
+    const teammate = await signUp("teammate", "Tia Teammate");
+    // Join the GC's company so they're a contact of the GC.
+    const me = await request(app).post("/query").set(authed(gc.token)).send({
+      table: "users",
+      operation: "select",
+      filters: [{ op: "eq", column: "id", value: gc.id }],
+    });
+    const gcCompanyId = me.body.data[0].company_id as string;
+    await request(app).post(`/companies/${gcCompanyId}/join-requests`).set(authed(teammate.token));
+    const listed = await request(app).get(`/companies/${gcCompanyId}/join-requests`).set(authed(gc.token));
+    await request(app)
+      .post(`/companies/${gcCompanyId}/join-requests/${listed.body.requests[0].id}/approve`)
+      .set(authed(gc.token))
+      .send({ permissionLevel: "partial" });
+
+    const created = await request(app).post("/conversations/group").set(authed(gc.token)).send({ title: "Team", userIds: [sub.id] });
+    const id = created.body.conversationId as string;
+
+    const added = await request(app).post(`/conversations/${id}/participants`).set(authed(gc.token)).send({ userId: teammate.id });
+    expect(added.status).toBe(201);
+    expect(added.body.message.body).toContain("added Tia Teammate");
+    const members = await request(app).get(`/conversations/${id}/participants`).set(authed(teammate.token));
+    expect(members.body.participants).toHaveLength(3);
+
+    const again = await request(app).post(`/conversations/${id}/participants`).set(authed(gc.token)).send({ userId: teammate.id });
+    expect(again.status).toBe(400);
+
+    const stranger = await signUp("groupstranger");
+    await company(stranger.token, "Stranger Group Co", "gc");
+    const refused = await request(app).post(`/conversations/${id}/participants`).set(authed(gc.token)).send({ userId: stranger.id });
+    expect(refused.status).toBe(403);
+    const outsiderRead = await request(app).get(`/conversations/${id}/messages`).set(authed(stranger.token));
+    expect(outsiderRead.status).toBe(404);
+  });
+
+  it("needs a name and at least one other person", async () => {
+    const { gc, sub } = await connectedPair();
+    const noName = await request(app).post("/conversations/group").set(authed(gc.token)).send({ title: " ", userIds: [sub.id] });
+    expect(noName.status).toBe(400);
+    const nobody = await request(app).post("/conversations/group").set(authed(gc.token)).send({ title: "Solo", userIds: [] });
+    expect(nobody.status).toBe(400);
+  });
+});
+
 describe("messaging: direct messages", () => {
   it("opens one DM between people on a shared project and reuses it", async () => {
     const { gc, sub } = await connectedPair();

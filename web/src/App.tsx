@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/toaster";
+import MessageAlerts from "@/components/MessageAlerts";
 
 // Route-level code splitting: each page (and its heavy deps like the matrix
 // drag-and-drop kit) loads on demand instead of bloating the initial bundle.
@@ -156,6 +157,7 @@ export default function App() {
         <Route path="*" element={<NotFound />} />
       </Routes>
       </Suspense>
+      <MessageAlerts />
       <Toaster />
     </>
   );

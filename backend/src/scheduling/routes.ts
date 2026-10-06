@@ -104,8 +104,8 @@ schedulingRouter.get(
 schedulingRouter.post(
   "/availability",
   route((req, res) => {
-    const { date, startTime, endTime, projectId, allProjects, employeeId } = req.body ?? {};
-    const entry = setAvailability(req.userId!, { date, startTime, endTime, projectId, allProjects, employeeId });
+    const { date, startTime, endTime, projectId, allProjects, employeeId, stopNumber } = req.body ?? {};
+    const entry = setAvailability(req.userId!, { date, startTime, endTime, projectId, allProjects, employeeId, stopNumber });
     const companyId = callerCompanyId(req.userId!);
     if (companyId) {
       // The target employee is always on the caller's own roster (enforced in

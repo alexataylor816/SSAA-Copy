@@ -28,6 +28,8 @@ interface AvailabilityRow {
   start_time: string;
   end_time: string;
   all_projects: 0 | 1;
+  stop_number: number | string | null;
+  stop_label: string | null;
   created_at: string;
 }
 
@@ -256,11 +258,13 @@ export function createAvailabilityRow(params: {
   startTime: string;
   endTime: string;
   allProjects: boolean;
+  stopNumber?: number | null;
+  stopLabel?: string | null;
 }): Availability {
   const id = crypto.randomUUID();
   db.prepare(
-    `INSERT INTO availability (id, employee_id, project_id, date, start_time, end_time, all_projects)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO availability (id, employee_id, project_id, date, start_time, end_time, all_projects, stop_number, stop_label)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     params.employeeId,
@@ -269,6 +273,9 @@ export function createAvailabilityRow(params: {
     params.startTime,
     params.endTime,
     params.allProjects ? 1 : 0,
+    // BigInt binds as an INTEGER, so a legacy TEXT column stores "1" rather than "1.0".
+    params.stopNumber == null ? null : BigInt(Math.trunc(params.stopNumber)),
+    params.stopLabel ?? null,
   );
   return findAvailabilityById(id)!;
 }
@@ -303,6 +310,8 @@ function mapAvailabilityRow(row: AvailabilityRow): Availability {
     startTime: row.start_time,
     endTime: row.end_time,
     allProjects: row.all_projects === 1,
+    stopNumber: row.stop_number == null ? null : Number(row.stop_number),
+    stopLabel: row.stop_label ?? null,
     createdAt: row.created_at,
   };
 }

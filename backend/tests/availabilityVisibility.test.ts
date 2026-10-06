@@ -23,6 +23,35 @@ function visibleAvailability(token: string) {
     .send({ table: "availability", operation: "select", filters: [{ op: "eq", column: "date", value: "2099-05-06" }] });
 }
 
+describe("availability: multiple stops", () => {
+  it("stores each stop with its number and label", async () => {
+    const sub = await account("stops", "sub");
+    for (const [stopNumber, startTime, endTime] of [
+      [1, "06:00", "10:00"],
+      [2, "13:00", "17:00"],
+    ] as const) {
+      const res = await request(app)
+        .post("/availability")
+        .set(authed(sub))
+        .send({ date: "2099-06-02", startTime, endTime, allProjects: true, stopNumber });
+      expect(res.status).toBe(201);
+      expect(res.body.stopLabel).toBe(`Stop #${stopNumber}`);
+    }
+    const listed = await request(app).get("/availability?start=2099-06-02&end=2099-06-02").set(authed(sub));
+    const stops = listed.body.availability.map((a: { stopNumber: number }) => a.stopNumber).sort();
+    expect(stops).toEqual([1, 2]);
+  });
+
+  it("rejects a stop number outside 1-10", async () => {
+    const sub = await account("badstop", "sub");
+    const res = await request(app)
+      .post("/availability")
+      .set(authed(sub))
+      .send({ date: "2099-06-02", startTime: "06:00", endTime: "10:00", allProjects: true, stopNumber: 0 });
+    expect(res.status).toBe(400);
+  });
+});
+
 /** Mirrors the original's "View availability" policy (20260723223933). */
 describe("availability visibility", () => {
   async function gcWithTwoSubs() {

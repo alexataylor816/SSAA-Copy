@@ -38,7 +38,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Toaster } from "@/components/ui/toaster";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
+import DashboardHeader from "@/components/dashboard/DashboardHeader";
 
 interface Employee {
   id: string;
@@ -551,17 +552,21 @@ export default function ResourceMatrix() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 p-4">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/dashboard">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Dashboard
-              </Link>
-            </Button>
-            <h1 className="text-lg font-bold">Resource matrix</h1>
+    <div className="flex min-h-screen flex-col bg-background">
+      <DashboardHeader />
+
+      <div className="border-b bg-card">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div>
+            <h1 className="text-lg font-semibold">Weekly Schedule</h1>
+            <p className="text-sm text-muted-foreground">
+              {weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })} –{" "}
+              {new Date(weekStart.getTime() + 6 * DAY_MS).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -571,34 +576,47 @@ export default function ResourceMatrix() {
               className="h-9 rounded-md border border-input bg-background px-2 text-sm"
               aria-label="Project"
             >
-              <option value="">All projects</option>
+              <option value="">Master Schedule (all projects)</option>
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
                 </option>
               ))}
             </select>
-            <Button variant="outline" size="sm" onClick={() => setWeekStart(new Date(weekStart.getTime() - 7 * DAY_MS))}>
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setWeekStart(startOfWeek(new Date()))}>
-              This week
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setWeekStart(new Date(weekStart.getTime() + 7 * DAY_MS))}>
-              Next
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="Previous week"
+                onClick={() => setWeekStart(new Date(weekStart.getTime() - 7 * DAY_MS))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="sm" className="h-9" onClick={() => setWeekStart(startOfWeek(new Date()))}>
+                Today
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="Next week"
+                onClick={() => setWeekStart(new Date(weekStart.getTime() + 7 * DAY_MS))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
-      </header>
+      </div>
 
-      <main className="mx-auto max-w-7xl p-4">
+      <main className="mx-auto w-full max-w-7xl flex-1 p-4">
         <p className="mb-3 text-sm text-muted-foreground">
-          Week of {iso(weekStart)} &#8212;{" "}
           {canEditOthers
-            ? "drag any name onto a day to publish that person's hours."
+            ? "Drag any name onto a day to publish that person's hours."
             : myEmployeeId
-              ? "drag your own name onto a day to add availability."
-              : "you have no employee record in this company yet, so this view is read-only."}
+              ? "Drag your own name onto a day to add your availability."
+              : "You have no employee record in this company yet, so this view is read-only."}
         </p>
         <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
@@ -720,7 +738,24 @@ export default function ResourceMatrix() {
                 <div key={crew.companyId} className="space-y-2">
                   <p className="text-xs font-medium text-muted-foreground">{crew.companyName}</p>
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[48rem] border-separate border-spacing-1">
+                    {/* Same fixed columns and day headings as the main grid, so the days line up. */}
+                    <table className="w-full min-w-[48rem] table-fixed border-separate border-spacing-1">
+                      <colgroup>
+                        <col className="w-44" />
+                        {days.map((day) => (
+                          <col key={day.iso} />
+                        ))}
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th className="sr-only">Employee</th>
+                          {days.map((day) => (
+                            <th key={day.iso} className="pb-1 text-left text-xs font-medium text-muted-foreground">
+                              {day.date.toLocaleDateString(undefined, { weekday: "short", month: "numeric", day: "numeric" })}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
                       <tbody>
                         {crew.employees.map((employee) => (
                           <tr key={employee.id}>

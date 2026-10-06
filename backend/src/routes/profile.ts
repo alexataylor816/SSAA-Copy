@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { HttpError } from "../rbac/errors.js";
 import { findUserById, updateUserProfile, type User } from "../models/users.js";
+import { findEmployeeByLinkedUser, setEmployeeNumberForUser } from "../rbac/models.js";
 
 export const profileRouter = Router();
 profileRouter.use(requireAuth);
@@ -33,6 +34,21 @@ function serializeUser(user: User) {
   };
 }
 
+function employeeNumberOf(user: User): string | null {
+  return user.companyId ? (findEmployeeByLinkedUser(user.companyId, user.id)?.employeeNumber ?? null) : null;
+}
+
+/** What the profile dialog needs beyond the session: the caller's employee ID, if they have an employee record. */
+profileRouter.get(
+  "/auth/profile",
+  route((req, res) => {
+    const user = findUserById(req.userId!);
+    if (!user) throw new HttpError(401, "User not found.");
+    const employee = user.companyId ? findEmployeeByLinkedUser(user.companyId, user.id) : undefined;
+    res.json({ user: serializeUser(user), employeeNumber: employee?.employeeNumber ?? null, hasEmployeeRecord: !!employee });
+  }),
+);
+
 const AVATAR_RE = /^\/uploads\/(schedule-requests|avatars)\/[A-Za-z0-9._-]+\.(png|jpe?g|webp|gif)$/i;
 
 /**
@@ -42,7 +58,7 @@ const AVATAR_RE = /^\/uploads\/(schedule-requests|avatars)\/[A-Za-z0-9._-]+\.(pn
 profileRouter.patch(
   "/auth/profile",
   route((req, res) => {
-    const { fullName, phone, language, profilePictureUrl } = req.body ?? {};
+    const { fullName, phone, language, profilePictureUrl, employeeNumber } = req.body ?? {};
     const updates: { fullName?: string; phone?: string | null; language?: string; profilePictureUrl?: string | null } = {};
 
     if (fullName !== undefined) {
@@ -69,12 +85,23 @@ profileRouter.patch(
       }
       updates.profilePictureUrl = profilePictureUrl;
     }
-    if (Object.keys(updates).length === 0) {
+    let employeeNumberValue: string | null | undefined;
+    if (employeeNumber !== undefined) {
+      if (employeeNumber !== null && (typeof employeeNumber !== "string" || employeeNumber.trim().length > 40)) {
+        throw new HttpError(400, "Employee ID must be 40 characters or fewer.");
+      }
+      employeeNumberValue = employeeNumber === null ? null : employeeNumber.trim() || null;
+    }
+    if (Object.keys(updates).length === 0 && employeeNumberValue === undefined) {
       throw new HttpError(400, "Nothing to update.");
     }
 
-    const user = updateUserProfile(req.userId!, updates);
+    const user = Object.keys(updates).length ? updateUserProfile(req.userId!, updates) : findUserById(req.userId!);
     if (!user) throw new HttpError(401, "User not found.");
-    res.json({ user: serializeUser(user) });
+    // The ID lives on the user's employee record, as in the original; nothing to set without one.
+    if (employeeNumberValue !== undefined && user.companyId) {
+      setEmployeeNumberForUser(user.companyId, user.id, employeeNumberValue);
+    }
+    res.json({ user: serializeUser(user), employeeNumber: employeeNumberOf(user) });
   }),
 );

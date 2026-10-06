@@ -176,6 +176,8 @@ export interface SetAvailabilityParams {
   allProjects?: boolean;
   /** Publish hours for this employee instead of the caller themself. */
   employeeId?: string;
+  /** Which stop this is when someone works several separate blocks in a day (1-based). */
+  stopNumber?: number;
 }
 
 /**
@@ -243,6 +245,11 @@ export function setAvailability(userId: string, params: SetAvailabilityParams): 
 
   const employee = resolveEmployeeToSchedule(user, params.employeeId);
 
+  const stop = params.stopNumber;
+  if (stop !== undefined && stop !== null && (!Number.isInteger(stop) || stop < 1 || stop > 10)) {
+    throw new BadRequestError("stopNumber must be a whole number from 1 to 10.");
+  }
+
   return createAvailabilityRow({
     employeeId: employee.id,
     projectId: params.allProjects ? null : params.projectId!,
@@ -250,6 +257,9 @@ export function setAvailability(userId: string, params: SetAvailabilityParams): 
     startTime: params.startTime,
     endTime: params.endTime,
     allProjects: !!params.allProjects,
+    stopNumber: stop ?? null,
+    // Same label the original generates.
+    stopLabel: stop ? `Stop #${stop}` : null,
   });
 }
 

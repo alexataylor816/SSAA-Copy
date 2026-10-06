@@ -39,6 +39,13 @@ export interface Contact {
 // one has to refresh the other, and the server sends no event for reads.
 const READ_EVENT = "ssaa:messages-read";
 
+/** The conversation open on screen right now, so new-message alerts can skip it. */
+let openConversationId: string | null = null;
+export const setOpenConversation = (id: string | null) => {
+  openConversationId = id;
+};
+export const getOpenConversation = () => openConversationId;
+
 export const messagingApi = {
   conversations: () => api.get<{ conversations: ConversationSummary[] }>("/conversations"),
   messages: (id: string) => api.get<{ messages: ChatMessage[] }>(`/conversations/${id}/messages`),
@@ -48,6 +55,11 @@ export const messagingApi = {
     window.dispatchEvent(new Event(READ_EVENT));
   },
   openDm: (userId: string) => api.post<{ conversationId: string }>("/conversations/dm", { userId }),
+  createGroup: (title: string, userIds: string[]) =>
+    api.post<{ conversationId: string }>("/conversations/group", { title, userIds }),
+  participants: (id: string) => api.get<{ participants: Contact[] }>(`/conversations/${id}/participants`),
+  addParticipant: (id: string, userId: string) =>
+    api.post<{ message: ChatMessage }>(`/conversations/${id}/participants`, { userId }),
   contacts: () => api.get<{ contacts: Contact[] }>("/messaging/contacts"),
 };
 

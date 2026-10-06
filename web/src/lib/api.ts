@@ -120,8 +120,15 @@ export const authApi = {
       body: JSON.stringify(body),
     }),
 
-  updateProfile: (body: { fullName?: string; phone?: string | null; language?: string; profilePictureUrl?: string | null }) =>
-    request<{ user: SessionUser }>("/auth/profile", {
+  getProfile: () => request<{ employeeNumber: string | null; hasEmployeeRecord: boolean }>("/auth/profile"),
+  updateProfile: (body: {
+    fullName?: string;
+    phone?: string | null;
+    language?: string;
+    profilePictureUrl?: string | null;
+    employeeNumber?: string | null;
+  }) =>
+    request<{ user: SessionUser; employeeNumber?: string | null }>("/auth/profile", {
       method: "PATCH",
       body: JSON.stringify(body),
     }),

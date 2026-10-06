@@ -41,6 +41,7 @@ interface Employee {
   email: string | null;
   phone: string | null;
   linkedUserId: string | null;
+  employeeNumber?: string | null;
 }
 
 interface Member {
@@ -606,7 +607,7 @@ export default function CompanySettings() {
         )}
 
         {company?.companyType === "sub" && (
-          <TimesheetDownloadCard employees={employees.map((e) => ({ id: e.id, name: e.name }))} />
+          <TimesheetDownloadCard employees={employees.map((e) => ({ id: e.id, name: e.name, employeeNumber: e.employeeNumber }))} />
         )}
 
         <Card>

@@ -34,7 +34,10 @@ export const config = {
    * Local development only: in production that would let anyone reset any
    * account by reading the code straight out of the response.
    */
-  exposeDevCodes: process.env.NODE_ENV !== "production",
+  // EXPOSE_DEV_CODES=false turns it off on a shared dev server too (e.g. a public Codespaces link).
+  exposeDevCodes: process.env.EXPOSE_DEV_CODES
+    ? process.env.EXPOSE_DEV_CODES === "true"
+    : process.env.NODE_ENV !== "production",
   /** Google OAuth client ID for "Continue with Google" (`POST /auth/google`). */
   googleClientId: process.env.GOOGLE_CLIENT_ID,
 };

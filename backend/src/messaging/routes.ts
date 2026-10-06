@@ -3,7 +3,23 @@ import { requireAuth } from "../middleware/requireAuth.js";
 import { HttpError } from "../rbac/errors.js";
 import { emit } from "../realtime/index.js";
 import { EVENT, ROOM } from "../realtime/events.js";
-import { getOrCreateDm, listContacts, listConversations, listMessages, markRead, sendMessage } from "./service.js";
+import {
+  addGroupParticipant,
+  createGroup,
+  getOrCreateDm,
+  listContacts,
+  listConversations,
+  listMessages,
+  listParticipants,
+  markRead,
+  sendMessage,
+  type MessageView,
+} from "./service.js";
+
+/** Every participant hears about a new message in their own room. */
+function broadcast(message: MessageView, recipientIds: string[]) {
+  for (const userId of recipientIds) emit(EVENT.messageCreated, { message }, ROOM.user_messages, userId);
+}
 
 export const messagingRouter = Router();
 
@@ -42,9 +58,7 @@ messagingRouter.post(
   requireAuth,
   route((req, res) => {
     const { message, recipientIds } = sendMessage(req.userId!, req.params.id, req.body?.body);
-    for (const userId of recipientIds) {
-      emit(EVENT.messageCreated, { message }, ROOM.user_messages, userId);
-    }
+    broadcast(message, recipientIds);
     res.status(201).json({ message });
   }),
 );
@@ -55,6 +69,34 @@ messagingRouter.post(
   route((req, res) => {
     markRead(req.userId!, req.params.id);
     res.json({ ok: true });
+  }),
+);
+
+messagingRouter.post(
+  "/conversations/group",
+  requireAuth,
+  route((req, res) => {
+    const { conversationId, message, recipientIds } = createGroup(req.userId!, req.body?.title, req.body?.userIds);
+    broadcast(message, recipientIds);
+    res.status(201).json({ conversationId });
+  }),
+);
+
+messagingRouter.get(
+  "/conversations/:id/participants",
+  requireAuth,
+  route((req, res) => {
+    res.json({ participants: listParticipants(req.userId!, req.params.id) });
+  }),
+);
+
+messagingRouter.post(
+  "/conversations/:id/participants",
+  requireAuth,
+  route((req, res) => {
+    const { message, recipientIds } = addGroupParticipant(req.userId!, req.params.id, req.body?.userId);
+    broadcast(message, recipientIds);
+    res.status(201).json({ message });
   }),
 );
 

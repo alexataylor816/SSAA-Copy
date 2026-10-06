@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft, ChevronDown, Plus, Search, Send } from "lucide-react";
+import { ArrowLeft, ChevronDown, Plus, Search, Send, UserPlus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { messagingApi, useConversations, type ChatMessage, type Contact, type ConversationSummary } from "@/hooks/useMessaging";
+import {
+  messagingApi,
+  setOpenConversation,
+  useConversations,
+  type ChatMessage,
+  type Contact,
+  type ConversationSummary,
+} from "@/hooks/useMessaging";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
@@ -25,11 +33,13 @@ import {
 /**
  * Port of Lovable's Messages page (MessagesView + ConversationThread). Project
  * chats are one private channel per GC/sub pair, grouped under the project for
- * the GC; People holds 1:1 DMs. Group chats, contacts and attachments are not
- * ported yet.
+ * the GC; People holds 1:1 DMs; Group Chats are titled chats anyone can add
+ * their contacts to. The contacts book and attachments are not ported yet.
  */
 
-type Tab = "projects" | "people";
+type Tab = "projects" | "people" | "groups";
+
+const TAB_LABEL: Record<Tab, string> = { projects: "Projects", people: "People", groups: "Group Chats" };
 
 const UnreadBadge = ({ count }: { count: number }) =>
   count > 0 ? (
@@ -76,7 +86,17 @@ function ConversationRow({
   );
 }
 
-function Thread({ conv, messages, onSend }: { conv: ConversationSummary; messages: ChatMessage[]; onSend: (body: string) => Promise<void> }) {
+function Thread({
+  conv,
+  messages,
+  onSend,
+  onAddPeople,
+}: {
+  conv: ConversationSummary;
+  messages: ChatMessage[];
+  onSend: (body: string) => Promise<void>;
+  onAddPeople?: () => void;
+}) {
   const { user } = useAuth();
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -109,8 +129,13 @@ function Thread({ conv, messages, onSend }: { conv: ConversationSummary; message
       <div className="flex items-center justify-between border-b bg-card px-4 py-3">
         <div className="min-w-0">
           <h2 className="truncate font-semibold">{label}</h2>
-          {conv.type === "dm" && conv.subtitle && <p className="truncate text-xs text-muted-foreground">{conv.subtitle}</p>}
+          {conv.type !== "project" && conv.subtitle && <p className="truncate text-xs text-muted-foreground">{conv.subtitle}</p>}
         </div>
+        {conv.type === "group" && onAddPeople && (
+          <Button size="sm" variant="ghost" onClick={onAddPeople}>
+            <UserPlus className="mr-1 h-4 w-4" /> Add
+          </Button>
+        )}
       </div>
 
       <ScrollArea className="flex-1">
@@ -119,6 +144,13 @@ function Thread({ conv, messages, onSend }: { conv: ConversationSummary; message
             <p className="py-8 text-center text-sm text-muted-foreground">No messages yet. Say hello.</p>
           )}
           {messages.map((m) => {
+            if (m.kind === "system") {
+              return (
+                <p key={m.id} className="text-center text-xs text-muted-foreground">
+                  {m.body} · {format(new Date(m.createdAt), "MMM d h:mm a")}
+                </p>
+              );
+            }
             const mine = m.senderUserId === user?.id;
             return (
               <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
@@ -171,55 +203,113 @@ function Thread({ conv, messages, onSend }: { conv: ConversationSummary; message
   );
 }
 
-function NewMessageDialog({
-  open,
-  onOpenChange,
+type PickerMode = "dm" | "group" | "add";
+
+/** NewMessageModal (DM or new group) and GroupAddParticipantModal in one picker. */
+function PeoplePicker({
+  mode,
+  onClose,
+  exclude = [],
   onPick,
+  onCreateGroup,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  mode: PickerMode | null;
+  onClose: () => void;
+  exclude?: string[];
   onPick: (userId: string) => void;
+  onCreateGroup: (title: string, userIds: string[]) => Promise<void>;
 }) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState("");
+  const [title, setTitle] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!mode) return;
     setSearch("");
+    setTitle("");
+    setPicked([]);
+    setError(null);
     messagingApi
       .contacts()
       .then((res) => setContacts(res.contacts))
       .catch(() => setContacts([]));
-  }, [open]);
+  }, [mode]);
 
   const q = search.trim().toLowerCase();
   const shown = contacts.filter(
-    (c) => !q || [c.fullName, c.email, c.companyName ?? ""].some((v) => v.toLowerCase().includes(q)),
+    (c) => !exclude.includes(c.userId) && (!q || [c.fullName, c.email, c.companyName ?? ""].some((v) => v.toLowerCase().includes(q))),
   );
 
+  async function create() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onCreateGroup(title.trim(), picked);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the group.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const heading = mode === "group" ? "New group chat" : mode === "add" ? "Add people" : "New message";
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={mode !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New message</DialogTitle>
+          <DialogTitle>{heading}</DialogTitle>
           <DialogDescription>People in your company and on projects you share.</DialogDescription>
         </DialogHeader>
+        {mode === "group" && (
+          <Input placeholder="Group name, e.g. Level 2 crew" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Group name" />
+        )}
         <Input placeholder="Search people..." value={search} onChange={(e) => setSearch(e.target.value)} />
         <div className="max-h-72 divide-y overflow-y-auto rounded-md border">
           {shown.length === 0 ? (
-            <p className="p-4 text-center text-sm text-muted-foreground">No one to message yet.</p>
+            <p className="p-4 text-center text-sm text-muted-foreground">
+              {mode === "add" ? "Everyone you work with is already in this group." : "No one to message yet."}
+            </p>
           ) : (
-            shown.map((c) => (
-              <button key={c.userId} onClick={() => onPick(c.userId)} className="w-full p-3 text-left hover:bg-accent">
-                <div className="text-sm font-medium">{c.fullName || c.email}</div>
-                <div className="text-xs text-muted-foreground">
-                  {c.email}
-                  {c.companyName ? ` · ${c.companyName}` : ""}
+            shown.map((c) => {
+              const details = (
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{c.fullName || c.email}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {c.email}
+                    {c.companyName ? ` · ${c.companyName}` : ""}
+                  </div>
                 </div>
-              </button>
-            ))
+              );
+              return mode === "group" ? (
+                <label key={c.userId} className="flex cursor-pointer items-center gap-3 p-3 hover:bg-accent">
+                  <Checkbox
+                    checked={picked.includes(c.userId)}
+                    onCheckedChange={(value) =>
+                      setPicked((prev) => (value ? [...prev, c.userId] : prev.filter((id) => id !== c.userId)))
+                    }
+                  />
+                  {details}
+                </label>
+              ) : (
+                <button key={c.userId} onClick={() => onPick(c.userId)} className="w-full p-3 text-left hover:bg-accent">
+                  {details}
+                </button>
+              );
+            })
           )}
         </div>
+        {mode === "group" && (
+          <>
+            {error && <p className="text-xs text-destructive">{error}</p>}
+            <Button disabled={busy || !title.trim() || picked.length === 0} onClick={() => void create()}>
+              Create group{picked.length > 0 ? ` (${picked.length + 1} people)` : ""}
+            </Button>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -232,7 +322,8 @@ export default function Messages() {
   const [search, setSearch] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [newOpen, setNewOpen] = useState(false);
+  const [picker, setPicker] = useState<PickerMode | null>(null);
+  const [memberIds, setMemberIds] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const activeRef = useRef<string | null>(null);
   activeRef.current = activeId;
@@ -261,6 +352,23 @@ export default function Messages() {
     [],
   );
 
+  // New-message alerts (MessageAlerts) stay quiet for whatever is open here.
+  useEffect(() => {
+    setOpenConversation(activeId);
+    return () => setOpenConversation(null);
+  }, [activeId]);
+
+  // An alert's "Open" button links to /messages?c=<conversation id>.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedId = searchParams.get("c");
+  useEffect(() => {
+    if (!linkedId || loading) return;
+    const linked = conversations.find((c) => c.id === linkedId);
+    setTab(linked?.type === "project" ? "projects" : linked?.type === "group" ? "groups" : "people");
+    void openConversation(linkedId);
+    setSearchParams({}, { replace: true });
+  }, [linkedId, loading, conversations, openConversation, setSearchParams]);
+
   const active = conversations.find((c) => c.id === activeId) ?? null;
 
   const handleSend = useCallback(
@@ -274,7 +382,7 @@ export default function Messages() {
 
   const startDm = useCallback(
     async (userId: string) => {
-      setNewOpen(false);
+      setPicker(null);
       const { conversationId } = await messagingApi.openDm(userId);
       await refresh();
       setTab("people");
@@ -283,16 +391,48 @@ export default function Messages() {
     [refresh, openConversation],
   );
 
+  const createGroup = useCallback(
+    async (title: string, userIds: string[]) => {
+      const { conversationId } = await messagingApi.createGroup(title, userIds);
+      setPicker(null);
+      await refresh();
+      setTab("groups");
+      await openConversation(conversationId);
+    },
+    [refresh, openConversation],
+  );
+
+  const openAddPeople = useCallback(async () => {
+    if (!activeId) return;
+    const res = await messagingApi.participants(activeId);
+    setMemberIds(res.participants.map((p) => p.userId));
+    setPicker("add");
+  }, [activeId]);
+
+  const addPerson = useCallback(
+    async (userId: string) => {
+      if (!activeId) return;
+      setPicker(null);
+      const res = await messagingApi.addParticipant(activeId, userId);
+      setMessages((prev) => (prev.some((m) => m.id === res.message.id) ? prev : [...prev, res.message]));
+      await refresh();
+    },
+    [activeId, refresh],
+  );
+
   const q = search.trim().toLowerCase();
   const matches = (c: ConversationSummary) =>
     !q || [c.title, c.subtitle ?? "", c.lastMessage?.body ?? ""].some((v) => v.toLowerCase().includes(q));
 
   const projectConvs = conversations.filter((c) => c.type === "project");
-  const peopleConvs = conversations.filter((c) => c.type !== "project");
-  const tabUnread = {
+  const peopleConvs = conversations.filter((c) => c.type === "dm");
+  const groupConvs = conversations.filter((c) => c.type === "group");
+  const tabUnread: Record<Tab, number> = {
     projects: projectConvs.reduce((s, c) => s + c.unreadCount, 0),
     people: peopleConvs.reduce((s, c) => s + c.unreadCount, 0),
+    groups: groupConvs.reduce((s, c) => s + c.unreadCount, 0),
   };
+  const listConvs = tab === "groups" ? groupConvs : peopleConvs;
 
   // The GC sees each project as a group with a channel per sub; a sub sees one row per project.
   const projectGroups = (() => {
@@ -321,28 +461,26 @@ export default function Messages() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="flex-1 justify-between">
-                  {tab === "projects" ? "Projects" : "People"}
+                  {TAB_LABEL[tab]}
                   <ChevronDown className="ml-2 h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-56">
-                <DropdownMenuItem onClick={() => setTab("projects")}>
-                  <span className="flex-1">Projects</span>
-                  <UnreadBadge count={tabUnread.projects} />
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setTab("people")}>
-                  <span className="flex-1">People</span>
-                  <UnreadBadge count={tabUnread.people} />
-                </DropdownMenuItem>
+                {(Object.keys(TAB_LABEL) as Tab[]).map((key) => (
+                  <DropdownMenuItem key={key} onClick={() => setTab(key)}>
+                    <span className="flex-1">{TAB_LABEL[key]}</span>
+                    <UnreadBadge count={tabUnread[key]} />
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
 
-          {tab === "people" && (
+          {tab !== "projects" && (
             <div className="border-b p-3">
-              <Button size="sm" className="w-full justify-start" onClick={() => setNewOpen(true)}>
+              <Button size="sm" className="w-full justify-start" onClick={() => setPicker(tab === "groups" ? "group" : "dm")}>
                 <Plus className="mr-2 h-4 w-4" />
-                New message
+                {tab === "groups" ? "New group chat" : "New message"}
               </Button>
             </div>
           )}
@@ -410,11 +548,13 @@ export default function Messages() {
                   })}
                 </div>
               )
-            ) : peopleConvs.filter(matches).length === 0 ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">No conversations yet.</div>
+            ) : listConvs.filter(matches).length === 0 ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">
+                {tab === "groups" ? "No group chats yet." : "No conversations yet."}
+              </div>
             ) : (
               <div className="divide-y">
-                {peopleConvs.filter(matches).map((conv) => (
+                {listConvs.filter(matches).map((conv) => (
                   <ConversationRow
                     key={conv.id}
                     conv={conv}
@@ -437,7 +577,7 @@ export default function Messages() {
                 </Button>
                 <span className="truncate text-sm font-medium">Back to conversations</span>
               </div>
-              <Thread conv={active} messages={messages} onSend={handleSend} />
+              <Thread conv={active} messages={messages} onSend={handleSend} onAddPeople={() => void openAddPeople()} />
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-muted-foreground">
@@ -447,7 +587,13 @@ export default function Messages() {
         </main>
       </div>
 
-      <NewMessageDialog open={newOpen} onOpenChange={setNewOpen} onPick={(id) => void startDm(id)} />
+      <PeoplePicker
+        mode={picker}
+        onClose={() => setPicker(null)}
+        exclude={picker === "add" ? memberIds : []}
+        onPick={(id) => void (picker === "add" ? addPerson(id) : startDm(id))}
+        onCreateGroup={createGroup}
+      />
     </div>
   );
 }

@@ -59,6 +59,8 @@ export interface Employee {
   email: string | null;
   phone: string | null;
   jobTitle: string | null;
+  /** Optional payroll/HR identifier, shown on timesheet exports (the original's employees.employee_id). */
+  employeeNumber: string | null;
   linkedUserId: string | null;
   createdAt: string;
 }

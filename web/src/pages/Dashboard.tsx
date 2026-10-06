@@ -510,7 +510,7 @@ const handleReorderTasks = useCallback(
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
-      <DashboardHeader companyName={company?.name} pendingJoinCount={pendingRequests.length} />
+      <DashboardHeader pendingJoinCount={pendingRequests.length} />
 
       <main className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
         {error && (
@@ -562,21 +562,10 @@ const handleReorderTasks = useCallback(
           </div>
         ) : (
           <>
-            {/* Flex-row parent (like Lovable's), but only from `min-[1400px]`
-                up: LeftPanel/CalendarPanel/RightPanel carry their own width +
-                flex-order classes built for a row, and four columns need
-                ~1400px before the calendar keeps usable day widths. Below that
-                everything stacks (rail first) instead of squeezing sideways.
-
-                Two deliberate departures from the original:
-                - `h-screen` shell + `h-full` row, so the panels fill the
-                  viewport instead of the page scrolling past them.
-                - The calendar is `flex-1` here rather than the original's
-                  hard-coded `lg:w-[1100px]`. Fixed 1100 + 288 + 256 is 1644px
-                  of panel plus gaps, which overflows any normal monitor.
-                  Growing the calendar into the leftover space is what "fits
-                  the screen" actually requires. */}
-            <div className="flex min-h-0 w-full flex-col gap-4 min-[1400px]:h-full min-[1400px]:mx-auto min-[1400px]:max-w-[1600px] min-[1400px]:flex-row min-[1400px]:gap-6">
+            {/* Lovable's layout: Tasks | Calendar | Projects, side by side from lg up.
+                The calendar is flex-1 rather than the original's fixed 1100px so
+                it fills the space instead of forcing sideways scrolling. */}
+            <div className="flex min-h-0 w-full flex-col gap-4 lg:h-full lg:mx-auto lg:max-w-[1600px] lg:flex-row lg:gap-6">
               <LeftPanel
                 viewMode={viewMode}
                 tasks={calendarTasks}
@@ -610,46 +599,33 @@ const handleReorderTasks = useCallback(
                 viewMode={viewMode}
               />
 
-              <RightPanel
-                viewMode={viewMode}
-                projects={rightPanelProjects}
-                selectedProject={selectedProjectId ?? "master"}
-                setSelectedProject={(id) => setSelectedProjectId(id === "master" ? null : id)}
-                employees={rightPanelEmployees}
-                onCreateProject={(name, address) => void handleCreateProject(name, address)}
-                onAddEmployee={(name, email, jobTitle) => void handleAddEmployee(name, email, jobTitle)}
-                onDeleteEmployee={(id) => void handleDeleteEmployee(id)}
-                onConnectProject={(code) => void handleConnectProject(code)}
-                hasLevel1OrHigher={hasLevel1OrHigher}
-                isBasicUser={isBasicUser}
-                isAdminOrHigher={isAccountHolder}
-                companyId={companyId ?? undefined}
-                currentDate={currentDate}
-                onTeamRefresh={() => void loadEmployees()}
-              />
+              {/* Right column: Lovable's Projects panel, then compact cards for what
+                  Lovable keeps elsewhere (new project, join requests, upcoming requests). */}
+              <div className="order-1 flex w-full flex-col gap-4 lg:order-none lg:h-full lg:w-64 lg:flex-shrink-0 lg:overflow-y-auto lg:pb-1">
+                <RightPanel
+                  viewMode={viewMode}
+                  projects={rightPanelProjects}
+                  selectedProject={selectedProjectId ?? "master"}
+                  setSelectedProject={(id) => setSelectedProjectId(id === "master" ? null : id)}
+                  employees={rightPanelEmployees}
+                  onCreateProject={(name, address) => void handleCreateProject(name, address)}
+                  onAddEmployee={(name, email, jobTitle) => void handleAddEmployee(name, email, jobTitle)}
+                  onDeleteEmployee={(id) => void handleDeleteEmployee(id)}
+                  onConnectProject={(code) => void handleConnectProject(code)}
+                  hasLevel1OrHigher={hasLevel1OrHigher}
+                  isBasicUser={isBasicUser}
+                  isAdminOrHigher={isAccountHolder}
+                  companyId={companyId ?? undefined}
+                  currentDate={currentDate}
+                  onTeamRefresh={() => void loadEmployees()}
+                />
 
-              {/* Lovable keeps projects in the header dropdown and schedule
-                  requests inside ScheduleModal, so it has no equivalent of
-                  these cards at all — they were invented by the migration and
-                  originally stacked *below* the panels, which put them off the
-                  bottom of a scrolling page. They live here instead: a fourth
-                  column beside the calendar, so nothing important needs a
-                  scroll to reach. `lg:h-full` + `overflow-y-auto` keeps the
-                  rail scrolling internally rather than growing the page. */}
-              {/* Four columns need ~1400px before the calendar keeps usable day
-                  widths, so below that everything stacks with the rail on top;
-                  from `min-[1400px]` up the panels sit side by side with the
-                  rail as a true right-hand column beside the calendar. */}
-              <aside className="order-first w-full space-y-4 min-[1400px]:order-last min-[1400px]:h-full min-[1400px]:w-80 min-[1400px]:flex-shrink-0 min-[1400px]:overflow-y-auto min-[1400px]:pr-1">
-                <Card className="border-primary/20">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                    <CardTitle className="text-lg">My Projects</CardTitle>
-                    {canManageProjects && (
+                {canManageProjects && (
                       <Dialog>
                         <DialogTrigger asChild>
-                          <Button size="sm">
+                          <Button variant="outline" className="w-full border-primary/20 bg-card">
                             <Plus className="mr-2 h-4 w-4" />
-                            New
+                            New Project
                           </Button>
                         </DialogTrigger>
                         <DialogContent>
@@ -678,145 +654,79 @@ const handleReorderTasks = useCallback(
                         </DialogContent>
                       </Dialog>
                     )}
-                  </CardHeader>
-                  {/* Selecting a project here is the same as picking it in the
-                      Projects dropdown: the calendar filters to it and the panel
-                      beside shows its connection code. Connecting by code lives
-                      in that panel, as in Lovable. */}
-                  <CardContent className="space-y-1">
-                    {loading ? (
-                      <p className="text-sm text-muted-foreground">Loading projects...</p>
-                    ) : projects.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        {viewMode === "gc"
-                          ? "No projects yet. Create one to get a connection code for your subcontractors."
-                          : "No projects yet. Use Connect to Project with the code your GC sent you."}
-                      </p>
-                    ) : (
-                      projects.map((project) => {
-                        const selected = selectedProjectId === project.id;
-                        const owned = project.companyId === companyId;
-                        return (
-                          <div
-                            key={project.id}
-                            className={`flex items-center gap-2 rounded-md border px-3 py-2 transition-colors ${
-                              selected ? "border-primary bg-primary/5" : "border-transparent hover:bg-accent"
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              aria-pressed={selected}
-                              onClick={() => setSelectedProjectId(selected ? null : project.id)}
-                              className="min-w-0 flex-1 text-left"
-                            >
-                              <p className="truncate text-sm font-medium">{project.name}</p>
-                              {project.address && (
-                                <p className="truncate text-xs text-muted-foreground">{project.address}</p>
-                              )}
-                            </button>
-                            {!owned && (
-                              <Badge variant="secondary" className="shrink-0 text-[10px]">
-                                Connected
-                              </Badge>
-                            )}
-                            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" asChild>
-                              <Link
-                                to={`/projects/${project.id}/schedule`}
-                                aria-label={`${project.name} schedule page`}
-                                title="Schedule page"
-                              >
-                                <CalendarDays className="h-4 w-4" />
-                              </Link>
-                            </Button>
-                          </div>
-                        );
-                      })
-                    )}
-                    {selectedProjectId && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedProjectId(null)}
-                        className="w-full pt-1 text-center text-xs text-muted-foreground hover:text-foreground"
-                      >
-                        Show all projects (Master Schedule)
-                      </button>
-                    )}
-                  </CardContent>
-                </Card>
 
-                {pendingRequests.length > 0 && (
+                  {pendingRequests.length > 0 && (
+                    <Card className="border-primary/20">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-lg">Join Requests</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ul className="divide-y">
+                          {pendingRequests.map((request) => (
+                            <li key={request.id} className="flex items-center justify-between gap-2 py-2.5">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">
+                                  {request.userName ?? request.userEmail}
+                                </p>
+                                <p className="truncate text-xs text-muted-foreground">{request.userEmail}</p>
+                              </div>
+                              <div className="flex shrink-0 gap-1.5">
+                                <Button size="sm" disabled={busy} onClick={() => void respondToJoinRequest(request.id, true)}>
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={busy}
+                                  onClick={() => void respondToJoinRequest(request.id, false)}
+                                >
+                                  Decline
+                                </Button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </CardContent>
+                    </Card>
+                  )}
+
                   <Card className="border-primary/20">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-lg">Join Requests</CardTitle>
+                      <CardTitle className="text-lg">Upcoming Requests</CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <ul className="divide-y">
-                        {pendingRequests.map((request) => (
-                          <li key={request.id} className="flex items-center justify-between gap-2 py-2.5">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium">
-                                {request.userName ?? request.userEmail}
-                              </p>
-                              <p className="truncate text-xs text-muted-foreground">{request.userEmail}</p>
+                    <CardContent className="space-y-1">
+                      {upcomingRequests.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Nothing scheduled in the next month. Click a day on the calendar to schedule.
+                        </p>
+                      ) : (
+                        upcomingRequests.map((entry) => (
+                          <button
+                            key={entry.id}
+                            type="button"
+                            onClick={() => openDay(entry.date)}
+                            className="w-full space-y-0.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent"
+                          >
+                            {/* Badge beside the date, times on their own line: the column is too narrow for both. */}
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="truncate text-sm font-medium">{formatDay(entry.date)}</p>
+                              <Badge variant="outline" className={`shrink-0 ${STATUS_STYLE[entry.status] ?? ""}`}>
+                                {STATUS_LABELS[entry.status] ?? entry.status}
+                              </Badge>
                             </div>
-                            <div className="flex shrink-0 gap-1.5">
-                              <Button size="sm" disabled={busy} onClick={() => void respondToJoinRequest(request.id, true)}>
-                                Approve
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={busy}
-                                onClick={() => void respondToJoinRequest(request.id, false)}
-                              >
-                                Decline
-                              </Button>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                )}
-
-                <Card className="border-primary/20">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg">Upcoming Requests</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-1">
-                    {upcomingRequests.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        Nothing scheduled in the next month. Click a day on the calendar to schedule.
-                      </p>
-                    ) : (
-                      upcomingRequests.map((entry) => (
-                        <button
-                          key={entry.id}
-                          type="button"
-                          onClick={() => openDay(entry.date)}
-                          className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{formatDay(entry.date)}</p>
-                            <p className="truncate text-xs text-muted-foreground">
+                            <p className="text-xs text-muted-foreground">
                               {formatTime(entry.startTime)} – {formatTime(entry.endTime)}
                               {entry.projectName && ` · ${entry.projectName}`}
                             </p>
                             {entry.employeeNames.length > 0 && (
-                              <p className="truncate text-xs text-muted-foreground">
-                                {entry.employeeNames.join(", ")}
-                              </p>
+                              <p className="truncate text-xs text-muted-foreground">{entry.employeeNames.join(", ")}</p>
                             )}
-                          </div>
-                          <Badge variant="outline" className={`shrink-0 ${STATUS_STYLE[entry.status] ?? ""}`}>
-                            {STATUS_LABELS[entry.status] ?? entry.status}
-                          </Badge>
-                        </button>
-                      ))
-                    )}
-                  </CardContent>
-                </Card>
-              </aside>
+                          </button>
+                        ))
+                      )}
+                    </CardContent>
+                  </Card>
+              </div>
             </div>
 
             <CreateTaskModal

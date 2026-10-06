@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { Clock, Loader2, Lock, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { api } from "@/lib/api";
 import { EVENT } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
@@ -11,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 /**
@@ -60,6 +62,7 @@ interface Slot {
   allProjects: boolean;
   startTime: string;
   endTime: string;
+  stopLabel?: string | null;
 }
 
 interface Props {
@@ -140,6 +143,7 @@ function RequestRow({
 
 export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, projects, defaultProjectId, onChanged }: Props) {
   const { user, hasPartialOrHigher } = useAuth();
+  const { t } = useLanguage();
   const companyId = user?.companyId ?? null;
   const day = date ? isoDate(date) : null;
   const locked = date ? isLocked(date) : false;
@@ -165,7 +169,14 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
   const [availFor, setAvailFor] = useState<string[]>([]);
   const [availStart, setAvailStart] = useState("08:00");
   const [availEnd, setAvailEnd] = useState("16:00");
-  const [availProject, setAvailProject] = useState<string>("all");
+  // Lovable's "Multiple Stops": separate blocks in one day, each posted as its own stop.
+  const [multipleStops, setMultipleStops] = useState(false);
+  const [stops, setStops] = useState<{ start: string; end: string }[]>([
+    { start: "06:00", end: "10:00" },
+    { start: "13:00", end: "17:00" },
+  ]);
+  const [availAllProjects, setAvailAllProjects] = useState(true);
+  const [availProjectIds, setAvailProjectIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -220,6 +231,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
       all_projects: number | boolean;
       start_time: string;
       end_time: string;
+      stop_label: string | null;
     }[];
     setSlots(
       rows
@@ -230,6 +242,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           allProjects: r.all_projects === true || r.all_projects === 1,
           startTime: r.start_time,
           endTime: r.end_time,
+          stopLabel: r.stop_label,
         }))
         // Only hours posted for every project, or for this one.
         .filter((s) => s.allProjects || s.projectId === projectId)
@@ -457,7 +470,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                               />
                               <Clock className="h-3 w-3 text-muted-foreground" />
                               <span className="flex-1">
-                                {date && format(date, "EEEE")}, Available: {fmtTime(slot.startTime)} - {fmtTime(slot.endTime)}
+                                {date && format(date, "EEEE")}, {slot.stopLabel ?? "Available"}: {fmtTime(slot.startTime)} - {fmtTime(slot.endTime)}
                               </span>
                               {booked && (
                                 <Badge variant="secondary" className="text-xs">
@@ -507,15 +520,24 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
 
   const publishAvailability = () =>
     run(async () => {
+      // One entry per person: either for every project, or one per chosen project.
+      const targets: (string | undefined)[] = availAllProjects ? [undefined] : availProjectIds;
+      const blocks = multipleStops
+        ? stops.map((stop, i) => ({ startTime: stop.start, endTime: stop.end, stopNumber: i + 1 }))
+        : [{ startTime: availStart, endTime: availEnd, stopNumber: undefined }];
+      if (blocks.some((b) => b.startTime >= b.endTime)) throw new Error("Each start time must be before its end time.");
       for (const employeeId of availFor) {
-        await api.post("/availability", {
-          date: day,
-          startTime: availStart,
-          endTime: availEnd,
-          employeeId,
-          allProjects: availProject === "all",
-          projectId: availProject === "all" ? undefined : availProject,
-        });
+        for (const projectId of targets) {
+          for (const block of blocks) {
+            await api.post("/availability", {
+              date: day,
+              employeeId,
+              allProjects: availAllProjects,
+              projectId,
+              ...block,
+            });
+          }
+        }
       }
     });
 
@@ -590,7 +612,8 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
               <div key={slot.id} className="flex items-center gap-2 rounded-md border bg-background p-2 text-sm">
                 <Clock className="h-3 w-3 text-muted-foreground" />
                 <span className="flex-1">
-                  {nameById.get(slot.employeeId) ?? "Employee"}: {fmtTime(slot.startTime)} - {fmtTime(slot.endTime)}
+                  {nameById.get(slot.employeeId) ?? "Employee"}
+                  {slot.stopLabel ? ` (${slot.stopLabel})` : ""}: {fmtTime(slot.startTime)} - {fmtTime(slot.endTime)}
                   <span className="text-xs text-muted-foreground">
                     {" "}
                     · {slot.allProjects ? "all projects" : projectName(slot.projectId ?? "")}
@@ -615,55 +638,161 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
       </div>
 
       {!locked && postable.length > 0 && (
-        <div className="space-y-3 rounded-md border bg-muted/30 p-3">
-          <Label>Who is available?</Label>
-          <div className="flex flex-wrap gap-3">
-            {postable.map((e) => (
-              <label key={e.id} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={availFor.includes(e.id)}
-                  onCheckedChange={(checked) =>
-                    setAvailFor((prev) => (checked ? [...prev, e.id] : prev.filter((id) => id !== e.id)))
-                  }
-                />
-                {e.name}
-                {titleOf(e) && <span className="text-xs text-muted-foreground">({titleOf(e)})</span>}
-              </label>
-            ))}
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label htmlFor="avail-start" className="text-xs">
-                Start time
-              </Label>
-              <Input id="avail-start" type="time" value={availStart} onChange={(e) => setAvailStart(e.target.value)} />
+        // Laid out like Lovable's "View Availability" panel.
+        <div className="space-y-4 border-t pt-4">
+          <div className="space-y-2">
+            <Label>Who is available?</Label>
+            {postable.length > 1 && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={() =>
+                  setAvailFor(availFor.length === postable.length ? [] : postable.map((e) => e.id))
+                }
+              >
+                {availFor.length === postable.length ? "Clear All" : "Select All"}
+              </Button>
+            )}
+            <div className="space-y-2 rounded-md border p-2">
+              {postable.map((e) => {
+                const checked = availFor.includes(e.id);
+                return (
+                  <label
+                    key={e.id}
+                    className={`flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5 text-sm shadow-sm transition-colors ${
+                      checked ? "border-primary bg-primary/5" : "bg-background hover:bg-muted/50"
+                    }`}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(value) =>
+                        setAvailFor((prev) => (value ? [...prev, e.id] : prev.filter((id) => id !== e.id)))
+                      }
+                    />
+                    <span>
+                      {e.name}
+                      {titleOf(e) && ` - ${titleOf(e)}`}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="avail-end" className="text-xs">
-                End time
-              </Label>
-              <Input id="avail-end" type="time" value={availEnd} onChange={(e) => setAvailEnd(e.target.value)} />
+          </div>
+
+          <label className="flex cursor-pointer items-center justify-between rounded-md border bg-muted/40 px-3 py-2.5 text-sm font-medium">
+            <span className="flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              Multiple Stops
+            </span>
+            <Switch checked={multipleStops} onCheckedChange={setMultipleStops} aria-label="Multiple stops" />
+          </label>
+
+          {multipleStops ? (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="stop-count">Number of stops</Label>
+                <select
+                  id="stop-count"
+                  value={stops.length}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setStops((prev) =>
+                      Array.from({ length: n }, (_, i) => prev[i] ?? { start: prev[i - 1]?.end ?? "08:00", end: "17:00" }),
+                    );
+                  }}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n} stop{n === 1 ? "" : "s"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2 rounded-md border p-2">
+                {stops.map((stop, i) => (
+                  <div key={i} className="space-y-2 rounded-md bg-muted/40 p-3">
+                    <p className="text-sm font-medium">Stop #{i + 1}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor={`stop-${i}-start`} className="text-xs">
+                          Start
+                        </Label>
+                        <Input
+                          id={`stop-${i}-start`}
+                          type="time"
+                          value={stop.start}
+                          onChange={(e) =>
+                            setStops((prev) => prev.map((s, j) => (j === i ? { ...s, start: e.target.value } : s)))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`stop-${i}-end`} className="text-xs">
+                          End
+                        </Label>
+                        <Input
+                          id={`stop-${i}-end`}
+                          type="time"
+                          value={stop.end}
+                          onChange={(e) =>
+                            setStops((prev) => prev.map((s, j) => (j === i ? { ...s, end: e.target.value } : s)))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="avail-start">Start</Label>
+                <Input id="avail-start" type="time" value={availStart} onChange={(e) => setAvailStart(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="avail-end">End</Label>
+                <Input id="avail-end" type="time" value={availEnd} onChange={(e) => setAvailEnd(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <Checkbox checked={availAllProjects} onCheckedChange={(value) => setAvailAllProjects(!!value)} />
+              Available for all projects
+            </label>
+            {!availAllProjects && (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Assign to specific project(s)</Label>
+                <div className="space-y-1 rounded-md border p-2">
+                  {connectedProjects.length === 0 ? (
+                    <p className="p-1 text-sm text-muted-foreground">You aren't connected to any projects yet.</p>
+                  ) : (
+                    connectedProjects.map((p) => (
+                      <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50">
+                        <Checkbox
+                          checked={availProjectIds.includes(p.id)}
+                          onCheckedChange={(value) =>
+                            setAvailProjectIds((prev) => (value ? [...prev, p.id] : prev.filter((id) => id !== p.id)))
+                          }
+                        />
+                        {p.name}
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="avail-project" className="text-xs">
-              Available for
-            </Label>
-            <select
-              id="avail-project"
-              value={availProject}
-              onChange={(e) => setAvailProject(e.target.value)}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            >
-              <option value="all">All my projects</option>
-              {connectedProjects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Button className="w-full" disabled={busy || availFor.length === 0} onClick={() => void publishAvailability()}>
+
+          <Button
+            className="w-full"
+            disabled={busy || availFor.length === 0 || (!availAllProjects && availProjectIds.length === 0)}
+            onClick={() => void publishAvailability()}
+          >
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Post availability
           </Button>
@@ -676,10 +805,14 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{date ? format(date, "EEEE, MMMM d, yyyy") : "Schedule"}</DialogTitle>
-          <DialogDescription>
-            {viewMode === "gc" ? "Book crews from your subcontractors' posted availability." : "Answer requests and post who is available."}
-          </DialogDescription>
+          <DialogTitle>
+            {viewMode === "gc"
+              ? t("schedule.scheduleSubcontractor")
+              : locked
+                ? t("schedule.viewAvailability")
+                : t("schedule.setAvailability")}
+          </DialogTitle>
+          <DialogDescription>{date ? format(date, "EEEE, MMMM d, yyyy") : ""}</DialogDescription>
         </DialogHeader>
 
         {locked && (

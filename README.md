@@ -63,6 +63,24 @@ Or both from the repo root:
 Vite proxies `/api` and `/socket.io` to the backend, so the web client only ever
 talks to its own origin.
 
+On macOS/Linux, `bash scripts/start-dev.sh` starts both.
+
+## Run on GitHub Codespaces (shareable link)
+
+1. On GitHub: **Code → Codespaces → Create codespace on `main`**. Setup installs
+   everything and starts the app; the website opens on port 8082.
+2. To share it: **Ports** tab → right-click port **8082** → **Port Visibility →
+   Public**, then copy the link. (Port 8000 doesn't need sharing; the website
+   reaches it internally.)
+3. The link only works while the codespace is running (it stops after ~30 min
+   idle). Restart it from github.com/codespaces; run `bash scripts/start-dev.sh`
+   if the app isn't already running.
+
+The codespace starts with an **empty database**, so sign up fresh there. Setup
+writes `backend/.env` with random secrets and turns off on-screen reset codes,
+because a public link would let anyone use them; add `SMTP_USER`/`SMTP_PASS` to
+that file to make password resets work by email.
+
 ## Checks
 
 ```powershell

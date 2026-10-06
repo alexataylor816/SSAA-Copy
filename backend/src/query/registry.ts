@@ -209,7 +209,7 @@ export const TABLE_RULES: Record<string, TableRule> = {
   },
 
   employees: {
-    columns: ["id", "company_id", "name", "email", "phone", "job_title", "linked_user_id", "created_at"],
+    columns: ["id", "company_id", "name", "email", "phone", "job_title", "employee_number", "linked_user_id", "created_at"],
     scope: (caller) => {
       if (caller.isAdmin) return null;
       // Own company, or a company you share a project with.

@@ -10,6 +10,8 @@ import { Download } from "lucide-react";
 interface RosterEmployee {
   id: string;
   name: string;
+  /** Payroll/HR ID from the profile; the column stays blank without one. */
+  employeeNumber?: string | null;
 }
 
 interface RequestRow {
@@ -87,6 +89,7 @@ export default function TimesheetDownloadCard({ employees }: { employees: Roster
       const projectNames = new Map(projectsRes.projects.map((p) => [p.id, p.name]));
       const rosterIds = new Set(employees.map((e) => e.id));
       const names = new Map(employees.map((e) => [e.id, e.name]));
+      const hrIds = new Map(employees.map((e) => [e.id, e.employeeNumber ?? ""]));
 
       const rows = ["Employee ID,Employee Name,Date,Start Time,End Time,Hours,Job Name,General Contractor"];
       for (const req of requestsRes.requests) {
@@ -98,7 +101,8 @@ export default function TimesheetDownloadCard({ employees }: { employees: Roster
           if (!rosterIds.has(empId)) continue;
           rows.push(
             [
-              empId,
+              // The HR/payroll ID from the profile, not the internal row id.
+              hrIds.get(empId) ?? "",
               names.get(empId) ?? "Unknown",
               req.date,
               fmt12(req.startTime),

@@ -38,6 +38,7 @@ interface EmployeeRow {
   email: string | null;
   phone: string | null;
   job_title: string | null;
+  employee_number: string | null;
   linked_user_id: string | null;
   created_at: string;
 }
@@ -98,6 +99,19 @@ export function ensureRbacTables() {
   if (!companyCols.has("trade")) {
     db.exec("ALTER TABLE companies ADD COLUMN trade TEXT");
   }
+
+  const employeeColumns = db.prepare("PRAGMA table_info(employees)").all() as { name: string }[];
+  if (!employeeColumns.some((c) => c.name === "employee_number")) {
+    db.exec("ALTER TABLE employees ADD COLUMN employee_number TEXT");
+  }
+}
+
+/** Sets the HR/payroll ID on the employee record linked to this user; false when they have none. */
+export function setEmployeeNumberForUser(companyId: string, userId: string, value: string | null): boolean {
+  const result = db
+    .prepare("UPDATE employees SET employee_number = ? WHERE company_id = ? AND linked_user_id = ?")
+    .run(value, companyId, userId);
+  return result.changes > 0;
 }
 
 // --- companies ---
@@ -294,6 +308,7 @@ function mapEmployeeRow(row: EmployeeRow): Employee {
     email: row.email,
     phone: row.phone,
     jobTitle: row.job_title,
+    employeeNumber: row.employee_number ?? null,
     linkedUserId: row.linked_user_id,
     createdAt: row.created_at,
   };

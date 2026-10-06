@@ -71,15 +71,16 @@ export function ensureProjectTables() {
   db.exec("CREATE INDEX IF NOT EXISTS idx_epa_project ON employee_project_assignments(project_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_epa_employee ON employee_project_assignments(employee_id)");
 
-  // Multi-stop availability was deferred in scheduling/types.ts but the
-  // reference's ResourceMatrix renders stop numbers, so the columns exist now.
-  for (const [table, column] of [
-    ["availability", "stop_number"],
-    ["availability", "stop_label"],
+  // Multi-stop availability (the original's stop_number INTEGER / stop_label TEXT).
+  // Databases created before this was typed have stop_number as TEXT; the
+  // scheduling model writes whole numbers and reads them back as numbers either way.
+  for (const [table, column, type] of [
+    ["availability", "stop_number", "INTEGER"],
+    ["availability", "stop_label", "TEXT"],
   ] as const) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
     if (!cols.some((c) => c.name === column)) {
-      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
   }
 

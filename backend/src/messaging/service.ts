@@ -253,6 +253,13 @@ export function listConversations(userId: string): ConversationSummary[] {
         .get(conv.id, user.id) as { full_name: string; email: string; company: string | null } | undefined;
       title = other?.full_name || other?.email || "Direct message";
       subtitle = other?.company ?? null;
+    } else if (conv.type === "group") {
+      const count = (
+        db.prepare("SELECT COUNT(*) AS n FROM conversation_participants WHERE conversation_id = ?").get(conv.id) as {
+          n: number;
+        }
+      ).n;
+      subtitle = `${count} member${count === 1 ? "" : "s"}`;
     }
 
     const last = db
@@ -369,6 +376,100 @@ export function sendMessage(
     }[]
   ).map((r) => r.user_id);
   return { message, recipientIds };
+}
+
+/** A "Gina added Sam" line in the thread (the original's system_participant_added). */
+function postSystemMessage(conversationId: string, actor: User, text: string): { message: MessageView; recipientIds: string[] } {
+  const id = crypto.randomUUID();
+  const ts = now();
+  db.transaction(() => {
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, sender_user_id, sender_company_id, body, kind, created_at) VALUES (?, ?, ?, ?, ?, 'system', ?)",
+    ).run(id, conversationId, actor.id, actor.companyId, text, ts);
+    db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(ts, conversationId);
+  })();
+  const message = toView(db.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).get(id) as MessageRow);
+  const recipientIds = (
+    db.prepare("SELECT user_id FROM conversation_participants WHERE conversation_id = ?").all(conversationId) as {
+      user_id: string;
+    }[]
+  ).map((r) => r.user_id);
+  return { message, recipientIds };
+}
+
+const displayName = (u: User) => u.fullName || u.email;
+
+/** Group members must be people you could DM: your company or a shared project. */
+function requireContacts(user: User, userIds: string[]): User[] {
+  const allowed = new Set(listContacts(user.id).map((c) => c.userId));
+  return userIds.map((id) => {
+    const other = findUserById(id);
+    if (!other || (!user.isAdmin && !allowed.has(id))) {
+      throw new ForbiddenError("You can only add people in your company or on a shared project.");
+    }
+    return other;
+  });
+}
+
+/** create_group_conversation: a titled chat with you plus the people you pick. */
+export function createGroup(
+  userId: string,
+  title: unknown,
+  userIds: unknown,
+): { conversationId: string; message: MessageView; recipientIds: string[] } {
+  const user = requireUser(userId);
+  const name = typeof title === "string" ? title.trim() : "";
+  if (!name) throw new BadRequestError("Give the group a name.");
+  if (name.length > 80) throw new BadRequestError("Group names are limited to 80 characters.");
+  const ids = Array.isArray(userIds) ? [...new Set(userIds.filter((id): id is string => typeof id === "string" && id !== user.id))] : [];
+  if (ids.length === 0) throw new BadRequestError("Pick at least one person to add.");
+  const members = requireContacts(user, ids);
+
+  const id = crypto.randomUUID();
+  const ts = now();
+  db.transaction(() => {
+    db.prepare(
+      "INSERT INTO conversations (id, type, title, created_by, created_at, last_message_at) VALUES (?, 'group', ?, ?, ?, ?)",
+    ).run(id, name, user.id, ts, ts);
+    const insert = db.prepare(
+      "INSERT INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)",
+    );
+    insert.run(id, user.id, user.companyId, ts);
+    for (const m of members) insert.run(id, m.id, m.companyId, ts);
+  })();
+  const announced = postSystemMessage(id, user, `${displayName(user)} created the group "${name}"`);
+  return { conversationId: id, ...announced };
+}
+
+export function listParticipants(userId: string, conversationId: string): Contact[] {
+  const user = requireUser(userId);
+  requireConversation(conversationId, user);
+  const rows = db
+    .prepare(
+      `SELECT u.id, u.full_name, u.email, co.name AS company FROM conversation_participants cp
+         JOIN users u ON u.id = cp.user_id LEFT JOIN companies co ON co.id = u.company_id
+        WHERE cp.conversation_id = ? ORDER BY u.full_name`,
+    )
+    .all(conversationId) as { id: string; full_name: string; email: string; company: string | null }[];
+  return rows.map((r) => ({ userId: r.id, fullName: r.full_name, email: r.email, companyName: r.company }));
+}
+
+/** GroupAddParticipantModal: any member can add one of their contacts to a group. */
+export function addGroupParticipant(
+  userId: string,
+  conversationId: string,
+  targetUserId: unknown,
+): { message: MessageView; recipientIds: string[] } {
+  const user = requireUser(userId);
+  const conv = requireConversation(conversationId, user);
+  if (conv.type !== "group") throw new BadRequestError("People can only be added to group chats.");
+  if (typeof targetUserId !== "string" || !targetUserId) throw new BadRequestError("userId is required.");
+  if (isParticipant(conv.id, targetUserId)) throw new BadRequestError("They're already in this group.");
+  const [target] = requireContacts(user, [targetUserId]);
+  db.prepare(
+    "INSERT INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)",
+  ).run(conv.id, target.id, target.companyId, now());
+  return postSystemMessage(conv.id, user, `${displayName(user)} added ${displayName(target)}`);
 }
 
 export function markRead(userId: string, conversationId: string): void {
