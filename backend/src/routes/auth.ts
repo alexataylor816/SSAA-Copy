@@ -1,9 +1,13 @@
 import { Router } from "express";
+import crypto from "node:crypto";
+import { config } from "../config.js";
 import { consumeResetCode, createResetCode } from "../models/passwordResets.js";
 import {
   createUser,
   findUserByEmail,
+  findUserByGoogleSub,
   findUserById,
+  linkGoogleSub,
   updateUserPassword,
   type User,
 } from "../models/users.js";
@@ -84,7 +88,7 @@ authRouter.post("/auth/request-password-reset", async (req, res) => {
   }
 
   // Always respond the same way so we don't reveal whether the email exists.
-  res.json({ success: true, devCode });
+  res.json({ success: true, devCode: config.exposeDevCodes ? devCode : undefined });
 });
 
 authRouter.post("/auth/verify-reset-code", (req, res) => {
@@ -135,6 +139,110 @@ authRouter.post("/auth/request-username-reminder", async (req, res) => {
 
   // Always the same shape so we don't reveal whether the email exists.
   res.json({ success: true, delivered });
+});
+
+/**
+ * "Continue with Google". The client obtains a Google ID token via Google
+ * Identity Services and posts it here as `credential`. We validate it against
+ * Google's tokeninfo endpoint (audience must equal our GOOGLE_CLIENT_ID),
+ * then find-or-create the matching SSAA account and issue our own JWT.
+ *
+ * Google-only accounts get a random, unverifiable password hash — they can
+ * never sign in via `/auth/signin`. Without GOOGLE_CLIENT_ID configured this
+ * returns 503 so the UI can say so honestly instead of failing opaquely.
+ */
+authRouter.post("/auth/google", async (req, res) => {
+  const { credential } = req.body ?? {};
+
+  if (typeof credential !== "string" || !credential) {
+    return res.status(400).json({ error: "A Google credential is required." });
+  }
+  if (!config.googleClientId) {
+    return res.status(503).json({ error: "Google sign-in is not configured on this server." });
+  }
+
+  let info: Record<string, unknown>;
+  try {
+    const tokeninfo = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`,
+    );
+    if (!tokeninfo.ok) {
+      return res.status(401).json({ error: "Google sign-in failed. Please try again." });
+    }
+    info = (await tokeninfo.json()) as Record<string, unknown>;
+  } catch {
+    return res.status(502).json({ error: "Could not reach Google to verify sign-in. Please try again." });
+  }
+
+  if (info.aud !== config.googleClientId) {
+    return res.status(401).json({ error: "Google sign-in failed. Please try again." });
+  }
+  if (info.email_verified !== true && info.email_verified !== "true") {
+    return res.status(401).json({ error: "That Google account's email is not verified." });
+  }
+  const email = typeof info.email === "string" ? info.email.toLowerCase() : "";
+  if (!EMAIL_RE.test(email)) {
+    return res.status(401).json({ error: "Google sign-in failed. Please try again." });
+  }
+  const sub = typeof info.sub === "string" && info.sub ? info.sub : null;
+
+  let user = sub ? findUserByGoogleSub(sub) : undefined;
+  let created = false;
+  if (!user) {
+    user = findUserByEmail(email);
+    if (user && sub) linkGoogleSub(user.id, sub);
+  }
+  if (!user) {
+    const name = typeof info.name === "string" && info.name.trim() ? info.name.trim() : email.split("@")[0];
+    // No ":" means verifyPassword() always returns false — this account can
+    // only ever sign in through Google.
+    user = createUser({
+      email,
+      passwordHash: `google-oauth:${crypto.randomBytes(32).toString("hex")}`,
+      fullName: name,
+    });
+    created = true;
+    if (sub) linkGoogleSub(user.id, sub);
+  }
+
+  const token = signToken({ sub: user.id, email: user.email });
+  res.json({ token, user: serializeUser(user), created });
+});
+
+authRouter.post("/auth/change-password", (req, res) => {
+  const header = req.headers.authorization;
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
+  if (!token) {
+    return res.status(401).json({ error: "Missing token." });
+  }
+
+  let userId: string;
+  try {
+    userId = verifyToken(token).sub;
+  } catch {
+    return res.status(401).json({ error: "Invalid or expired token." });
+  }
+
+  const { currentPassword, newPassword } = req.body ?? {};
+  if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
+    return res.status(400).json({ error: "Current and new passwords are required." });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters." });
+  }
+
+  const user = findUserById(userId);
+  if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
+    // Same answer for a bad token-owner and a wrong password: nothing here
+    // should tell an attacker which one failed.
+    return res.status(401).json({ error: "Current password is incorrect." });
+  }
+  if (verifyPassword(newPassword, user.passwordHash)) {
+    return res.status(400).json({ error: "The new password must be different from the current one." });
+  }
+
+  updateUserPassword(user.id, hashPassword(newPassword));
+  res.json({ success: true });
 });
 
 authRouter.get("/auth/me", (req, res) => {

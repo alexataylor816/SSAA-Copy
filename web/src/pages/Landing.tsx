@@ -5,9 +5,9 @@ import { Calendar, Users, Building2 } from "lucide-react";
 import heroImage from "@/assets/hero-construction.jpg";
 
 const features = [
-  { icon: Calendar, label: "Smart scheduling across every crew and project" },
-  { icon: Users, label: "Team and permission management" },
-  { icon: Building2, label: "Project tracking from bid to closeout" },
+  { icon: Calendar, label: "Smart Scheduling" },
+  { icon: Users, label: "Team Management" },
+  { icon: Building2, label: "Project Tracking" },
 ];
 
 export default function Landing() {
@@ -17,12 +17,11 @@ export default function Landing() {
         <div className="absolute inset-0 bg-cover bg-center opacity-20" style={{ backgroundImage: `url(${heroImage})` }} />
         <div className="relative z-10 text-center lg:text-left max-w-xl">
           <h1 className="text-4xl lg:text-6xl font-bold text-primary-foreground mb-4">SSAA</h1>
-          <p className="text-2xl lg:text-3xl font-medium text-primary-foreground/90 mb-6">
-            Run your construction schedule in one place.
+          <p className="text-2xl lg:text-3xl font-medium text-primary-foreground/90 mb-6 whitespace-pre-line">
+            {"Schedule Someone,\nAnytime, Anywhere"}
           </p>
           <p className="text-lg text-primary-foreground/80 mb-8">
-            Coordinate general contractors and subcontractors, schedule crews without the back-and-forth, and keep
-            every project on track.
+            The complete construction scheduling platform for General Contractors and Subcontractors.
           </p>
 
           <div className="flex flex-wrap gap-4 justify-center lg:justify-start">

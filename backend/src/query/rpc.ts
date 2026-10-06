@@ -9,30 +9,16 @@
  */
 import { db } from "../db.js";
 import { ForbiddenError } from "../rbac/errors.js";
-import { hasLevel1OrHigher, hasPartialOrHigher } from "../rbac/permissions.js";
+import { hasLevel1OrHigher, hasPartialOrHigher, isAccountHolder } from "../rbac/permissions.js";
 import { companyTypeOf, visibleProjectIds, type Caller } from "./registry.js";
 
 type Rpc = (caller: Caller, args: Record<string, unknown>) => unknown;
 
-function str(args: Record<string, unknown>, key: string): string {
-  const value = args[key];
-  if (typeof value !== "string" || !value) {
-    throw new ForbiddenError(`"${key}" is required.`);
-  }
-  return value;
-}
-
 export const RPC_REGISTRY: Record<string, Rpc> = {
-  /** ProfilesModal / Dashboard gate project management on this. */
-  can_manage_projects: (caller, args) => {
-    const projectId = str(args, "project_id_arg") ?? str(args, "project_id");
-    if (caller.isAdmin) return true;
-    if (args.company_id_arg || args.company_id) {
-      const companyId = String(args.company_id_arg ?? args.company_id);
-      return caller.companyId === companyId && hasLevel1OrHigher(caller);
-    }
-    return visibleProjectIds(caller).includes(projectId);
-  },
+  /** Takes no arguments, like the original: full or account holder in your own company, or admin. */
+  can_manage_projects: (caller) =>
+    caller.isAdmin ||
+    (caller.companyId !== null && (isAccountHolder(caller) || caller.permissionLevel === "full")),
 
   /** Onboarding uses this to decide whether to force a password change. */
   check_user_never_logged_in: (caller) => {

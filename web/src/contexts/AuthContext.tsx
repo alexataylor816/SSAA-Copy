@@ -30,6 +30,7 @@ interface AuthContextValue {
   initializing: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: Error | null }>;
+  signInWithGoogle: (credential: string) => Promise<{ error: Error | null; created?: boolean }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   waitForAccountHolder: (companyId: string, timeoutMs?: number) => Promise<boolean>;
@@ -45,6 +46,9 @@ interface UserRow {
   id: string;
   email: string;
   full_name: string | null;
+  phone?: string | null;
+  language?: string | null;
+  profile_picture_url?: string | null;
   company_id: string | null;
   is_admin: number | boolean;
 }
@@ -55,9 +59,20 @@ function toSessionUser(row: UserRow): SessionUser {
     id: row.id,
     email: row.email,
     fullName: row.full_name,
+    phone: row.phone ?? null,
+    language: row.language ?? null,
+    profilePictureUrl: row.profile_picture_url ?? null,
     companyId: row.company_id,
     isAdmin: row.is_admin === true || row.is_admin === 1,
+    full_name: row.full_name,
+    company_id: row.company_id,
   };
+}
+
+/** Keeps the snake_case mirrors in step on users that arrived from the API. */
+function withMirrors(user: SessionUser | null): SessionUser | null {
+  if (!user) return null;
+  return { ...user, full_name: user.fullName, company_id: user.companyId };
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -76,19 +91,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUserRole = useCallback(async (userId: string, companyId: string | null) => {
     if (!companyId) return null;
-    return (await supabase
+    const { data: roleRow } = await supabase
       .from("user_roles")
       .select("*")
       .eq("user_id", userId)
       .eq("company_id", companyId)
-      .maybeSingle()) as UserRole | null;
+      .maybeSingle();
+    return roleRow as UserRole | null;
   }, []);
 
   const loadUserData = useCallback(
     async (userId: string) => {
       setRolesLoading(true);
-      const row = (await supabase.from("users").select("*").eq("id", userId).maybeSingle()) as UserRow | null;
-      const profileData = row ? toSessionUser(row) : null;
+      const { data: row } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle();
+      const profileData = row ? toSessionUser(row as UserRow) : null;
       setUser(profileData);
 
       let roleData: UserRole | null = null;
@@ -123,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const { user: sessionUser } = await authApi.me();
         if (cancelled) return;
-        setUser(sessionUser);
+        setUser(withMirrors(sessionUser));
         await loadUserData(sessionUser.id);
       } catch {
         // Token expired or revoked: drop it rather than looping on 401s.
@@ -139,7 +159,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     void restore();
-    return onAuthChange((token) => {
+    // Both halves matter: `cancelled` stops `restore` from setting state after
+    // unmount, and unsubscribing stops token events from doing the same.
+    const unsubscribe = onAuthChange((token) => {
       if (!token) {
         setUser(null);
         setUserRole(null);
@@ -147,18 +169,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setInitializing(false);
       }
     });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [loadUserData]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     try {
       const sessionUser = await authApi.login({ email: email.trim().toLowerCase(), password });
-      setUser(sessionUser);
+      setUser(withMirrors(sessionUser));
       await loadUserData(sessionUser.id);
       return { error: null };
     } catch (err) {
       return { error: err instanceof Error ? err : new Error("Could not sign in.") };
     }
   }, [loadUserData]);
+
+  const signInWithGoogle = useCallback(
+    async (credential: string) => {
+      try {
+        const { user: sessionUser, created } = await authApi.google(credential);
+        setUser(withMirrors(sessionUser));
+        await loadUserData(sessionUser.id);
+        return { error: null, created };
+      } catch (err) {
+        return {
+          error: err instanceof Error ? err : new Error("Could not sign in with Google."),
+          created: undefined,
+        };
+      }
+    },
+    [loadUserData],
+  );
 
   const signUp = useCallback(
     async (email: string, password: string, fullName?: string) => {
@@ -168,7 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           password,
           fullName: fullName ?? "",
         });
-        setUser(sessionUser);
+        setUser(withMirrors(sessionUser));
         await loadUserData(sessionUser.id);
         return { error: null };
       } catch (err) {
@@ -219,6 +262,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       initializing,
       signIn,
       signUp,
+      signInWithGoogle,
       signOut,
       refreshProfile,
       waitForAccountHolder,
@@ -232,7 +276,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isBasicUser: permissionLevel === "basic" || permissionLevel === "standard",
       permissionLevel,
     };
-  }, [user, userRole, loading, rolesLoading, initializing, signIn, signUp, signOut, refreshProfile, waitForAccountHolder]);
+  }, [user, userRole, loading, rolesLoading, initializing, signIn, signUp, signInWithGoogle, signOut, refreshProfile, waitForAccountHolder]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -30,5 +30,5 @@ if ($WithExpo) {
     Write-Host "  Expo    http://localhost:8081"
 }
 else {
-    Write-Host "  (Expo not started - pass -WithExpo to include it)"
+    Write-Host "  (Expo not started - pass -WithExpo to include the paused mobile client)"
 }

@@ -6,24 +6,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import AuthLayout from "@/components/AuthLayout";
+import GoogleSignInButton from "@/components/GoogleSignInButton";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-
-type CompanyType = "gc" | "sub";
 
 export default function SignUp() {
   const [params] = useSearchParams();
-  // A link like /signup?invite=<companyId> skips company creation and sends a
-  // join request to that company instead, pending the account holder's approval.
+  // A link like /signup?invite=<companyId> skips onboarding and sends a join
+  // request to that company instead, pending the account holder's approval.
+  // Everyone else lands on /onboarding after the account exists.
   const inviteCompanyId = params.get("invite");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [companyName, setCompanyName] = useState("");
-  const [companyType, setCompanyType] = useState<CompanyType>("gc");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { signUp, refreshProfile } = useAuth();
+  const { signUp, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
 
   async function handleSubmit(event: React.FormEvent) {
@@ -31,7 +31,6 @@ export default function SignUp() {
     setError(null);
 
     if (!fullName.trim()) return setError("Full name is required.");
-    if (!inviteCompanyId && !companyName.trim()) return setError("Company name is required.");
     if (password.length < 6) return setError("Password must be at least 6 characters.");
 
     setSubmitting(true);
@@ -43,11 +42,7 @@ export default function SignUp() {
         await api.post(`/companies/${inviteCompanyId}/join-requests`);
         navigate("/dashboard", { state: { pendingJoinRequest: true } });
       } else {
-        // The account holder owns the company they just created, so create it
-        // before entering the app rather than deferring to a later step.
-        await api.post("/companies", { name: companyName.trim(), companyType });
-        await refreshProfile();
-        navigate("/dashboard");
+        navigate("/onboarding");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create that account.");
@@ -56,8 +51,30 @@ export default function SignUp() {
     }
   }
 
+  async function handleGoogleCredential(credential: string) {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const { error: googleError } = await signInWithGoogle(credential);
+      if (googleError) throw googleError;
+
+      // Google accounts go through onboarding too: the invite link still sends
+      // a join request, and everyone else sets up their company there.
+      if (inviteCompanyId) {
+        await api.post(`/companies/${inviteCompanyId}/join-requests`);
+        navigate("/dashboard", { state: { pendingJoinRequest: true } });
+      } else {
+        navigate("/onboarding");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not continue with Google.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-8 bg-background">
+    <AuthLayout inviteNote={inviteCompanyId ? "You've been invited to join a company on SSAA." : undefined}>
       <Card className="w-full max-w-md border-primary/20 shadow-lg">
         <CardHeader className="text-center pb-2">
           <CardTitle className="text-2xl font-bold">Create your account</CardTitle>
@@ -73,31 +90,9 @@ export default function SignUp() {
             </div>
 
             {!inviteCompanyId && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="companyName">Company name</Label>
-                  <Input
-                    id="companyName"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="Smith Construction"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="companyType">What kind of company?</Label>
-                  <select
-                    id="companyType"
-                    value={companyType}
-                    onChange={(e) => setCompanyType(e.target.value as CompanyType)}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    <option value="gc">General contractor</option>
-                    <option value="sub">Subcontractor</option>
-                  </select>
-                </div>
-              </>
+              <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+                After creating your account, you&apos;ll set up your company or join an existing one.
+              </p>
             )}
 
             <div className="space-y-2">
@@ -114,6 +109,7 @@ export default function SignUp() {
                   autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
                   required
                   className="pr-10"
                 />
@@ -138,6 +134,19 @@ export default function SignUp() {
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Create account
             </Button>
+
+            <div className="relative my-2">
+              <Separator />
+              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-3 text-xs text-muted-foreground">
+                or
+              </span>
+            </div>
+
+            <GoogleSignInButton
+              onCredential={(credential) => void handleGoogleCredential(credential)}
+              onError={(message) => setError(message)}
+              disabled={submitting}
+            />
           </form>
 
           <div className="mt-6 text-center">
@@ -147,6 +156,6 @@ export default function SignUp() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </AuthLayout>
   );
 }

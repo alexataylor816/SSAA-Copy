@@ -137,6 +137,37 @@ export const rbacApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ['Members'],
     }),
+    // `employees` has no dedicated REST surface, so it goes through /query the
+    // same way the reference client does. Delete needs an explicit filter, and
+    // update needs `id` inside `data`, because the executor matches rows by the
+    // columns present rather than by the response envelope.
+    createEmployee: build.mutation<
+      { changes: number; lastInsertRowid: number },
+      { companyId: string; name: string; email?: string | null; phone?: string | null }
+    >({
+      query: ({ companyId, name, email, phone }) => ({
+        url: '/query',
+        method: 'POST',
+        body: {
+          table: 'employees',
+          operation: 'insert',
+          data: { company_id: companyId, name, email: email ?? null, phone: phone ?? null },
+        },
+      }),
+      invalidatesTags: ['Members'],
+    }),
+    removeEmployee: build.mutation<{ changes: number }, { employeeId: string }>({
+      query: ({ employeeId }) => ({
+        url: '/query',
+        method: 'POST',
+        body: {
+          table: 'employees',
+          operation: 'delete',
+          filters: [{ op: 'eq', column: 'id', value: employeeId }],
+        },
+      }),
+      invalidatesTags: ['Members'],
+    }),
   }),
   overrideExisting: false,
 });
@@ -153,4 +184,6 @@ export const {
   useListEmployeesQuery,
   useListConnectedEmployeesQuery,
   useAssignPermissionMutation,
+  useCreateEmployeeMutation,
+  useRemoveEmployeeMutation,
 } = rbacApi;

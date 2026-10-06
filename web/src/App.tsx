@@ -1,16 +1,26 @@
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/toaster";
-import Landing from "@/pages/Landing";
-import SignIn from "@/pages/SignIn";
-import SignUp from "@/pages/SignUp";
-import ForgotPassword from "@/pages/ForgotPassword";
-import ResetPassword from "@/pages/ResetPassword";
-import ForgotUsername from "@/pages/ForgotUsername";
-import Dashboard from "@/pages/Dashboard";
-import ProjectSchedule from "@/pages/ProjectSchedule";
-import ResourceMatrix from "@/pages/ResourceMatrix";
-import CompanySettings from "@/pages/CompanySettings";
+
+// Route-level code splitting: each page (and its heavy deps like the matrix
+// drag-and-drop kit) loads on demand instead of bloating the initial bundle.
+const Landing = lazy(() => import("@/pages/Landing"));
+const SignIn = lazy(() => import("@/pages/SignIn"));
+const SignUp = lazy(() => import("@/pages/SignUp"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
+const ForgotUsername = lazy(() => import("@/pages/ForgotUsername"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Onboarding = lazy(() => import("@/pages/Onboarding"));
+const ProjectSchedule = lazy(() => import("@/pages/ProjectSchedule"));
+const ResourceMatrix = lazy(() => import("@/pages/ResourceMatrix"));
+const CompanySettings = lazy(() => import("@/pages/CompanySettings"));
+const Messages = lazy(() => import("@/pages/Messages"));
+const Admin = lazy(() => import("@/pages/Admin"));
+const NotFound = lazy(() => import("@/pages/NotFound"));
+const PrivacyPolicy = lazy(() => import("@/pages/PrivacyPolicy"));
+const TermsOfService = lazy(() => import("@/pages/TermsOfService"));
 import { Loader2 } from "lucide-react";
 
 function FullPageSpinner() {
@@ -40,6 +50,7 @@ function Protected({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <>
+      <Suspense fallback={<FullPageSpinner />}>
       <Routes>
         <Route
           path="/"
@@ -92,6 +103,14 @@ export default function App() {
           }
         />
         <Route
+          path="/onboarding"
+          element={
+            <Protected>
+              <Onboarding />
+            </Protected>
+          }
+        />
+        <Route
           path="/projects/:projectId/schedule"
           element={
             <Protected>
@@ -115,9 +134,28 @@ export default function App() {
             </Protected>
           }
         />
+        <Route
+          path="/messages"
+          element={
+            <Protected>
+              <Messages />
+            </Protected>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <Protected>
+              <Admin />
+            </Protected>
+          }
+        />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/terms" element={<TermsOfService />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
+      </Suspense>
       <Toaster />
     </>
   );

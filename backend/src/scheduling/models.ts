@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { db } from "../db.js";
+import { findCompanyById } from "../rbac/models.js";
 import type { Availability, Project, ProjectConnection, ScheduleRequest, ScheduleRequestStatus } from "./types.js";
 
 interface ProjectRow {
@@ -40,7 +41,9 @@ interface ScheduleRequestRow {
   start_time: string | null;
   end_time: string | null;
   description: string | null;
+  image_urls: string; // JSON array of /uploads/* paths attached to the request
   status: ScheduleRequestStatus;
+  status_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -94,14 +97,27 @@ export function ensureSchedulingTables() {
       start_time TEXT,
       end_time TEXT,
       description TEXT,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'rejected', 'cancelled')),
+      image_urls TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending',
+'confirmed', 'rejected', 'cancelled')),
+      status_reason TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
   db.exec("CREATE INDEX IF NOT EXISTS idx_schedule_requests_date ON schedule_requests(date)");
-}
 
+  // Additive column for databases created before photo attachments existed.
+  const columns = new Set(
+    (db.prepare("PRAGMA table_info(schedule_requests)").all() as { name: string }[]).map((c) => c.name),
+  );
+  if (!columns.has("image_urls")) {
+    db.exec("ALTER TABLE schedule_requests ADD COLUMN image_urls TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!columns.has("status_reason")) {
+    db.exec("ALTER TABLE schedule_requests ADD COLUMN status_reason TEXT");
+  }
+}
 function randomConnectionCode(): string {
   return crypto.randomBytes(6).toString("hex").slice(0, 8);
 }
@@ -127,6 +143,39 @@ export function createProjectRow(params: { name: string; address?: string | null
 export function findProjectById(id: string): Project | undefined {
   const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow | undefined;
   return row ? mapProjectRow(row) : undefined;
+}
+
+/**
+ * Removes a project and every row that references it. Foreign keys are
+ * declared but not enforced (no PRAGMA in db.ts), so each child table is
+ * cleared explicitly. Messaging rows live in the messaging module's tables;
+ * they are deleted here by SQL because that module has no per-project
+ * delete helper and importing it would couple the two domains.
+ */
+export function deleteProjectAndChildren(projectId: string): void {
+  db.transaction(() => {
+    const convs = db.prepare("SELECT id FROM conversations WHERE project_id = ?").all(projectId) as {
+      id: string;
+    }[];
+    const delMessages = db.prepare("DELETE FROM messages WHERE conversation_id = ?");
+    const delReads = db.prepare("DELETE FROM message_reads WHERE conversation_id = ?");
+    const delParts = db.prepare("DELETE FROM conversation_participants WHERE conversation_id = ?");
+    for (const conv of convs) {
+      delMessages.run(conv.id);
+      delReads.run(conv.id);
+      delParts.run(conv.id);
+    }
+    db.prepare("DELETE FROM conversations WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM schedule_requests WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM availability WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM tasks WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM project_aliases WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM user_project_assignments WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM employee_project_assignments WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM project_connections WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM contractor_connection_projects WHERE project_id = ?").run(projectId);
+    db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+  })();
 }
 
 export function findProjectByConnectionCode(code: string): Project | undefined {
@@ -269,12 +318,13 @@ export function createScheduleRequestRow(params: {
   startTime: string | null;
   endTime: string | null;
   description: string | null;
+  imageUrls: string[];
 }): ScheduleRequest {
   const id = crypto.randomUUID();
   db.prepare(
     `INSERT INTO schedule_requests
-       (id, project_id, requesting_company_id, sub_company_id, employee_ids, date, start_time, end_time, description)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, project_id, requesting_company_id, sub_company_id, employee_ids, date, start_time, end_time, description, image_urls)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     params.projectId,
@@ -285,6 +335,7 @@ export function createScheduleRequestRow(params: {
     params.startTime,
     params.endTime,
     params.description,
+    JSON.stringify(params.imageUrls),
   );
   return findScheduleRequestById(id)!;
 }
@@ -309,8 +360,12 @@ export function listScheduleRequestsForCompany(
   return rows.map(mapScheduleRequestRow);
 }
 
-export function updateScheduleRequestStatusRow(id: string, status: ScheduleRequestStatus) {
-  db.prepare("UPDATE schedule_requests SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, id);
+export function updateScheduleRequestStatusRow(id: string, status: ScheduleRequestStatus, reason: string | null) {
+  db.prepare("UPDATE schedule_requests SET status = ?, status_reason = ?, updated_at = datetime('now') WHERE id = ?").run(
+    status,
+    reason,
+    id,
+  );
 }
 
 function mapScheduleRequestRow(row: ScheduleRequestRow): ScheduleRequest {
@@ -324,7 +379,11 @@ function mapScheduleRequestRow(row: ScheduleRequestRow): ScheduleRequest {
     startTime: row.start_time,
     endTime: row.end_time,
     description: row.description,
+    imageUrls: row.image_urls ? (JSON.parse(row.image_urls) as string[]) : [],
     status: row.status,
+    statusReason: row.status_reason,
+    requestingCompanyName: findCompanyById(row.requesting_company_id)?.name ?? null,
+    subCompanyName: findCompanyById(row.sub_company_id)?.name ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

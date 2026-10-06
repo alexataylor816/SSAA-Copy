@@ -5,6 +5,7 @@ import {
   createCompanyRow,
   createEmployeeRow,
   createJoinRequest,
+  deleteUserRole,
   findCompanyById,
   findJoinRequestById,
   findPendingJoinRequest,
@@ -13,7 +14,9 @@ import {
   listCompanyRoles,
   listPendingJoinRequests,
   setJoinRequestStatus,
+  setRoleCompanyCreator,
   createUserRole,
+  unlinkUserEmployees,
   updateUserRolePermission,
 } from "./models.js";
 import {
@@ -52,7 +55,7 @@ function requireCompany(companyId: string): Company {
   return company;
 }
 
-export function createCompany(userId: string, params: { name: string; companyType: CompanyType; address?: string }) {
+export function createCompany(userId: string, params: { name: string; companyType: CompanyType; address?: string; trade?: string }) {
   const user = requireUser(userId);
   if (user.companyId) {
     throw new ConflictError("You already belong to a company.");
@@ -63,12 +66,17 @@ export function createCompany(userId: string, params: { name: string; companyTyp
   if (params.companyType !== "gc" && params.companyType !== "sub") {
     throw new BadRequestError("companyType must be 'gc' or 'sub'.");
   }
+  const trade = params.trade?.trim() || null;
+  if (trade && trade.length > 60) {
+    throw new BadRequestError("Trade must be 60 characters or fewer.");
+  }
 
   const run = db.transaction(() => {
     const company = createCompanyRow({
       name: params.name.trim(),
       companyType: params.companyType,
       address: params.address?.trim() || null,
+      trade,
     });
 
     setUserCompany(user.id, company.id);
@@ -107,7 +115,10 @@ export function requestToJoinCompany(userId: string, companyId: string): JoinReq
   return createJoinRequest(userId, companyId);
 }
 
-export function listJoinRequests(companyId: string, requesterUserId: string): JoinRequest[] {
+export function listJoinRequests(
+  companyId: string,
+  requesterUserId: string,
+): (JoinRequest & { userName: string | null; userEmail: string | null })[] {
   const company = requireCompany(companyId);
   const requester = requireUser(requesterUserId);
   const actor = actorFor(requester, companyId);
@@ -116,7 +127,12 @@ export function listJoinRequests(companyId: string, requesterUserId: string): Jo
     throw new ForbiddenError("Only an account holder (or, for sub companies, a full-level admin) can view join requests.");
   }
 
-  return listPendingJoinRequests(companyId);
+  // The approver can't look the requester up themselves (they aren't in the
+  // company yet), so name the person here.
+  return listPendingJoinRequests(companyId).map((request) => {
+    const user = findUserById(request.userId);
+    return { ...request, userName: user?.fullName ?? null, userEmail: user?.email ?? null };
+  });
 }
 
 function requireApprover(companyId: string, approverUserId: string): { company: Company; actor: Actor } {
@@ -216,6 +232,112 @@ export function assignPermissionLevel(
 
   updateUserRolePermission(targetUserId, companyId, newLevel);
   return findUserRole(targetUserId, companyId)!;
+}
+
+/**
+ * Move main account-holder status to another member (ProfilesModal's
+ * "Transfer Main Company Account Holder Status"). The previous holder steps
+ * down to `demoteTo` in the same transaction so the company is never
+ * holder-less in between. Only a holder or admin can initiate; the creator
+ * flag moves with the status.
+ */
+export function transferAccountHolder(
+  companyId: string,
+  actorUserId: string,
+  targetUserId: string,
+  demoteTo: PermissionLevel = "full",
+): { previousHolderId: string; newHolderId: string } {
+  const company = requireCompany(companyId);
+  const actor = actorFor(requireUser(actorUserId), companyId);
+
+  if (!actor.isAdmin && !isAccountHolder(actor)) {
+    throw new ForbiddenError("Only the account holder or an admin can transfer holdership.");
+  }
+  if (typeof targetUserId !== "string" || !targetUserId) {
+    throw new BadRequestError("A target member is required.");
+  }
+  if (!getVisiblePermissions(company.companyType).includes(demoteTo) || demoteTo === "account_holder") {
+    throw new BadRequestError(
+      `demoteTo must be a non-holder level valid for a ${company.companyType} company.`,
+    );
+  }
+
+  const targetRole = findUserRole(targetUserId, companyId);
+  if (!targetRole) {
+    throw new NotFoundError("That user is not a member of this company.");
+  }
+
+  // The status moves off whoever holds it now: the actor when they are a
+  // holder-member, otherwise the current creator (or any holder) — this
+  // covers an admin transferring on a company's behalf.
+  const actorRole = findUserRole(actorUserId, companyId);
+  const actorHolds =
+    !!actorRole &&
+    (actorRole.permissionLevel === "account_holder" || actorRole.isCompanyCreator);
+  const currentHolderId =
+    (actorHolds ? actorUserId : null) ??
+    listCompanyRoles(companyId).find((r) => r.isCompanyCreator)?.userId ??
+    listCompanyRoles(companyId).find((r) => r.permissionLevel === "account_holder")?.userId ??
+    null;
+  if (!currentHolderId) {
+    throw new ConflictError("This company has no account holder to transfer from.");
+  }
+  if (currentHolderId === targetUserId) {
+    throw new BadRequestError("That member already holds this company.");
+  }
+
+  db.transaction(() => {
+    updateUserRolePermission(targetUserId, companyId, "account_holder");
+    setRoleCompanyCreator(targetUserId, companyId, true);
+    updateUserRolePermission(currentHolderId, companyId, demoteTo);
+    setRoleCompanyCreator(currentHolderId, companyId, false);
+  })();
+
+  return { previousHolderId: currentHolderId, newHolderId: targetUserId };
+}
+
+/**
+ * Remove a member from the company. Holder or admin only; never yourself,
+ * never the company creator (transfer holdership first), and never the last
+ * remaining holder. The roster rows stay — only the login link is detached —
+ * so availability history and schedule references keep working.
+ */
+export function removeMember(companyId: string, actorUserId: string, targetUserId: string): void {
+  requireCompany(companyId);
+  const actor = actorFor(requireUser(actorUserId), companyId);
+
+  if (!actor.isAdmin && !isAccountHolder(actor)) {
+    throw new ForbiddenError("Only the account holder or an admin can remove members.");
+  }
+  if (typeof targetUserId !== "string" || !targetUserId) {
+    throw new BadRequestError("A target member is required.");
+  }
+  if (actorUserId === targetUserId) {
+    throw new BadRequestError("You cannot remove yourself. Transfer holdership first if you are leaving.");
+  }
+
+  const targetRole = findUserRole(targetUserId, companyId);
+  if (!targetRole) {
+    throw new NotFoundError("That user is not a member of this company.");
+  }
+  if (targetRole.isCompanyCreator) {
+    throw new BadRequestError("Transfer the account holder status before removing the company creator.");
+  }
+  const targetIsHolder = targetRole.permissionLevel === "account_holder";
+  if (targetIsHolder) {
+    const otherHolders = listCompanyRoles(companyId).filter(
+      (r) => r.userId !== targetUserId && (r.permissionLevel === "account_holder" || r.isCompanyCreator),
+    );
+    if (otherHolders.length === 0) {
+      throw new ConflictError("Cannot remove the last account holder. Transfer holdership first.");
+    }
+  }
+
+  db.transaction(() => {
+    deleteUserRole(targetUserId, companyId);
+    setUserCompany(targetUserId, null);
+    unlinkUserEmployees(targetUserId, companyId);
+  })();
 }
 
 export interface CompanyMember {

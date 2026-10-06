@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { emit } from "../realtime/index.js";
 import { EVENT, ROOM } from "../realtime/events.js";
+import { notifyJoinRequestCreated, notifyJoinRequestResolved } from "../notifications/service.js";
 import { HttpError } from "./errors.js";
 import { listCompanies } from "./models.js";
 import {
@@ -13,9 +14,12 @@ import {
   listEmployees,
   listJoinRequests,
   rejectJoinRequest,
+  removeMember,
   requestToJoinCompany,
+  transferAccountHolder,
 } from "./service.js";
 import type { CompanyType, PermissionLevel } from "./types.js";
+import { getPendingCompanyDeletion, requestCompanyDeletion } from "./companyDeletion.js";
 
 export const rbacRouter = Router();
 rbacRouter.use(requireAuth);
@@ -57,8 +61,8 @@ rbacRouter.get(
 rbacRouter.post(
   "/companies",
   route((req, res) => {
-    const { name, companyType, address } = req.body ?? {};
-    const result = createCompany(req.userId!, { name, companyType, address });
+    const { name, companyType, address, trade } = req.body ?? {};
+    const result = createCompany(req.userId!, { name, companyType, address, trade });
     res.status(201).json(result);
   }),
 );
@@ -69,6 +73,7 @@ rbacRouter.post(
     const result = requestToJoinCompany(req.userId!, req.params.companyId);
     // Everyone who can approve needs to see it without a refresh.
     emit(EVENT.joinRequestCreated, { joinRequest: result }, ROOM.join_requests, req.params.companyId);
+    notifyJoinRequestCreated(req.userId!, req.params.companyId);
     res.status(201).json(result);
   }),
 );
@@ -87,6 +92,7 @@ rbacRouter.post(
     const role = approveJoinRequest(req.params.companyId, req.params.requestId, req.userId!, permissionLevel);
     emit(EVENT.joinRequestResolved, { status: "approved", userRole: role }, ROOM.join_requests, req.params.companyId);
     emit(EVENT.joinRequestResolved, { status: "approved" }, ROOM.user_profile, req.params.requestId);
+    notifyJoinRequestResolved(req.params.requestId, true);
     res.json(role);
   }),
 );
@@ -96,6 +102,7 @@ rbacRouter.post(
   route((req, res) => {
     rejectJoinRequest(req.params.companyId, req.params.requestId, req.userId!);
     emit(EVENT.joinRequestResolved, { status: "rejected" }, ROOM.join_requests, req.params.companyId);
+    notifyJoinRequestResolved(req.params.requestId, false);
     res.json({ success: true });
   }),
 );
@@ -120,5 +127,36 @@ rbacRouter.patch(
     const permissionLevel = req.body?.permissionLevel as PermissionLevel;
     const role = assignPermissionLevel(req.params.companyId, req.userId!, req.params.userId, permissionLevel);
     res.json(role);
+  }),
+);
+
+rbacRouter.post(
+  "/companies/:companyId/transfer-holder",
+  route((req, res) => {
+    const { targetUserId, demoteTo } = req.body ?? {};
+    res.json(transferAccountHolder(req.params.companyId, req.userId!, targetUserId, demoteTo ?? "full"));
+  }),
+);
+
+rbacRouter.delete(
+  "/companies/:companyId/members/:userId",
+  route((req, res) => {
+    removeMember(req.params.companyId, req.userId!, req.params.userId);
+    res.json({ success: true });
+  }),
+);
+
+rbacRouter.post(
+  "/companies/:companyId/deletion-requests",
+  route((req, res) => {
+    const { reason } = req.body ?? {};
+    res.status(201).json(requestCompanyDeletion(req.params.companyId, req.userId!, reason));
+  }),
+);
+
+rbacRouter.get(
+  "/companies/:companyId/deletion-requests/pending",
+  route((req, res) => {
+    res.json({ request: getPendingCompanyDeletion(req.params.companyId, req.userId!) });
   }),
 );

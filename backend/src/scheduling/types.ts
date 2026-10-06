@@ -51,7 +51,11 @@ export interface ScheduleRequest {
   startTime: string | null; // HH:MM
   endTime: string | null; // HH:MM
   description: string | null;
+  imageUrls: string[];
   status: ScheduleRequestStatus;
+  statusReason: string | null;
+  requestingCompanyName: string | null;
+  subCompanyName: string | null;
   createdAt: string;
   updatedAt: string;
 }

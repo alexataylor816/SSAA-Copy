@@ -87,6 +87,23 @@ export function unsupported(feature: string): never {
   throw new Error(`[supabase-facade] "${feature}" has not been migrated to the Express backend yet.`);
 }
 
+/**
+ * Mirrors the `supabase-js` result shape: a successful call resolves with
+ * `{ data }`, a failure resolves with `{ data: null, error }` and never rejects.
+ * Components ported from the Lovable app destructure `{ data, error }` and check
+ * `if (error)`, so this has to match or every ported component needs editing.
+ */
+export interface QueryError {
+  message: string;
+  status?: number;
+}
+
+export interface QueryResult<T> {
+  data: T;
+  error: QueryError | null;
+  count?: number;
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: "POST",
@@ -99,9 +116,23 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   const text = await res.text();
   const payload = text ? JSON.parse(text) : {};
   if (!res.ok) {
-    throw new Error(payload.error ?? `Request failed with ${res.status}.`);
+    const message = payload.error ?? `Request failed with ${res.status}.`;
+    const error = new Error(message) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
   }
   return payload as T;
+}
+
+/** Wraps a throwing call in the Supabase `{ data, error }` envelope. */
+async function toResult<T = any>(run: () => Promise<T>): Promise<QueryResult<T>> {
+  try {
+    return { data: await run(), error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Request failed.";
+    const status = (err as { status?: number }).status;
+    return { data: null as T, error: { message, ...(status ? { status } : {}) } };
+  }
 }
 
 /** Accumulates filters/ordering exactly like the PostgREST builder does. */
@@ -129,22 +160,30 @@ class PostgrestBuilder {
   }
 
   insert(values: unknown): this {
+    // `from()` always starts as "select": the verb methods must set the real
+    // operation, or every write silently executes as a read (the backend
+    // ignores `data` on selects, and toResult never rejects, so nothing
+    // complained — writes just never happened).
+    this.operation = "insert";
     this.dataValue = values;
     return this;
   }
 
   update(values: unknown): this {
+    this.operation = "update";
     this.dataValue = values;
     return this;
   }
 
-  upsert(values: unknown, options?: { onConflict?: string }): this {
+  upsert(values: unknown, options?: { onConflict?: string; ignoreDuplicates?: boolean }): this {
+    this.operation = "upsert";
     this.dataValue = values;
     this.onConflictValue = options?.onConflict;
     return this;
   }
 
   delete(): this {
+    this.operation = "delete";
     return this;
   }
 
@@ -219,17 +258,17 @@ class PostgrestBuilder {
     return this;
   }
 
-  single(): Promise<unknown> {
+  single(): Promise<QueryResult<any>> {
     this.result = "single";
     return this.execute();
   }
 
-  maybeSingle(): Promise<unknown> {
+  maybeSingle(): Promise<QueryResult<any>> {
     this.result = "maybeSingle";
     return this.execute();
   }
 
-  private async execute(): Promise<unknown> {
+  private async execute(): Promise<QueryResult<any>> {
     const request: QueryRequest = {
       table: this.table,
       operation: this.operation,
@@ -242,21 +281,27 @@ class PostgrestBuilder {
     if (this.onConflictValue) request.onConflict = this.onConflictValue;
     if (this.orClause) request.or = this.orClause;
 
-    const payload = await post<{ data: unknown; count?: number }>("/query", request);
+    return toResult(async () => {
+      const payload = await post<{ data: unknown; count?: number }>("/query", request);
 
-    if (this.result === "single") {
-      const row = Array.isArray(payload.data) ? payload.data[0] : payload.data;
-      if (row == null) throw new Error("No rows returned.");
-      return row;
-    }
-    if (this.result === "maybeSingle") {
-      return Array.isArray(payload.data) ? (payload.data[0] ?? null) : (payload.data ?? null);
-    }
-    return payload.data;
+      if (this.result === "single") {
+        const row = Array.isArray(payload.data) ? payload.data[0] : payload.data;
+        if (row == null) throw new Error("No rows returned.");
+        return row;
+      }
+      if (this.result === "maybeSingle") {
+        return Array.isArray(payload.data) ? (payload.data[0] ?? null) : (payload.data ?? null);
+      }
+      return payload.data;
+    }).then((result) =>
+      this.wantsCount && result.data !== null
+        ? { ...result, count: Array.isArray(result.data) ? result.data.length : undefined }
+        : result,
+    );
   }
 
-  then<TResult1 = unknown, TResult2 = never>(
-    onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = QueryResult<any>, TResult2 = never>(
+    onfulfilled?: ((value: QueryResult<any>) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     return this.execute().then(onfulfilled, onrejected);
@@ -265,28 +310,47 @@ class PostgrestBuilder {
 
 export interface SupabaseLike {
   from(table: string): PostgrestBuilder;
-  rpc(name: string, args?: Record<string, unknown>): Promise<unknown>;
+  rpc(name: string, args?: Record<string, unknown>): Promise<QueryResult<any>>;
   auth: {
     getToken(): string | null;
     setToken(token: string | null): void;
     onChange(listener: (token: string | null) => void): () => void;
   };
   channel(name: string): RealtimeChannel;
+
+  removeChannel(channel?: unknown): void;
   storage: { unsupported: typeof unsupported };
-  functions: { unsupported: typeof unsupported };
+  functions: {
+    invoke(name: string, options?: { body?: unknown }): Promise<QueryResult<any>>;
+  };
+}
+
+/**
+ * Lovable calls Supabase Edge Functions for the project-invite email. The
+ * Express backend has no equivalent endpoint yet (there is no invite token on
+ * `project_connections`), so this reports a clean failure: the caller already
+ * checks `if (error)` and shows a toast, which beats crashing the dashboard.
+ */
+async function invokeFunction(name: string): Promise<QueryResult<any>> {
+  return {
+    data: null,
+    error: { message: `"${name}" has not been migrated to the Express backend yet.` },
+  };
 }
 
 export const supabase: SupabaseLike = {
   from: (table: string) => new PostgrestBuilder(table, "select"),
-  rpc: (name: string, args: Record<string, unknown> = {}) => post(`/rpc/${name}`, args),
+  rpc: (name: string, args: Record<string, unknown> = {}) =>
+    toResult(() => post<unknown>(`/rpc/${name}`, args)),
   auth: {
     getToken,
     setToken,
     onChange: onAuthChange,
   },
   channel: (name: string) => new RealtimeChannel(name),
+  removeChannel,
   storage: { unsupported },
-  functions: { unsupported },
+  functions: { invoke: invokeFunction },
 };
 
 /* ------------------------------------------------------------------ *
@@ -305,7 +369,22 @@ class RealtimeChannel {
 
   constructor(private name: string) {}
 
-  on(event: string, handler: Handler): this {
+  /**
+   * `on('postgres_changes', { event, schema, table, filter }, handler)` is the
+   * Postgres-flavoured form the Lovable app uses. The backend has no logical
+   * replication to filter on, so the subscription is registered under the event
+   * name from the filter and the filter itself is ignored â€” callers still get
+   * every payload for that event, which is what the Socket.IO events deliver.
+   */
+  on(
+    trigger: string,
+    filterOrHandler: Record<string, unknown> | Handler,
+    maybeHandler?: Handler,
+  ): this {
+    const event = maybeHandler
+      ? String((filterOrHandler as Record<string, unknown>).event ?? "*")
+      : trigger;
+    const handler = maybeHandler ?? (filterOrHandler as Handler);
     if (!this.handlers.has(event)) this.handlers.set(event, new Set());
     this.handlers.get(event)!.add(handler);
     return this;
@@ -332,6 +411,13 @@ class RealtimeChannel {
     this.socket = null;
   }
 }
+
+/**
+ * Supabase removes a channel by its handle. Ours carry their own socket and
+ * expose `unsubscribe()`, so this just tolerates the argument and lets the
+ * caller keep using the standard call shape.
+ */
+function removeChannel(_channel?: unknown): void {}
 
 /** Re-renders a component whenever the signed-in token changes. */
 export function useAuthToken(): string | null {

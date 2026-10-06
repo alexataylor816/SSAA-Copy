@@ -182,6 +182,41 @@ function rowsFrom(data: QueryRequest["data"]): Record<string, unknown>[] {
   throw new ForbiddenError("A data payload is required for this operation.");
 }
 
+/**
+ * Recover the target row's id from the request's own filters.
+ *
+ * PostgREST addresses the affected row with a filter rather than with an id
+ * inside the body, so `.update({ status: "done" }).eq("id", rowId)` is the
+ * idiomatic shape -- and it is the shape every component ported from the
+ * reference app writes. Requiring the id to be inlined into the payload as well
+ * meant those calls threw "Each updated row must include its id" even though the
+ * caller had unambiguously named the row.
+ *
+ * Only a single-valued `id` filter is accepted. `.eq("id", a).eq("id", b)` and
+ * `.in("id", [a, b])` each name several rows, so there is no single row for the
+ * payload to belong to and the call is refused rather than guessed at.
+ */
+function rowIdFromFilters(rule: { columns: readonly string[] }, req: QueryRequest): string | null {
+  if (!rule.columns.includes("id")) return null;
+
+  const values: unknown[] = [];
+  for (const filter of req.filters ?? []) {
+    if (filter.column !== "id") continue;
+    if (filter.op === "eq") {
+      values.push(filter.value);
+      continue;
+    }
+    if (filter.op === "in" && Array.isArray(filter.value)) {
+      values.push(...filter.value);
+      continue;
+    }
+    return null;
+  }
+
+  if (values.length !== 1) return null;
+  return typeof values[0] === "string" && values[0] !== "" ? values[0] : null;
+}
+
 /** Matches the format the rest of the schema stores timestamps in. */
 function nowTimestamp(): string {
   return new Date().toISOString().slice(0, 19).replace("T", " ");
@@ -321,6 +356,17 @@ export function runQuery(caller: Caller, req: QueryRequest): unknown {
         if (rule.columns.includes("id")) clean.id = randomUUID();
         if (rule.columns.includes("created_at")) clean.created_at = nowTimestamp();
         if (rule.columns.includes("updated_at")) clean.updated_at = nowTimestamp();
+        // Tasks are ordered by sort_order and every row defaults to 0, so an
+        // explicit sort_order from the client is honoured but an omitted one
+        // appends to the end of the project instead of tying with every sibling.
+        if (req.table === "tasks" && clean.sort_order == null) {
+          const maxRow = db
+            .prepare(
+              `SELECT MAX(sort_order) AS max FROM tasks WHERE project_id = @projectId`,
+            )
+            .get({ projectId: clean.project_id }) as { max: number | null } | undefined;
+          clean.sort_order = (maxRow?.max ?? -1) + 1;
+        }
 
         const columns = Object.keys(clean);
         const placeholders = columns.map((c) => params.bind(normaliseValue(clean[c]))).join(", ");
@@ -340,14 +386,20 @@ export function runQuery(caller: Caller, req: QueryRequest): unknown {
     }
 
     case "update": {
-      const rows = rowsFrom(req.data);
+      // Merge a single-valued `id` filter into the payload before the row is
+      // validated or handed to canWrite: both of those need the id to be on the
+      // row already, so it has to be resolved first rather than at write time.
+      const filterId = rowIdFromFilters(rule, req);
+      const rows = rowsFrom(req.data).map((row) => (row.id == null && filterId != null ? { ...row, id: filterId } : row));
       rule.canWrite?.(caller, rows);
 
       const touched: string[] = [];
       for (const row of rows) {
         if (row.id == null) {
           // Without an id this becomes "update every row I can see".
-          throw new ForbiddenError("Each updated row must include its id.");
+          throw new ForbiddenError(
+            'Each updated row must include its id: put it in the data payload, or name the row with .eq("id", rowId).',
+          );
         }
         assertWritableColumns(rule, row);
         const setColumns = Object.keys(row).filter((c) => {
@@ -382,6 +434,17 @@ export function runQuery(caller: Caller, req: QueryRequest): unknown {
       const where = buildWhere(params, rule, req.filters, req.or);
       const scopeSql = applyScope(params, caller, req.table, rule);
       const fullWhere = [where, scopeSql].filter(Boolean).join(" AND ");
+      if (rule.canWrite) {
+        // Deletes used to skip canWrite entirely: anything the scope let you
+        // *see* you could also *remove*, so a basic member could delete a
+        // coworker's availability row that REST would have refused with 403.
+        // Load exactly the rows the DELETE below would touch and run the same
+        // per-row guard insert/update/upsert get. Same WHERE, same bindings.
+        const doomed = db
+          .prepare(`SELECT * FROM ${req.table} WHERE ${fullWhere}`)
+          .all(params.values) as Record<string, unknown>[];
+        rule.canWrite(caller, doomed.map(denormaliseRow));
+      }
       return db.prepare(`DELETE FROM ${req.table} WHERE ${fullWhere}`).run(params.values);
     }
 

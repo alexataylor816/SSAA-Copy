@@ -82,4 +82,11 @@ export function ensureProjectTables() {
       db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
     }
   }
+
+  // The dashboard's team rail (RightPanel -> MatrixEmployeeCard) shows each
+  // employee's trade, and creating an employee there sends job_title.
+  const employeeCols = db.prepare("PRAGMA table_info(employees)").all() as { name: string }[];
+  if (!employeeCols.some((c) => c.name === "job_title")) {
+    db.exec("ALTER TABLE employees ADD COLUMN job_title TEXT");
+  }
 }

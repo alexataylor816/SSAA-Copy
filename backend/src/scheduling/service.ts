@@ -5,7 +5,7 @@ import {
   findUserRole,
   listCompanyEmployees,
 } from "../rbac/models.js";
-import { hasPartialOrHigher } from "../rbac/permissions.js";
+import { hasAtLeast, hasPartialOrHigher } from "../rbac/permissions.js";
 import type { Company, Employee } from "../rbac/types.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../rbac/errors.js";
 import { findUserById, type User } from "../models/users.js";
@@ -16,6 +16,7 @@ import {
   createProjectRow,
   createScheduleRequestRow,
   deleteAvailabilityRow,
+  deleteProjectAndChildren,
   findAvailabilityById,
   findProjectByConnectionCode,
   findProjectConnection,
@@ -48,6 +49,19 @@ function actorHasPartialOrHigher(user: User): boolean {
 }
 
 /**
+ * Project create/delete gate. Mirrors the reference's can_manage_projects():
+ * full or account holder only — the dashboard's "+ New" button already hides
+ * itself under the same rule, but the API never enforced it.
+ */
+function actorHasFullOrHigher(user: User): boolean {
+  if (user.isAdmin) return true;
+  if (!user.companyId) return false;
+  const role = findUserRole(user.id, user.companyId);
+  const level = role?.permissionLevel ?? null;
+  return level !== null && hasAtLeast(level, "full");
+}
+
+/**
  * Every mutation that writes to a dated row goes through here, so the
  * historical lock can't be bypassed by calling the API directly instead of
  * going through the UI. Admins bypass (mirrors the original's MOA bypass).
@@ -65,8 +79,31 @@ export function createProject(userId: string, params: { name: string; address?: 
   if (!params.name?.trim()) {
     throw new BadRequestError("Project name is required.");
   }
+  if (!actorHasFullOrHigher(user)) {
+    throw new ForbiddenError("You need Full-level access or higher to create projects.");
+  }
 
   return createProjectRow({ name: params.name.trim(), address: params.address?.trim() || null, companyId: user.companyId! });
+}
+
+/**
+ * Delete an owned project and everything hanging off it. SQLite foreign keys
+ * are not enforced (no PRAGMA in db.ts), so children are removed explicitly
+ * in one transaction: connections, availability on the project, requests,
+ * tasks, aliases, assignments, and the messaging channel (+ its messages,
+ * reads, and participants).
+ */
+export function deleteProject(userId: string, projectId: string): void {
+  const user = requireUserWithCompany(userId);
+  const project = findProjectById(projectId);
+  if (!project || project.companyId !== user.companyId) {
+    throw new NotFoundError("Project not found.");
+  }
+  if (!actorHasFullOrHigher(user)) {
+    throw new ForbiddenError("You need Full-level access or higher to delete projects.");
+  }
+
+  deleteProjectAndChildren(projectId);
 }
 
 export function listVisibleProjects(userId: string): Project[] {
@@ -137,6 +174,53 @@ export interface SetAvailabilityParams {
   endTime: string;
   projectId?: string;
   allProjects?: boolean;
+  /** Publish hours for this employee instead of the caller themself. */
+  employeeId?: string;
+}
+
+/**
+ * Which employee row a write to `availability` is allowed to land on.
+ *
+ * This used to always resolve the employee linked to the caller, so a GC or an
+ * account holder could never publish a crew's hours for them — which is why
+ * ResourceMatrix had to render every other employee's row read-only.
+ *
+ * The original app allowed it through RLS rather than through the REST layer:
+ * the insert/update/delete policies on `availability` required only that the
+ * target employee belong to the caller's own company
+ * (20251213144102_90db3129, "Manage availability"), and the UI narrowed that
+ * with permission level — ProfilesModal.tsx describes partial/full/account_holder
+ * as able to "manage schedules", while level_1 and basic explicitly "cannot
+ * edit availability".
+ *
+ * So: naming yourself is always allowed, naming somebody else needs
+ * Partial-level or higher, and the employee has to be on your own roster.
+ * Deliberately *not* allowed for a connected sub's employees — a GC booking
+ * another company's crew goes through the schedule-request flow, which is the
+ * entire point of it.
+ */
+function resolveEmployeeToSchedule(user: User, employeeId?: string): Employee {
+  const ownEmployee = findEmployeeByLinkedUser(user.companyId!, user.id);
+  const targetId = employeeId ?? ownEmployee?.id;
+  if (!targetId) {
+    throw new ConflictError("No employee record found for your account in this company.");
+  }
+
+  const target = findEmployeeById(targetId);
+  if (!target) {
+    throw new NotFoundError("Employee not found.");
+  }
+  if (ownEmployee && target.id === ownEmployee.id) return target;
+
+  if (target.companyId !== user.companyId) {
+    throw new ForbiddenError("You can only publish availability for employees of your own company.");
+  }
+  if (!actorHasPartialOrHigher(user)) {
+    throw new ForbiddenError(
+      "You need Partial-level access or higher to publish availability for other people.",
+    );
+  }
+  return target;
 }
 
 export function setAvailability(userId: string, params: SetAvailabilityParams): Availability {
@@ -157,10 +241,7 @@ export function setAvailability(userId: string, params: SetAvailabilityParams): 
   }
   assertDateUnlocked(params.date, user);
 
-  const employee = findEmployeeByLinkedUser(user.companyId!, user.id);
-  if (!employee) {
-    throw new ConflictError("No employee record found for your account in this company.");
-  }
+  const employee = resolveEmployeeToSchedule(user, params.employeeId);
 
   return createAvailabilityRow({
     employeeId: employee.id,
@@ -185,10 +266,15 @@ export function deleteAvailability(userId: string, availabilityId: string) {
   const row = findAvailabilityById(availabilityId);
   if (!row) throw new NotFoundError("Availability entry not found.");
 
-  const employee = findEmployeeByLinkedUser(user.companyId!, user.id);
-  const isOwnEntry = employee && employee.id === row.employeeId;
-  if (!isOwnEntry && !user.isAdmin) {
-    throw new ForbiddenError("You can only remove your own availability.");
+  const ownEmployee = findEmployeeByLinkedUser(user.companyId!, user.id);
+  const isOwnEntry = !!ownEmployee && ownEmployee.id === row.employeeId;
+  if (!isOwnEntry) {
+    // Removing somebody else's hours is the same privilege as publishing them,
+    // so it goes through the same check rather than a blanket admin-only rule.
+    const owner = findEmployeeById(row.employeeId);
+    if (!owner || owner.companyId !== user.companyId || !actorHasPartialOrHigher(user)) {
+      throw new ForbiddenError("You can only remove your own availability.");
+    }
   }
   assertDateUnlocked(row.date, user);
 
@@ -203,6 +289,8 @@ export interface CreateScheduleRequestParams {
   startTime?: string;
   endTime?: string;
   description?: string;
+  /** Photo attachments, as `/uploads/*` URLs previously returned by POST /uploads. */
+  imageUrls?: string[];
 }
 
 export function createScheduleRequest(userId: string, params: CreateScheduleRequestParams): ScheduleRequest {
@@ -238,6 +326,18 @@ export function createScheduleRequest(userId: string, params: CreateScheduleRequ
     }
   }
 
+  // Photos must be files this server actually served: no remote URLs, no
+  // path escapes, and few enough to keep the request readable.
+  const imageUrls = params.imageUrls ?? [];
+  if (!Array.isArray(imageUrls) || imageUrls.length > 6) {
+    throw new BadRequestError("Attach at most 6 photos.");
+  }
+  for (const url of imageUrls) {
+    if (typeof url !== "string" || !/^\/uploads\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\.(png|jpe?g|webp|gif)$/i.test(url)) {
+      throw new BadRequestError("Photo attachments must be images uploaded to this server.");
+    }
+  }
+
   return createScheduleRequestRow({
     projectId: params.projectId,
     requestingCompanyId: user.companyId!,
@@ -247,6 +347,7 @@ export function createScheduleRequest(userId: string, params: CreateScheduleRequ
     startTime: params.startTime ?? null,
     endTime: params.endTime ?? null,
     description: params.description?.trim() || null,
+    imageUrls,
   });
 }
 
@@ -262,6 +363,7 @@ export function updateScheduleRequestStatus(
   userId: string,
   requestId: string,
   status: ScheduleRequestStatus,
+  reason?: string,
 ): ScheduleRequest {
   const user = requireUserWithCompany(userId);
   const req = findScheduleRequestById(requestId);
@@ -290,6 +392,11 @@ export function updateScheduleRequestStatus(
     throw new BadRequestError("status must be confirmed, rejected, or cancelled.");
   }
 
-  updateScheduleRequestStatusRow(requestId, status);
+  const trimmed = typeof reason === "string" ? reason.trim() : "";
+  if (trimmed.length > 500) {
+    throw new BadRequestError("Reason must be 500 characters or fewer.");
+  }
+
+  updateScheduleRequestStatusRow(requestId, status, trimmed || null);
   return findScheduleRequestById(requestId)!;
 }

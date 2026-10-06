@@ -9,13 +9,23 @@ import { ensureUsersTable } from "./users.js";
 import { ensureRbacTables } from "../rbac/models.js";
 import { ensureSchedulingTables } from "../scheduling/models.js";
 import { ensureProjectTables } from "../query/projectTables.js";
+import { ensureMessagingTables } from "../messaging/service.js";
+import { ensureNotificationTables } from "../notifications/service.js";
+import { ensureCompanyDeletionTables } from "../rbac/companyDeletion.js";
+import { ensureContractorTables } from "../contractors/models.js";
+import { ensureTemplateTables } from "../notifications/templates.js";
 
 export function ensureSchema() {
   ensureUsersTable();
   ensurePasswordResetsTable();
   ensureRbacTables();
+  ensureCompanyDeletionTables();
+  ensureContractorTables();
+  ensureTemplateTables();
   ensureSchedulingTables();
   ensureProjectTables();
+  ensureMessagingTables();
+  ensureNotificationTables();
 }
 
 export * from "./users.js";

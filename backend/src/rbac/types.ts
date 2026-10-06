@@ -26,6 +26,7 @@ export interface Company {
   name: string;
   companyType: CompanyType;
   address: string | null;
+  trade: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -57,6 +58,7 @@ export interface Employee {
   name: string;
   email: string | null;
   phone: string | null;
+  jobTitle: string | null;
   linkedUserId: string | null;
   createdAt: string;
 }
