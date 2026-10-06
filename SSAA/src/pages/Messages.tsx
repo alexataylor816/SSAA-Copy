@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useImpersonation } from '@/contexts/ImpersonationContext';
-import MessagesView from '@/components/messages/MessagesView';
+import MessagesView from '@/features/messaging/MessagesView';
 
 export default function Messages() {
   const navigate = useNavigate();
