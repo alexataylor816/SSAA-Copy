@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "dev:sqlite": "cross-env DB_CLIENT=sqlite tsx watch src/server.ts",
+    "dev:mysql": "cross-env DB_CLIENT=mysql tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "test": "vitest run"
   },
@@ -15,6 +17,7 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.24.5",
     "resend": "^6.31.0",
     "socket.io": "^4.8.1"
   },
@@ -26,6 +29,7 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.10.5",
     "@types/supertest": "^6.0.2",
+    "cross-env": "^10.1.0",
     "supertest": "^7.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
