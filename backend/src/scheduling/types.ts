@@ -47,6 +47,7 @@ export interface ScheduleRequest {
   requestingCompanyId: string;
   subCompanyId: string;
   employeeIds: string[];
+  employeeNames: string[];
   date: string; // YYYY-MM-DD
   startTime: string | null; // HH:MM
   endTime: string | null; // HH:MM

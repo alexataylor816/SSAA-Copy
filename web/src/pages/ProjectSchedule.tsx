@@ -352,7 +352,9 @@ export default function ProjectSchedule() {
                         {String(request.date)} {String(request.startTime ?? "")} - {String(request.endTime ?? "")}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        {(request.employeeIds as string[] | undefined)?.length ?? 0} employee(s)
+                        {((request.employeeNames as string[] | undefined)?.length
+                          ? (request.employeeNames as string[]).join(", ")
+                          : `${(request.employeeIds as string[] | undefined)?.length ?? 0} employee(s)`) }
                         {request.description ? ` · ${String(request.description)}` : ""}
                       </p>
                       {request.requestingCompanyName || request.subCompanyName ? (

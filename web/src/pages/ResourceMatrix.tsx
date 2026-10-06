@@ -136,19 +136,27 @@ function ConnectedDayCell({ entries, bookings }: { entries: Availability[]; book
   return (
     <div className="min-h-24 space-y-1 rounded-md border bg-muted/30 p-1.5">
       {entries.map((entry) => (
-        <div key={entry.id} className="rounded bg-secondary px-2 py-1 text-xs">
-          <span className="truncate">
-            {entry.startTime}&#8202;-&#8202;{entry.endTime}
+        <div
+          key={entry.id}
+          className="rounded-md border border-yellow-400 bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-900"
+          title="Available"
+        >
+          <span className="flex min-w-0 items-start gap-1.5">
+            <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-500" />
+            <span className="leading-tight">
+              {fmtTime(entry.startTime)} – <span className="whitespace-nowrap">{fmtTime(entry.endTime)}</span>
+            </span>
           </span>
         </div>
       ))}
       {bookings.map((booking, index) => (
         <div
           key={`${booking.projectName}-${index}`}
-          className="truncate rounded border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium"
+          className="flex items-center gap-1.5 truncate rounded-md border border-green-500 bg-green-50 px-2 py-1 text-xs font-medium text-green-900"
           title={`Booked: ${booking.projectName}`}
         >
-          ✓ {booking.projectName}
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
+          <span className="truncate">{booking.projectName}</span>
         </div>
       ))}
     </div>
@@ -163,6 +171,7 @@ function DayCell({
   canDelete,
   onAdd,
   canAdd,
+  isToday,
 }: {
   date: string;
   entries: Availability[];
@@ -171,6 +180,7 @@ function DayCell({
   canDelete: boolean;
   onAdd: () => void;
   canAdd: boolean;
+  isToday: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day:${date}` });
 
@@ -178,7 +188,7 @@ function DayCell({
     <div
       ref={setNodeRef}
       className={`group/cell min-h-24 space-y-1 rounded-md border p-1.5 transition-colors ${
-        isOver ? "border-primary bg-primary/5" : "bg-card"
+        isOver ? "border-primary bg-primary/5" : isToday ? "border-primary/50 bg-primary/[0.03]" : "bg-card"
       }`}
     >
       {entries.map((entry) => (
@@ -267,6 +277,8 @@ export default function ResourceMatrix() {
       return { date, iso: iso(date) };
     });
   }, [weekStart]);
+
+  const todayIso = useMemo(() => iso(new Date()), []);
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -588,6 +600,16 @@ export default function ResourceMatrix() {
               ? "drag your own name onto a day to add availability."
               : "you have no employee record in this company yet, so this view is read-only."}
         </p>
+        <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm border border-yellow-400 bg-yellow-50" />
+            Available
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm border border-green-500 bg-green-50" />
+            Booked on a project
+          </span>
+        </div>
 
         {canEditOthers && (
           <form onSubmit={handleQuickAdd} className="mb-3 flex max-w-md items-end gap-2">
@@ -620,9 +642,16 @@ export default function ResourceMatrix() {
             <table className="w-full min-w-[48rem] table-fixed border-separate border-spacing-1">
               <thead>
                 <tr>
-                  <th className="w-44 text-left text-xs font-medium text-muted-foreground">Employee</th>
+                  <th className="sticky left-0 z-10 w-44 bg-background pr-2 text-left text-xs font-medium text-muted-foreground">
+                    Employee
+                  </th>
                   {days.map((day) => (
-                    <th key={day.iso} className="pb-1 text-left text-xs font-medium text-muted-foreground">
+                    <th
+                      key={day.iso}
+                      className={`pb-1 text-left text-xs font-medium ${
+                        day.iso === todayIso ? "text-primary" : "text-muted-foreground"
+                      }`}
+                    >
                       {day.date.toLocaleDateString(undefined, { weekday: "short", month: "numeric", day: "numeric" })}
                     </th>
                   ))}
@@ -631,7 +660,7 @@ export default function ResourceMatrix() {
               <tbody>
                 {employees.map((employee) => (
                   <tr key={employee.id}>
-                    <td className="align-top">
+                    <td className="sticky left-0 z-10 bg-background pr-2 align-top">
                       <DraggableChip employee={employee} disabled={!canEdit(employee.id)} />
                     </td>
                     {days.map((day) => (
@@ -643,6 +672,7 @@ export default function ResourceMatrix() {
                           canDelete={canEdit(employee.id)}
                           onDelete={deleteEntry}
                           canAdd={canEdit(employee.id)}
+                          isToday={day.iso === todayIso}
                           onAdd={() => {
                             setAddStart("08:00");
                             setAddEnd("16:00");
@@ -655,8 +685,11 @@ export default function ResourceMatrix() {
                 ))}
                 {employees.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="p-6 text-sm text-muted-foreground">
-                      No employees yet. Add them in company settings first.
+                    <td colSpan={8} className="p-6 text-center">
+                      <p className="text-sm text-muted-foreground">No employees yet.</p>
+                      <Button variant="outline" size="sm" className="mt-3" asChild>
+                        <Link to="/settings/company">Add your crew in company settings</Link>
+                      </Button>
                     </td>
                   </tr>
                 )}
@@ -691,7 +724,7 @@ export default function ResourceMatrix() {
                       <tbody>
                         {crew.employees.map((employee) => (
                           <tr key={employee.id}>
-                            <td className="w-44 align-top">
+                            <td className="sticky left-0 z-10 w-44 bg-background pr-2 align-top">
                               <div className="rounded-md border bg-card px-3 py-2">
                                 <EmployeeLabel employee={employee} />
                               </div>

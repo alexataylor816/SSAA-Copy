@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { db } from "../db.js";
-import { findCompanyById } from "../rbac/models.js";
+import { findCompanyById, findEmployeeById } from "../rbac/models.js";
 import type { Availability, Project, ProjectConnection, ScheduleRequest, ScheduleRequestStatus } from "./types.js";
 
 interface ProjectRow {
@@ -369,12 +369,14 @@ export function updateScheduleRequestStatusRow(id: string, status: ScheduleReque
 }
 
 function mapScheduleRequestRow(row: ScheduleRequestRow): ScheduleRequest {
+  const employeeIds = JSON.parse(row.employee_ids) as string[];
   return {
     id: row.id,
     projectId: row.project_id,
     requestingCompanyId: row.requesting_company_id,
     subCompanyId: row.sub_company_id,
-    employeeIds: JSON.parse(row.employee_ids),
+    employeeIds,
+    employeeNames: employeeIds.map((id) => findEmployeeById(id)?.name ?? "Unknown"),
     date: row.date,
     startTime: row.start_time,
     endTime: row.end_time,

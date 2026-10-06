@@ -455,6 +455,7 @@ const handleReorderTasks = useCallback(
         endTime: (entry.endTime ?? entry.end_time ?? null) as string | null,
         status: String(entry.status ?? ""),
         projectName: projects.find((p) => p.id === (entry.projectId ?? entry.project_id))?.name ?? null,
+        employeeNames: Array.isArray(entry.employeeNames) ? (entry.employeeNames as string[]) : [],
       }))
       .filter((entry) => entry.date >= today)
       .sort((a, b) => a.date.localeCompare(b.date) || (a.startTime ?? "").localeCompare(b.startTime ?? ""));
@@ -801,6 +802,11 @@ const handleReorderTasks = useCallback(
                               {formatTime(entry.startTime)} – {formatTime(entry.endTime)}
                               {entry.projectName && ` · ${entry.projectName}`}
                             </p>
+                            {entry.employeeNames.length > 0 && (
+                              <p className="truncate text-xs text-muted-foreground">
+                                {entry.employeeNames.join(", ")}
+                              </p>
+                            )}
                           </div>
                           <Badge variant="outline" className={`shrink-0 ${STATUS_STYLE[entry.status] ?? ""}`}>
                             {STATUS_LABELS[entry.status] ?? entry.status}

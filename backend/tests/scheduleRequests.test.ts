@@ -56,6 +56,9 @@ describe("schedule requests", () => {
       });
     expect(created.status).toBe(201);
     expect(created.body.status).toBe("pending");
+    const subEmployees = await request(app).get(`/companies/${subCompany.company.id}/employees`).set(authed(sub.token));
+    const expectedName = subEmployees.body.employees.find((e: { id: string }) => e.id === subEmployeeId)?.name;
+    expect(created.body.employeeNames).toEqual([expectedName]);
 
     const confirm = await request(app)
       .patch(`/schedule-requests/${created.body.id}`)
