@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts run on Linux (Codespaces); Windows line endings break them.
+*.sh text eol=lf

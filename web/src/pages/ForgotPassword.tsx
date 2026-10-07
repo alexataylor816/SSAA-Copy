@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import AuthLayout from "@/components/AuthLayout";
 import { Loader2 } from "lucide-react";
 
 export default function ForgotPassword() {
@@ -27,7 +28,7 @@ export default function ForgotPassword() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-8 bg-background">
+    <AuthLayout>
       <Card className="w-full max-w-md border-primary/20 shadow-lg">
         <CardHeader className="text-center pb-2">
           <CardTitle className="text-2xl font-bold">Reset your password</CardTitle>
@@ -74,6 +75,6 @@ export default function ForgotPassword() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </AuthLayout>
   );
 }

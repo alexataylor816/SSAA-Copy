@@ -7,6 +7,7 @@ interface CompanyRow {
   name: string;
   company_type: CompanyType;
   address: string | null;
+  trade: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +37,8 @@ interface EmployeeRow {
   name: string;
   email: string | null;
   phone: string | null;
+  job_title: string | null;
+  employee_number: string | null;
   linked_user_id: string | null;
   created_at: string;
 }
@@ -47,6 +50,7 @@ export function ensureRbacTables() {
       name TEXT NOT NULL,
       company_type TEXT NOT NULL CHECK (company_type IN ('gc', 'sub')),
       address TEXT,
+      trade TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -87,17 +91,39 @@ export function ensureRbacTables() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+
+  // Additive column for databases created before trade tracking existed.
+  const companyCols = new Set(
+    (db.prepare("PRAGMA table_info(companies)").all() as { name: string }[]).map((c) => c.name),
+  );
+  if (!companyCols.has("trade")) {
+    db.exec("ALTER TABLE companies ADD COLUMN trade TEXT");
+  }
+
+  const employeeColumns = db.prepare("PRAGMA table_info(employees)").all() as { name: string }[];
+  if (!employeeColumns.some((c) => c.name === "employee_number")) {
+    db.exec("ALTER TABLE employees ADD COLUMN employee_number TEXT");
+  }
+}
+
+/** Sets the HR/payroll ID on the employee record linked to this user; false when they have none. */
+export function setEmployeeNumberForUser(companyId: string, userId: string, value: string | null): boolean {
+  const result = db
+    .prepare("UPDATE employees SET employee_number = ? WHERE company_id = ? AND linked_user_id = ?")
+    .run(value, companyId, userId);
+  return result.changes > 0;
 }
 
 // --- companies ---
 
-export function createCompanyRow(params: { name: string; companyType: CompanyType; address?: string | null }): Company {
+export function createCompanyRow(params: { name: string; companyType: CompanyType; address?: string | null; trade?: string | null }): Company {
   const id = crypto.randomUUID();
-  db.prepare("INSERT INTO companies (id, name, company_type, address) VALUES (?, ?, ?, ?)").run(
+  db.prepare("INSERT INTO companies (id, name, company_type, address, trade) VALUES (?, ?, ?, ?, ?)").run(
     id,
     params.name,
     params.companyType,
     params.address ?? null,
+    params.trade ?? null,
   );
   return findCompanyById(id)!;
 }
@@ -122,6 +148,7 @@ function mapCompanyRow(row: CompanyRow): Company {
     name: row.name,
     companyType: row.company_type,
     address: row.address,
+    trade: row.trade,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -162,6 +189,20 @@ export function updateUserRolePermission(userId: string, companyId: string, perm
 
 export function deleteUserRole(userId: string, companyId: string) {
   db.prepare("DELETE FROM user_roles WHERE user_id = ? AND company_id = ?").run(userId, companyId);
+}
+
+export function setRoleCompanyCreator(userId: string, companyId: string, isCreator: boolean) {
+  db.prepare(
+    "UPDATE user_roles SET is_company_creator = ?, updated_at = datetime('now') WHERE user_id = ? AND company_id = ?",
+  ).run(isCreator ? 1 : 0, userId, companyId);
+}
+
+/** Detach a user's login from their roster rows without deleting the rows themselves. */
+export function unlinkUserEmployees(userId: string, companyId: string) {
+  db.prepare("UPDATE employees SET linked_user_id = NULL WHERE linked_user_id = ? AND company_id = ?").run(
+    userId,
+    companyId,
+  );
 }
 
 function mapUserRoleRow(row: UserRoleRow): UserRole {
@@ -266,6 +307,8 @@ function mapEmployeeRow(row: EmployeeRow): Employee {
     name: row.name,
     email: row.email,
     phone: row.phone,
+    jobTitle: row.job_title,
+    employeeNumber: row.employee_number ?? null,
     linkedUserId: row.linked_user_id,
     createdAt: row.created_at,
   };

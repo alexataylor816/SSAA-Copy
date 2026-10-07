@@ -1,0 +1,14 @@
+{
+  "name": "SSAA",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "postCreateCommand": "bash scripts/codespace-setup.sh",
+  "postAttachCommand": "bash scripts/start-dev.sh",
+  "forwardPorts": [8082],
+  "portsAttributes": {
+    "8082": { "label": "SSAA website", "onAutoForward": "openBrowser" },
+    "8000": { "label": "SSAA API (reached through the website)", "onAutoForward": "ignore" }
+  },
+  "customizations": {
+    "codespaces": { "openFiles": ["README.md"] }
+  }
+}

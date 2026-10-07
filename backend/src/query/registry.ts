@@ -12,7 +12,7 @@
  * entry here with real authorization.
  */
 import { db } from "../db.js";
-import { findUserRole } from "../rbac/models.js";
+import { findEmployeeById, findEmployeeByLinkedUser, findUserRole } from "../rbac/models.js";
 import { findUserById } from "../models/users.js";
 import { canManagePermissions, hasLevel1OrHigher, hasPartialOrHigher, isAccountHolder } from "../rbac/permissions.js";
 import type { CompanyType, PermissionLevel } from "../rbac/types.js";
@@ -135,7 +135,7 @@ const TASKS: TableRule = {
 
 export const TABLE_RULES: Record<string, TableRule> = {
   users: {
-    columns: ["id", "email", "full_name", "company_id", "is_admin", "created_at"],
+    columns: ["id", "email", "full_name", "phone", "language", "profile_picture_url", "company_id", "is_admin", "created_at"],
     // Never expose password_hash.
     scope: (caller) =>
       caller.isAdmin ? null : { sql: "(id = @__self OR company_id = @__own)", params: { __self: caller.userId, __own: caller.companyId } },
@@ -146,7 +146,7 @@ export const TABLE_RULES: Record<string, TableRule> = {
   },
 
   companies: {
-    columns: ["id", "name", "company_type", "address", "created_at", "updated_at"],
+    columns: ["id", "name", "company_type", "address", "trade", "created_at", "updated_at"],
     scope: (caller) => {
       if (caller.isAdmin) return null;
       // A company is visible if you belong to it, own one of its projects,
@@ -209,7 +209,7 @@ export const TABLE_RULES: Record<string, TableRule> = {
   },
 
   employees: {
-    columns: ["id", "company_id", "name", "email", "phone", "linked_user_id", "created_at"],
+    columns: ["id", "company_id", "name", "email", "phone", "job_title", "employee_number", "linked_user_id", "created_at"],
     scope: (caller) => {
       if (caller.isAdmin) return null;
       // Own company, or a company you share a project with.
@@ -339,22 +339,54 @@ export const TABLE_RULES: Record<string, TableRule> = {
     ],
     scope: (caller) => {
       if (caller.isAdmin) return null;
-      // Availability of your own company, plus availability on projects you can see.
+      // The original's "View availability" policy: your own crew, plus the crew
+      // of any sub connected to one of your projects. Keyed by employee, so a
+      // sub's "all projects" hours (project_id NULL) reach the GC, and a sub
+      // never sees a rival sub's hours on a shared project.
       const rows = db
         .prepare(
           `SELECT a.id FROM availability a JOIN employees e ON e.id = a.employee_id
              WHERE e.company_id = @__own
            UNION SELECT a.id FROM availability a
-             WHERE a.project_id IN (SELECT id FROM projects WHERE company_id = @__own)
-           UNION SELECT a.id FROM availability a
-             WHERE a.project_id IN (SELECT project_id FROM project_connections WHERE sub_company_id = @__own)`,
+             JOIN employees e ON e.id = a.employee_id
+             JOIN project_connections pc ON pc.sub_company_id = e.company_id
+             JOIN projects p ON p.id = pc.project_id
+            WHERE p.company_id = @__own`,
         )
         .all({ __own: caller.companyId }) as { id: string }[];
       return inList("id", rows.map((r) => r.id), "av");
     },
     canWrite: (caller, rows) => {
-      if (!hasLevel1OrHigher(caller)) {
-        throw new ForbiddenError("You need Foreman-level access or higher to manage availability.");
+      // Same rule as the REST path (`resolveEmployeeToSchedule` in
+      // scheduling/service.ts): yourself always, someone else on your own
+      // roster at partial+, never a connected company's crew. `employee_id`
+      // is NOT NULL on this table, so a row whose target can't be resolved
+      // is refused rather than guessed at. One deliberate difference from
+      // REST: the facade has no "omit the target, mean yourself" default —
+      // callers must name employee_id explicitly.
+      const ownEmployee = caller.companyId
+        ? findEmployeeByLinkedUser(caller.companyId, caller.userId)
+        : undefined;
+      for (const row of rows) {
+        const namedId =
+          typeof row.employee_id === "string" && row.employee_id ? row.employee_id : null;
+        let target = namedId ? findEmployeeById(namedId) : undefined;
+        if (!target && typeof row.id === "string" && row.id) {
+          // Updates name the row by id without repeating employee_id.
+          const existing = db
+            .prepare("SELECT employee_id FROM availability WHERE id = ?")
+            .get(row.id) as { employee_id: string } | undefined;
+          target = existing ? findEmployeeById(existing.employee_id) : undefined;
+        }
+        if (ownEmployee && target && target.id === ownEmployee.id) continue;
+        if (!target || target.companyId !== caller.companyId) {
+          throw new ForbiddenError("You can only change availability for employees of your own company.");
+        }
+        if (!hasPartialOrHigher(caller)) {
+          throw new ForbiddenError(
+            "You need Partial-level access or higher to change someone else's availability.",
+          );
+        }
       }
     },
     readonlyColumns: ["created_at"],

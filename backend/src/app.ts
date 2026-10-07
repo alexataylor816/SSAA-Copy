@@ -10,6 +10,11 @@ import { healthRouter } from "./routes/health.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { queryRouter } from "./query/routes.js";
 import { schedulingRouter } from "./scheduling/routes.js";
+import { messagingRouter } from "./messaging/routes.js";
+import { contractorsRouter } from "./contractors/routes.js";
+import { adminRouter } from "./admin/routes.js";
+import { notificationsRouter } from "./notifications/routes.js";
+import { profileRouter } from "./routes/profile.js";
 import { attachRealtime } from "./realtime/index.js";
 
 export function createApp() {
@@ -32,8 +37,13 @@ export function createApp() {
   app.use(uploadsRouter);
   app.use(authRouter);
   app.use(rbacRouter);
+  app.use(messagingRouter);
+  app.use(notificationsRouter);
+  app.use(profileRouter);
   app.use(schedulingRouter);
   app.use(queryRouter);
+  app.use(contractorsRouter);
+  app.use(adminRouter);
 
   // Anything thrown that isn't an HttpError used to reach Express's default
   // HTML error page; the SPA can't read that, so always answer with JSON.

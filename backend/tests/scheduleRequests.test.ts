@@ -56,6 +56,9 @@ describe("schedule requests", () => {
       });
     expect(created.status).toBe(201);
     expect(created.body.status).toBe("pending");
+    const subEmployees = await request(app).get(`/companies/${subCompany.company.id}/employees`).set(authed(sub.token));
+    const expectedName = subEmployees.body.employees.find((e: { id: string }) => e.id === subEmployeeId)?.name;
+    expect(created.body.employeeNames).toEqual([expectedName]);
 
     const confirm = await request(app)
       .patch(`/schedule-requests/${created.body.id}`)
@@ -200,5 +203,131 @@ describe("schedule requests", () => {
     const fromSub = await request(app).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(sub.token));
     expect(fromGc.body.requests).toHaveLength(1);
     expect(fromSub.body.requests).toHaveLength(1);
+  });
+});
+
+describe("schedule request photos", () => {
+  // A 1x1 transparent PNG; big enough for multer's sniffing, small enough
+  // to never trip the size limit.
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  async function uploadPhoto(token: string, filename = "site.png", contentType = "image/png", body: Buffer = png) {
+    return request(app).post("/uploads").set(authed(token)).attach("photo", body, { filename, contentType });
+  }
+
+  it("refuses anonymous uploads", async () => {
+    const res = await request(app).post("/uploads").attach("photo", png, {
+      filename: "site.png",
+      contentType: "image/png",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses non-images with a 400, not a 500", async () => {
+    const { gc } = await connectedGcAndSub();
+    const res = await request(app)
+      .post("/uploads")
+      .set(authed(gc.token))
+      .attach("photo", Buffer.from("definitely not an image"), {
+        filename: "notes.txt",
+        contentType: "text/plain",
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/only jpeg, png, webp, or gif/i);
+  });
+
+  it("stores a photo and serves it back at the returned URL", async () => {
+    const { gc } = await connectedGcAndSub();
+    const uploaded = await uploadPhoto(gc.token);
+    expect(uploaded.status).toBe(201);
+    expect(uploaded.body.url).toMatch(/^\/uploads\/schedule-requests\/[A-Za-z0-9._-]+\.png$/);
+
+    const served = await request(app).get(uploaded.body.url);
+    expect(served.status).toBe(200);
+    expect(served.headers["content-type"]).toMatch(/image\/png/);
+  });
+
+  it("round-trips photo URLs on a schedule request and rejects remote URLs", async () => {
+    const { gc, sub, project, subCompany, subEmployeeId } = await connectedGcAndSub();
+    const uploaded = await uploadPhoto(gc.token);
+    const url = uploaded.body.url as string;
+    const date = farFutureDate(13);
+
+    const created = await request(app)
+      .post("/schedule-requests")
+      .set(authed(gc.token))
+      .send({
+        projectId: project.id,
+        subCompanyId: subCompany.company.id,
+        employeeIds: [subEmployeeId],
+        date,
+        imageUrls: [url],
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.imageUrls).toEqual([url]);
+
+    const listed = await request(app).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(sub.token));
+    expect(listed.body.requests[0].imageUrls).toEqual([url]);
+
+    const remote = await request(app)
+      .post("/schedule-requests")
+      .set(authed(gc.token))
+      .send({
+        projectId: project.id,
+        subCompanyId: subCompany.company.id,
+        employeeIds: [subEmployeeId],
+        date,
+        imageUrls: ["https://evil.example/photo.png"],
+      });
+    expect(remote.status).toBe(400);
+
+    const tooMany = await request(app)
+      .post("/schedule-requests")
+      .set(authed(gc.token))
+      .send({
+        projectId: project.id,
+        subCompanyId: subCompany.company.id,
+        employeeIds: [subEmployeeId],
+        date,
+        imageUrls: Array(7).fill(url),
+      });
+    expect(tooMany.status).toBe(400);
+  });
+
+  it("records an optional reason on reject/cancel and rejects overlong ones", async () => {
+    const { gc, sub, project, subCompany, subEmployeeId } = await connectedGcAndSub();
+    const date = farFutureDate(14);
+
+    const created = await request(app)
+      .post("/schedule-requests")
+      .set(authed(gc.token))
+      .send({ projectId: project.id, subCompanyId: subCompany.company.id, employeeIds: [subEmployeeId], date });
+    expect(created.status).toBe(201);
+    expect(created.body.statusReason).toBeNull();
+    expect(created.body.requestingCompanyName).toBeTruthy();
+    expect(created.body.subCompanyName).toBeTruthy();
+
+    const rejected = await request(app)
+      .patch(`/schedule-requests/${created.body.id}`)
+      .set(authed(sub.token))
+      .send({ status: "rejected", statusReason: "Crew is on another job that day." });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.statusReason).toBe("Crew is on another job that day.");
+
+    const listed = await request(app).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(gc.token));
+    expect(listed.body.requests[0].statusReason).toBe("Crew is on another job that day.");
+
+    const created2 = await request(app)
+      .post("/schedule-requests")
+      .set(authed(gc.token))
+      .send({ projectId: project.id, subCompanyId: subCompany.company.id, employeeIds: [subEmployeeId], date });
+    const tooLong = await request(app)
+      .patch(`/schedule-requests/${created2.body.id}`)
+      .set(authed(sub.token))
+      .send({ status: "rejected", statusReason: "x".repeat(501) });
+    expect(tooLong.status).toBe(400);
   });
 });

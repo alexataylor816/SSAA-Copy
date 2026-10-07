@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "@/lib/api";
+import { EVENT } from "@/lib/realtime";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +20,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, CalendarDays, Plus } from "lucide-react";
+import RejectRequestDialog from "@/components/RejectRequestDialog";
+import ScheduleRequestPhotos from "@/components/ScheduleRequestPhotos";
+import { getToken } from "@/lib/supabase";
 
 interface ConnectedCompany {
   id: string;
@@ -38,7 +43,9 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+/** Local calendar date; toISOString() would roll over to tomorrow in US evenings. */
+const iso = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export default function ProjectSchedule() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -56,10 +63,15 @@ export default function ProjectSchedule() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const loadRequests = useCallback(async () => {
     if (!projectId) return;
-    const start = iso(new Date(Date.now() - 7 * 86_400_000));
+    // History mode looks a year back; the default window covers the
+    // upcoming work only.
+    const start = iso(new Date(Date.now() - (showHistory ? 365 : 7) * 86_400_000));
     const end = iso(new Date(Date.now() + 30 * 86_400_000));
     try {
       const res = await api.get<{ requests: Record<string, unknown>[] }>(
@@ -70,7 +82,7 @@ export default function ProjectSchedule() {
     } catch {
       setRequests([]);
     }
-  }, [projectId]);
+  }, [projectId, showHistory]);
 
   const loadCompanies = useCallback(async () => {
     if (!projectId) return;
@@ -102,6 +114,18 @@ export default function ProjectSchedule() {
     void loadCompanies();
   }, [loadRequests, loadCompanies]);
 
+  // The other company confirming/declining/cancelling should show up here live.
+  const companyId = user?.companyId;
+  useEffect(() => {
+    if (!companyId || !projectId) return;
+    const channel = supabase
+      .channel(`company:${companyId}:project:${projectId}`)
+      .on(EVENT.scheduleRequestCreated, () => void loadRequests())
+      .on(EVENT.scheduleRequestUpdated, () => void loadRequests())
+      .subscribe();
+    return () => channel.unsubscribe();
+  }, [companyId, projectId, loadRequests]);
+
   useEffect(() => {
     void loadEmployees();
     setSelectedEmployees([]);
@@ -130,10 +154,12 @@ export default function ProjectSchedule() {
         startTime,
         endTime,
         description: description.trim() || undefined,
+        imageUrls: photoUrls.length > 0 ? photoUrls : undefined,
       });
       setOpen(false);
       setSelectedEmployees([]);
       setDescription("");
+      setPhotoUrls([]);
       await loadRequests();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send that request.");
@@ -142,10 +168,36 @@ export default function ProjectSchedule() {
     }
   }
 
-  async function setStatus(id: string, status: "confirmed" | "rejected" | "cancelled") {
+  async function handlePhotoPicked(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("photo", file);
+      const token = getToken();
+      const res = await fetch("/api/uploads", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+      const payload = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok) throw new Error(payload.error ?? `Upload failed with ${res.status}.`);
+      if (!payload.url) throw new Error("Upload did not return a URL.");
+      setPhotoUrls((current) => (current.length >= 6 ? current : [...current, payload.url as string]));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not upload that photo.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function setStatus(id: string, status: "confirmed" | "rejected" | "cancelled", statusReason?: string) {
     setBusy(true);
     try {
-      await api.patch(`/schedule-requests/${id}`, { status });
+      await api.patch(`/schedule-requests/${id}`, { status, statusReason });
       await loadRequests();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update that request.");
@@ -154,10 +206,8 @@ export default function ProjectSchedule() {
     }
   }
 
-  const canRespond = useMemo(
-    () => requests.some((r) => r.subCompanyId === user?.companyId && r.status === "pending"),
-    [requests, user],
-  );
+  const [reasonDialog, setReasonDialog] = useState<{ id: string; mode: "reject" | "remove-cancel" } | null>(null);
+
 
   return (
     <div className="min-h-screen bg-background">
@@ -256,6 +306,13 @@ export default function ProjectSchedule() {
                     />
                   </div>
 
+                  <div className="space-y-2">
+                    <Label htmlFor="photos">Photos (optional, up to 6)</Label>
+                    <Input id="photos" type="file" accept="image/*" onChange={handlePhotoPicked} disabled={uploading} />
+                    {uploading && <p className="text-xs text-muted-foreground">Uploading...</p>}
+                    <ScheduleRequestPhotos imageUrls={photoUrls} />
+                  </div>
+
                   <DialogFooter>
                     <Button type="submit" disabled={busy}>
                       Send request
@@ -276,8 +333,11 @@ export default function ProjectSchedule() {
         )}
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Upcoming requests</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-lg">{showHistory ? "Request history" : "Upcoming requests"}</CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => setShowHistory((v) => !v)}>
+              {showHistory ? "Show upcoming" : "Show history"}
+            </Button>
           </CardHeader>
           <CardContent>
             {requests.length === 0 ? (
@@ -292,13 +352,26 @@ export default function ProjectSchedule() {
                         {String(request.date)} {String(request.startTime ?? "")} - {String(request.endTime ?? "")}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        {(request.employeeIds as string[] | undefined)?.length ?? 0} employee(s)
+                        {((request.employeeNames as string[] | undefined)?.length
+                          ? (request.employeeNames as string[]).join(", ")
+                          : `${(request.employeeIds as string[] | undefined)?.length ?? 0} employee(s)`) }
                         {request.description ? ` · ${String(request.description)}` : ""}
                       </p>
+                      {request.requestingCompanyName || request.subCompanyName ? (
+                        <p className="text-xs text-muted-foreground">
+                          {String(request.requestingCompanyName ?? "")} → {String(request.subCompanyName ?? "")}
+                        </p>
+                      ) : null}
+                      {request.statusReason ? (
+                        <p className="text-xs text-muted-foreground italic">
+                          {String(request.status)}: {String(request.statusReason)}
+                        </p>
+                      ) : null}
+                      <ScheduleRequestPhotos imageUrls={(request.imageUrls as string[] | undefined) ?? []} />
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary">{STATUS_LABELS[String(request.status)] ?? String(request.status)}</Badge>
-                      {canRespond && request.status === "pending" && (
+                      {hasPartialOrHigher && request.subCompanyId === companyId && request.status === "pending" && (
                         <>
                           <Button size="sm" disabled={busy} onClick={() => void setStatus(String(request.id), "confirmed")}>
                             Confirm
@@ -307,12 +380,24 @@ export default function ProjectSchedule() {
                             size="sm"
                             variant="outline"
                             disabled={busy}
-                            onClick={() => void setStatus(String(request.id), "rejected")}
+                            onClick={() => setReasonDialog({ id: String(request.id), mode: "reject" })}
                           >
                             Decline
                           </Button>
                         </>
                       )}
+                      {hasPartialOrHigher &&
+                        request.requestingCompanyId === companyId &&
+                        (request.status === "pending" || request.status === "confirmed") && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => setReasonDialog({ id: String(request.id), mode: "remove-cancel" })}
+                          >
+                            Cancel
+                          </Button>
+                        )}
                     </div>
                   </li>
                 ))}
@@ -321,6 +406,17 @@ export default function ProjectSchedule() {
           </CardContent>
         </Card>
       </main>
+      <RejectRequestDialog
+        open={reasonDialog !== null}
+        onOpenChange={(isOpen) => !isOpen && setReasonDialog(null)}
+        mode={reasonDialog?.mode ?? "reject"}
+        onConfirm={(reason) => {
+          if (!reasonDialog) return;
+          const status = reasonDialog.mode === "remove-cancel" ? "cancelled" : "rejected";
+          setReasonDialog(null);
+          void setStatus(reasonDialog.id, status, reason);
+        }}
+      />
     </div>
   );
 }

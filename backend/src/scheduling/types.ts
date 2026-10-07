@@ -3,12 +3,10 @@
  * `projects`, `project_connections`, `availability`, and `schedule_requests`
  * tables.
  *
- * Deliberately deferred still: multi-stop scheduling
- * (availability.stop_number/stop_label, schedule_requests.employee_stops),
- * guest-GC companies + project_aliases, contractor_connections (sub-of-sub /
- * intermediary routing), and the drag-and-drop weekly resource matrix.
- * Those are separate, larger efforts — see SSAA/.lovable/plan/ for the
- * originals.
+ * Availability supports multiple stops per day (stop_number/stop_label).
+ * Deliberately deferred still: per-stop booking on schedule requests
+ * (schedule_requests.employee_stops) and guest-GC companies + project_aliases.
+ * See SSAA/.lovable/plan/ for the originals.
  */
 
 export interface Project {
@@ -36,6 +34,9 @@ export interface Availability {
   startTime: string; // HH:MM
   endTime: string; // HH:MM
   allProjects: boolean;
+  /** Multiple stops in one day (the original's stop_number/stop_label); null for a single block. */
+  stopNumber: number | null;
+  stopLabel: string | null;
   createdAt: string;
 }
 
@@ -47,11 +48,16 @@ export interface ScheduleRequest {
   requestingCompanyId: string;
   subCompanyId: string;
   employeeIds: string[];
+  employeeNames: string[];
   date: string; // YYYY-MM-DD
   startTime: string | null; // HH:MM
   endTime: string | null; // HH:MM
   description: string | null;
+  imageUrls: string[];
   status: ScheduleRequestStatus;
+  statusReason: string | null;
+  requestingCompanyName: string | null;
+  subCompanyName: string | null;
   createdAt: string;
   updatedAt: string;
 }

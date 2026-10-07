@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 import { Provider, useDispatch, useSelector } from 'react-redux';
 
+import { ToastProvider } from '@/components/ui/toast';
 import { loadPersistedAuth } from '@/store/authStorage';
 import { store, type RootState } from '@/store/store';
 
@@ -30,7 +31,9 @@ export default function RootLayout() {
     <Provider store={store}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AuthHydrator />
-        <Stack screenOptions={{ headerShown: false }} />
+        <ToastProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </ToastProvider>
         <StatusBar style="auto" />
       </ThemeProvider>
     </Provider>
