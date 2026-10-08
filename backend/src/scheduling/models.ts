@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { database, db } from "../db.js";
+import { database } from "../db.js";
 import { findCompanyById, findEmployeeById } from "../rbac/models.js";
 import type { Availability, Project, ProjectConnection, ScheduleRequest, ScheduleRequestStatus } from "./types.js";
 
@@ -50,8 +50,8 @@ interface ScheduleRequestRow {
   updated_at: string;
 }
 
-export function ensureSchedulingTables() {
-  db.exec(`
+export async function ensureSchedulingTables(): Promise<void> {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -63,7 +63,7 @@ export function ensureSchedulingTables() {
     )
   `);
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS project_connections (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -73,7 +73,7 @@ export function ensureSchedulingTables() {
     )
   `);
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS availability (
       id TEXT PRIMARY KEY,
       employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
@@ -85,10 +85,10 @@ export function ensureSchedulingTables() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  db.exec("CREATE INDEX IF NOT EXISTS idx_availability_date ON availability(date)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_availability_employee ON availability(employee_id)");
+  await database.exec("CREATE INDEX IF NOT EXISTS idx_availability_date ON availability(date)");
+  await database.exec("CREATE INDEX IF NOT EXISTS idx_availability_employee ON availability(employee_id)");
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS schedule_requests (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -107,17 +107,20 @@ export function ensureSchedulingTables() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  db.exec("CREATE INDEX IF NOT EXISTS idx_schedule_requests_date ON schedule_requests(date)");
+  await database.exec("CREATE INDEX IF NOT EXISTS idx_schedule_requests_date ON schedule_requests(date)");
 
-  // Additive column for databases created before photo attachments existed.
-  const columns = new Set(
-    (db.prepare("PRAGMA table_info(schedule_requests)").all() as { name: string }[]).map((c) => c.name),
-  );
-  if (!columns.has("image_urls")) {
-    db.exec("ALTER TABLE schedule_requests ADD COLUMN image_urls TEXT NOT NULL DEFAULT '[]'");
-  }
-  if (!columns.has("status_reason")) {
-    db.exec("ALTER TABLE schedule_requests ADD COLUMN status_reason TEXT");
+  // Additive columns for SQLite databases created before photo attachments
+  // existed. PRAGMA is SQLite-only; MySQL gets them from the MySQL schema file.
+  if (database.dialect === "sqlite") {
+    const columns = new Set(
+      (await database.all<{ name: string }>("PRAGMA table_info(schedule_requests)")).map((c) => c.name),
+    );
+    if (!columns.has("image_urls")) {
+      await database.exec("ALTER TABLE schedule_requests ADD COLUMN image_urls TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!columns.has("status_reason")) {
+      await database.exec("ALTER TABLE schedule_requests ADD COLUMN status_reason TEXT");
+    }
   }
 }
 function randomConnectionCode(): string {
@@ -156,7 +159,7 @@ export async function findProjectById(id: string): Promise<Project | undefined> 
 
 /**
  * Removes a project and every row that references it. Foreign keys are
- * declared but not enforced (no PRAGMA in db.ts), so each child table is
+ * declared but not enforced in SQLite (foreign_keys is never turned on), so each child table is
  * cleared explicitly. Messaging rows live in the messaging module's tables;
  * they are deleted here by SQL because that module has no per-project
  * delete helper and importing it would couple the two domains.

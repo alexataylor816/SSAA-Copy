@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { database, db } from "../db.js";
+import { database } from "../db.js";
 import type { Company, CompanyType, Employee, JoinRequest, JoinRequestStatus, PermissionLevel, UserRole } from "./types.js";
 
 interface CompanyRow {
@@ -43,8 +43,8 @@ interface EmployeeRow {
   created_at: string;
 }
 
-export function ensureRbacTables() {
-  db.exec(`
+export async function ensureRbacTables(): Promise<void> {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS companies (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -56,7 +56,7 @@ export function ensureRbacTables() {
     )
   `);
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS user_roles (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -69,7 +69,7 @@ export function ensureRbacTables() {
     )
   `);
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS company_join_requests (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -80,7 +80,7 @@ export function ensureRbacTables() {
     )
   `);
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS employees (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -92,17 +92,20 @@ export function ensureRbacTables() {
     )
   `);
 
-  // Additive column for databases created before trade tracking existed.
-  const companyCols = new Set(
-    (db.prepare("PRAGMA table_info(companies)").all() as { name: string }[]).map((c) => c.name),
-  );
-  if (!companyCols.has("trade")) {
-    db.exec("ALTER TABLE companies ADD COLUMN trade TEXT");
-  }
+  // Additive columns for SQLite databases created before these existed.
+  // PRAGMA is SQLite-only; MySQL gets them from the MySQL schema file.
+  if (database.dialect === "sqlite") {
+    const companyCols = new Set(
+      (await database.all<{ name: string }>("PRAGMA table_info(companies)")).map((c) => c.name),
+    );
+    if (!companyCols.has("trade")) {
+      await database.exec("ALTER TABLE companies ADD COLUMN trade TEXT");
+    }
 
-  const employeeColumns = db.prepare("PRAGMA table_info(employees)").all() as { name: string }[];
-  if (!employeeColumns.some((c) => c.name === "employee_number")) {
-    db.exec("ALTER TABLE employees ADD COLUMN employee_number TEXT");
+    const employeeColumns = await database.all<{ name: string }>("PRAGMA table_info(employees)");
+    if (!employeeColumns.some((c) => c.name === "employee_number")) {
+      await database.exec("ALTER TABLE employees ADD COLUMN employee_number TEXT");
+    }
   }
 }
 

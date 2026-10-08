@@ -11,7 +11,7 @@
  * the migration incremental: as each Lovable feature lands, its table gets an
  * entry here with real authorization.
  */
-import { db } from "../db.js";
+import { database } from "../db.js";
 import { findEmployeeById, findEmployeeByLinkedUser, findUserRole } from "../rbac/models.js";
 import { findUserById } from "../models/users.js";
 import { canManagePermissions, hasLevel1OrHigher, hasPartialOrHigher, isAccountHolder } from "../rbac/permissions.js";
@@ -39,39 +39,40 @@ export async function resolveCaller(userId: string): Promise<Caller> {
   };
 }
 
-export function companyTypeOf(companyId: string): CompanyType {
-  const row = db
-    .prepare("SELECT company_type FROM companies WHERE id = ?")
-    .get(companyId) as { company_type: CompanyType } | undefined;
+export async function companyTypeOf(companyId: string): Promise<CompanyType> {
+  const row = await database.get<{ company_type: CompanyType }>("SELECT company_type FROM companies WHERE id = ?", [
+    companyId,
+  ]);
   return row?.company_type ?? "sub";
 }
 
 /** The set of project ids a caller can see: owned + connected + explicitly assigned. */
-export function visibleProjectIds(caller: Caller): string[] {
+export async function visibleProjectIds(caller: Caller): Promise<string[]> {
   if (caller.isAdmin) {
-    const all = db.prepare("SELECT id FROM projects").all() as { id: string }[];
+    const all = await database.all<{ id: string }>("SELECT id FROM projects");
     return all.map((r) => r.id);
   }
   if (!caller.companyId) return [];
 
-  const rows = db
-    .prepare(
-      `SELECT id FROM projects WHERE company_id = @company
-       UNION
-       SELECT pc.project_id FROM project_connections pc WHERE pc.sub_company_id = @company
-       UNION
-       SELECT upa.project_id FROM user_project_assignments upa
-         WHERE upa.user_id = @user AND upa.company_id = @company`,
-    )
-    .all({ company: caller.companyId, user: caller.userId }) as { id: string }[];
+  const rows = await database.all<{ id: string }>(
+    `SELECT id FROM projects WHERE company_id = @company
+     UNION
+     SELECT pc.project_id FROM project_connections pc WHERE pc.sub_company_id = @company
+     UNION
+     SELECT upa.project_id FROM user_project_assignments upa
+       WHERE upa.user_id = @user AND upa.company_id = @company`,
+    { company: caller.companyId, user: caller.userId },
+  );
   return rows.map((r) => r.id);
 }
+
+type ScopeResult = { sql: string; params: Record<string, unknown> } | null;
 
 export interface TableRule {
   /** Columns the client may read and write. Anything else is rejected. */
   columns: readonly string[];
   /** Extra AND-ed filters restricting which rows the caller can see. */
-  scope?: (caller: Caller) => { sql: string; params: Record<string, unknown> } | null;
+  scope?: (caller: Caller) => ScopeResult | Promise<ScopeResult>;
   /** Reject the whole write before touching the database. */
   canWrite?: (caller: Caller, rows: Record<string, unknown>[]) => void | Promise<void>;
   /** Columns the client may never write directly (server-managed). */
@@ -109,12 +110,12 @@ const TASKS: TableRule = {
     "created_at",
     "updated_at",
   ],
-  scope: (caller) => inList("project_id", visibleProjectIds(caller), "vp"),
-  canWrite: (caller, rows) => {
+  scope: async (caller) => inList("project_id", await visibleProjectIds(caller), "vp"),
+  canWrite: async (caller, rows) => {
     if (!hasLevel1OrHigher(caller)) {
       throw new ForbiddenError("You need Foreman-level access or higher to edit the schedule.");
     }
-    const allowed = new Set(visibleProjectIds(caller));
+    const allowed = new Set(await visibleProjectIds(caller));
     for (const row of rows) {
       // Inserts carry project_id. Updates address the row by id instead, so
       // fall back to the project the task already belongs to — otherwise every
@@ -122,9 +123,8 @@ const TASKS: TableRule = {
       const projectId =
         row.project_id ??
         (row.id
-          ? (db.prepare("SELECT project_id FROM tasks WHERE id = ?").get(String(row.id)) as
-              | { project_id: string }
-              | undefined)?.project_id
+          ? (await database.get<{ project_id: string }>("SELECT project_id FROM tasks WHERE id = ?", [String(row.id)]))
+              ?.project_id
           : undefined);
       if (projectId == null || !allowed.has(String(projectId))) {
         throw new ForbiddenError("You do not have access to that project.");
@@ -147,19 +147,18 @@ export const TABLE_RULES: Record<string, TableRule> = {
 
   companies: {
     columns: ["id", "name", "company_type", "address", "trade", "created_at", "updated_at"],
-    scope: (caller) => {
+    scope: async (caller) => {
       if (caller.isAdmin) return null;
       // A company is visible if you belong to it, own one of its projects,
       // or you are connected to one of its projects.
-      const rows = db
-        .prepare(
-          `SELECT id FROM companies WHERE id = @__own
-           UNION SELECT company_id FROM projects WHERE company_id = @__own
-           UNION SELECT pc.sub_company_id FROM project_connections pc
-             JOIN projects p ON p.id = pc.project_id WHERE p.company_id = @__own
-           UNION SELECT pc.sub_company_id FROM project_connections pc WHERE pc.sub_company_id = @__own`,
-        )
-        .all({ __own: caller.companyId }) as { id: string }[];
+      const rows = await database.all<{ id: string }>(
+        `SELECT id FROM companies WHERE id = @__own
+         UNION SELECT company_id FROM projects WHERE company_id = @__own
+         UNION SELECT pc.sub_company_id FROM project_connections pc
+           JOIN projects p ON p.id = pc.project_id WHERE p.company_id = @__own
+         UNION SELECT pc.sub_company_id FROM project_connections pc WHERE pc.sub_company_id = @__own`,
+        { __own: caller.companyId },
+      );
       return inList("id", rows.map((r) => r.id), "cv");
     },
     canWrite: async (caller, rows) => {
@@ -210,20 +209,19 @@ export const TABLE_RULES: Record<string, TableRule> = {
 
   employees: {
     columns: ["id", "company_id", "name", "email", "phone", "job_title", "employee_number", "linked_user_id", "created_at"],
-    scope: (caller) => {
+    scope: async (caller) => {
       if (caller.isAdmin) return null;
       // Own company, or a company you share a project with.
-      const rows = db
-        .prepare(
-          `SELECT company_id AS id FROM employees WHERE company_id = @__own
-           UNION SELECT e.company_id FROM employees e
-             JOIN project_connections pc ON pc.sub_company_id = e.company_id
-             JOIN projects p ON p.id = pc.project_id WHERE p.company_id = @__own
-           UNION SELECT e.company_id FROM employees e
-             JOIN project_connections pc ON pc.sub_company_id = @__own
-             JOIN projects p ON p.id = pc.project_id WHERE p.company_id = e.company_id`,
-        )
-        .all({ __own: caller.companyId }) as { id: string }[];
+      const rows = await database.all<{ id: string }>(
+        `SELECT company_id AS id FROM employees WHERE company_id = @__own
+         UNION SELECT e.company_id FROM employees e
+           JOIN project_connections pc ON pc.sub_company_id = e.company_id
+           JOIN projects p ON p.id = pc.project_id WHERE p.company_id = @__own
+         UNION SELECT e.company_id FROM employees e
+           JOIN project_connections pc ON pc.sub_company_id = @__own
+           JOIN projects p ON p.id = pc.project_id WHERE p.company_id = e.company_id`,
+        { __own: caller.companyId },
+      );
       return inList("company_id", rows.map((r) => r.id), "ev");
     },
     canWrite: (caller, rows) => {
@@ -241,15 +239,15 @@ export const TABLE_RULES: Record<string, TableRule> = {
 
   projects: {
     columns: ["id", "name", "address", "company_id", "connection_code", "created_at", "updated_at"],
-    scope: (caller) => inList("id", visibleProjectIds(caller), "pv"),
-    canWrite: (caller, rows) => {
+    scope: async (caller) => inList("id", await visibleProjectIds(caller), "pv"),
+    canWrite: async (caller, rows) => {
       if (!hasLevel1OrHigher(caller)) {
         throw new ForbiddenError("You need Foreman-level access or higher to manage projects.");
       }
       for (const row of rows) {
         const isUpdate = !!row.id;
         if (isUpdate) {
-          if (!visibleProjectIds(caller).includes(String(row.id))) {
+          if (!(await visibleProjectIds(caller)).includes(String(row.id))) {
             throw new ForbiddenError("You do not have access to that project.");
           }
         } else if (row.company_id && row.company_id !== caller.companyId && !caller.isAdmin) {
@@ -262,9 +260,9 @@ export const TABLE_RULES: Record<string, TableRule> = {
 
   project_connections: {
     columns: ["id", "project_id", "sub_company_id", "connected_at"],
-    scope: (caller) => {
+    scope: async (caller) => {
       if (caller.isAdmin) return null;
-      return inList("project_id", visibleProjectIds(caller), "cv");
+      return inList("project_id", await visibleProjectIds(caller), "cv");
     },
     canWrite: (caller, rows) => {
       if (!hasLevel1OrHigher(caller)) {
@@ -294,7 +292,7 @@ export const TABLE_RULES: Record<string, TableRule> = {
 
   user_project_assignments: {
     columns: ["id", "user_id", "project_id", "company_id", "created_at"],
-    scope: (caller) => inList("project_id", visibleProjectIds(caller), "uv"),
+    scope: async (caller) => inList("project_id", await visibleProjectIds(caller), "uv"),
     canWrite: (caller, rows) => {
       if (!hasPartialOrHigher(caller)) {
         throw new ForbiddenError("You need Partial-level access or higher to change project access.");
@@ -305,15 +303,14 @@ export const TABLE_RULES: Record<string, TableRule> = {
 
   employee_project_assignments: {
     columns: ["id", "employee_id", "project_id", "company_id", "created_at"],
-    scope: (caller) => {
+    scope: async (caller) => {
       if (caller.isAdmin) return null;
-      const rows = db
-        .prepare(
-          `SELECT project_id AS id FROM employee_project_assignments WHERE company_id = @__own
-           UNION SELECT project_id FROM employee_project_assignments
-             WHERE project_id IN (SELECT id FROM projects WHERE company_id = @__own)`,
-        )
-        .all({ __own: caller.companyId }) as { id: string }[];
+      const rows = await database.all<{ id: string }>(
+        `SELECT project_id AS id FROM employee_project_assignments WHERE company_id = @__own
+         UNION SELECT project_id FROM employee_project_assignments
+           WHERE project_id IN (SELECT id FROM projects WHERE company_id = @__own)`,
+        { __own: caller.companyId },
+      );
       return inList("project_id", rows.map((r) => r.id), "av");
     },
     canWrite: (caller, rows) => {
@@ -337,23 +334,22 @@ export const TABLE_RULES: Record<string, TableRule> = {
       "stop_label",
       "created_at",
     ],
-    scope: (caller) => {
+    scope: async (caller) => {
       if (caller.isAdmin) return null;
       // The original's "View availability" policy: your own crew, plus the crew
       // of any sub connected to one of your projects. Keyed by employee, so a
       // sub's "all projects" hours (project_id NULL) reach the GC, and a sub
       // never sees a rival sub's hours on a shared project.
-      const rows = db
-        .prepare(
-          `SELECT a.id FROM availability a JOIN employees e ON e.id = a.employee_id
-             WHERE e.company_id = @__own
-           UNION SELECT a.id FROM availability a
-             JOIN employees e ON e.id = a.employee_id
-             JOIN project_connections pc ON pc.sub_company_id = e.company_id
-             JOIN projects p ON p.id = pc.project_id
-            WHERE p.company_id = @__own`,
-        )
-        .all({ __own: caller.companyId }) as { id: string }[];
+      const rows = await database.all<{ id: string }>(
+        `SELECT a.id FROM availability a JOIN employees e ON e.id = a.employee_id
+           WHERE e.company_id = @__own
+         UNION SELECT a.id FROM availability a
+           JOIN employees e ON e.id = a.employee_id
+           JOIN project_connections pc ON pc.sub_company_id = e.company_id
+           JOIN projects p ON p.id = pc.project_id
+          WHERE p.company_id = @__own`,
+        { __own: caller.companyId },
+      );
       return inList("id", rows.map((r) => r.id), "av");
     },
     canWrite: async (caller, rows) => {
@@ -373,9 +369,10 @@ export const TABLE_RULES: Record<string, TableRule> = {
         let target = namedId ? await findEmployeeById(namedId) : undefined;
         if (!target && typeof row.id === "string" && row.id) {
           // Updates name the row by id without repeating employee_id.
-          const existing = db
-            .prepare("SELECT employee_id FROM availability WHERE id = ?")
-            .get(row.id) as { employee_id: string } | undefined;
+          const existing = await database.get<{ employee_id: string }>(
+            "SELECT employee_id FROM availability WHERE id = ?",
+            [row.id],
+          );
           target = existing ? await findEmployeeById(existing.employee_id) : undefined;
         }
         if (ownEmployee && target && target.id === ownEmployee.id) continue;

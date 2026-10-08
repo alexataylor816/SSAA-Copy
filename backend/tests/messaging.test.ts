@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 
-const { app } = createApp();
+const { app } = await createApp();
 let n = 0;
 const unique = (tag: string) => `msg-${tag}-${Date.now()}-${n++}@example.com`;
 

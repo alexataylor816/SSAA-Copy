@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { database, db } from "../db.js";
+import { database } from "../db.js";
 import { BadRequestError } from "../rbac/errors.js";
 
 /**
@@ -94,8 +94,8 @@ const SEEDS: { eventType: string; channel: string; subject: string; bodyHtml: st
   },
 ];
 
-export function ensureTemplateTables() {
-  db.exec(`
+export async function ensureTemplateTables(): Promise<void> {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS notification_templates (
       id TEXT PRIMARY KEY,
       event_type TEXT NOT NULL UNIQUE,
@@ -109,13 +109,23 @@ export function ensureTemplateTables() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  const insert = db.prepare(
-    `INSERT OR IGNORE INTO notification_templates
-     (id, event_type, channel, subject, body_html, description, is_active, placeholder_variables)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
-  );
+  await seedNotificationTemplates();
+}
+
+/**
+ * Inserts any default template that isn't there yet (event_type is UNIQUE),
+ * never overwriting an admin's edits. Runs on both databases: MySQL creates
+ * the table from schema.sql but still needs these rows.
+ */
+export async function seedNotificationTemplates(): Promise<void> {
+  const insertIgnore = database.dialect === "mysql" ? "INSERT IGNORE" : "INSERT OR IGNORE";
   for (const s of SEEDS) {
-    insert.run(crypto.randomUUID(), s.eventType, s.channel, s.subject, s.bodyHtml, s.description, JSON.stringify(s.vars));
+    await database.run(
+      `${insertIgnore} INTO notification_templates
+       (id, event_type, channel, subject, body_html, description, is_active, placeholder_variables)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+      [crypto.randomUUID(), s.eventType, s.channel, s.subject, s.bodyHtml, s.description, JSON.stringify(s.vars)],
+    );
   }
 }
 

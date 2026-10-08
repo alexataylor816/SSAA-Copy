@@ -1,26 +1,21 @@
 /**
  * Database access for the whole backend.
  *
- * Two exports, during the SQLite -> MySQL migration:
+ * `database` is a small async API that runs the same calls on SQLite
+ * (better-sqlite3) or MySQL (mysql2), chosen by DB_CLIENT in config.ts:
  *
- *   database  NEW. Async helpers that work on BOTH SQLite and MySQL.
- *             Every file should end up using only this.
+ *   await database.get(SQL, [a, b])            first row, or undefined
+ *   await database.all(SQL, [a])               every row
+ *   await database.all(SQL, { name })          `@name` placeholders work too
+ *   await database.run(SQL, [a, b])            INSERT/UPDATE/DELETE -> { changes }
+ *   await database.exec(SQL)                   raw SQL, no parameters
+ *   await database.transaction(async () => {}) all-or-nothing; nested calls join it
+ *   database.now()                             "YYYY-MM-DD HH:MM:SS" in UTC
+ *   database.dialect                           "sqlite" | "mysql", for the few
+ *                                              statements with no portable form
  *
- *   db        OLD. The raw better-sqlite3 handle the code used before.
- *             Only works while DB_CLIENT=sqlite. In MySQL mode it throws,
- *             so any file that hasn't been converted yet fails loudly
- *             instead of silently writing to the SQLite file.
- *
- * Conversion pattern (see MYSQL_MIGRATION.md for the full list):
- *   db.prepare(SQL).get(a, b)   ->  await database.get(SQL, [a, b])
- *   db.prepare(SQL).all(a)      ->  await database.all(SQL, [a])
- *   db.prepare(SQL).run(a, b)   ->  await database.run(SQL, [a, b])
- *   db.prepare(SQL).all(obj)    ->  await database.all(SQL, obj)   // @named params still work
- *   db.exec(SQL)                ->  await database.exec(SQL)
- *   db.transaction(fn)()        ->  await database.transaction(async () => { ... })
- *
- * When `grep -rn "db\." src` finds nothing, delete the `db` export and
- * set DB_CLIENT=mysql.
+ * Write SQL both databases accept (see MYSQL_MIGRATION.md) and branch on
+ * `database.dialect` only where there is no portable form.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import Database from "better-sqlite3";
@@ -194,18 +189,3 @@ export const database = {
     if (pool) await pool.end();
   },
 };
-
-// ---------------------------------------------------------------------------
-// Legacy handle (delete once nothing imports it)
-// ---------------------------------------------------------------------------
-
-export const db: Database.Database = sqlite
-  ? sqlite
-  : (new Proxy({} as Database.Database, {
-      get(_target, prop) {
-        throw new Error(
-          `db.${String(prop)} was called while DB_CLIENT=mysql. ` +
-            "This file hasn't been converted yet. Use `database` from db.ts instead.",
-        );
-      },
-    }) as Database.Database);

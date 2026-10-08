@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { database, db } from "../db.js";
+import { database } from "../db.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "./errors.js";
 import { findCompanyById } from "./models.js";
 import { deleteProjectAndChildren } from "../scheduling/models.js";
@@ -36,8 +36,8 @@ interface CompanyDeletionRequestRow {
   updated_at: string;
 }
 
-export function ensureCompanyDeletionTables() {
-  db.exec(`
+export async function ensureCompanyDeletionTables(): Promise<void> {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS company_deletion_requests (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

@@ -17,8 +17,8 @@ import { notificationsRouter } from "./notifications/routes.js";
 import { profileRouter } from "./routes/profile.js";
 import { attachRealtime } from "./realtime/index.js";
 
-export function createApp() {
-  ensureSchema();
+export async function createApp() {
+  await ensureSchema();
 
   const app = express();
 

@@ -3,8 +3,9 @@ import request from "supertest";
 import { createApp } from "../src/app.js";
 import { config } from "../src/config.js";
 
+const { app } = await createApp();
+
 describe("auth", () => {
-  const { app } = createApp();
 
   it("signs up a new user and returns a token", async () => {
     const res = await request(app)

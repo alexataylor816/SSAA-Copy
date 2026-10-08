@@ -66,7 +66,7 @@ queryRouter.post(
       return;
     }
     try {
-      res.json({ data: fn(caller, req.body ?? {}) });
+      res.json({ data: await fn(caller, req.body ?? {}) });
     } catch (err) {
       res.status(statusFor(err)).json({ error: err instanceof Error ? err.message : "rpc failed." });
     }

@@ -6,27 +6,30 @@
  * attachments are not ported yet.
  */
 import crypto from "node:crypto";
-import { database, db } from "../db.js";
+import { database } from "../db.js";
 import { findUserById, type User } from "../models/users.js";
 import { findUserRole } from "../rbac/models.js";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../rbac/errors.js";
 
 const MAX_BODY = 4000;
 
-export function ensureMessagingTables() {
+export async function ensureMessagingTables(): Promise<void> {
   // A first cut had one shared channel per project. It was never released and
-  // holds no data, but a dev database may still have that shape.
-  const cols = db.prepare("PRAGMA table_info(conversations)").all() as { name: string }[];
-  if (cols.length > 0 && !cols.some((c) => c.name === "sub_company_id")) {
-    db.exec(`
-      DROP TABLE IF EXISTS message_reads;
-      DROP TABLE IF EXISTS messages;
-      DROP TABLE IF EXISTS conversation_participants;
-      DROP TABLE IF EXISTS conversations;
-    `);
+  // holds no data, but a dev SQLite database may still have that shape.
+  // PRAGMA is SQLite-only; MySQL never had the old shape.
+  if (database.dialect === "sqlite") {
+    const cols = await database.all<{ name: string }>("PRAGMA table_info(conversations)");
+    if (cols.length > 0 && !cols.some((c) => c.name === "sub_company_id")) {
+      await database.exec(`
+        DROP TABLE IF EXISTS message_reads;
+        DROP TABLE IF EXISTS messages;
+        DROP TABLE IF EXISTS conversation_participants;
+        DROP TABLE IF EXISTS conversations;
+      `);
+    }
   }
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL CHECK (type IN ('project', 'dm', 'group')),

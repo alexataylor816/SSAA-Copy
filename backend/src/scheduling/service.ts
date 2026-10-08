@@ -88,7 +88,7 @@ export async function createProject(userId: string, params: { name: string; addr
 
 /**
  * Delete an owned project and everything hanging off it. SQLite foreign keys
- * are not enforced (no PRAGMA in db.ts), so children are removed explicitly
+ * are not enforced in SQLite (foreign_keys is never turned on), so children are removed explicitly
  * in one transaction: connections, availability on the project, requests,
  * tasks, aliases, assignments, and the messaging channel (+ its messages,
  * reads, and participants).

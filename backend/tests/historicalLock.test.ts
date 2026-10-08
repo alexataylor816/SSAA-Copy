@@ -3,7 +3,7 @@ import request from "supertest";
 import { createApp } from "../src/app.js";
 import { getHistoricalLockDate } from "../src/scheduling/historicalLock.js";
 
-const { app } = createApp();
+const { app } = await createApp();
 
 async function signUp(email: string, fullName = "Test User") {
   const res = await request(app).post("/auth/signup").send({ email, password: "hunter22", fullName });
@@ -106,8 +106,8 @@ describe("historical lock", () => {
     expect(created.status).toBe(201);
 
     // Backdate the row so the delete targets a locked day.
-    const { db } = await import("../src/db.js");
-    db.prepare("UPDATE availability SET date = ? WHERE id = ?").run(lockedDate(), created.body.id);
+    const { database } = await import("../src/db.js");
+    await database.run("UPDATE availability SET date = ? WHERE id = ?", [lockedDate(), created.body.id]);
 
     const res = await request(app).delete(`/availability/${created.body.id}`).set(authed(token));
     expect(res.status).toBe(403);
@@ -149,8 +149,8 @@ describe("historical lock", () => {
       });
     expect(created.status).toBe(201);
 
-    const { db } = await import("../src/db.js");
-    db.prepare("UPDATE schedule_requests SET date = ? WHERE id = ?").run(lockedDate(), created.body.id);
+    const { database } = await import("../src/db.js");
+    await database.run("UPDATE schedule_requests SET date = ? WHERE id = ?", [lockedDate(), created.body.id]);
 
     const res = await request(app)
       .patch(`/schedule-requests/${created.body.id}`)

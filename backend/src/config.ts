@@ -12,7 +12,7 @@ export const config = {
   secretKey: process.env.SECRET_KEY ?? "dev-secret-change-me",
   jwtSecretKey: process.env.JWT_SECRET_KEY ?? "dev-jwt-secret-change-me",
   // Which database to use: "sqlite" (default, what the team runs today) or "mysql".
-  // Flip to "mysql" only after every file uses the async `sql` helper from db.ts.
+  // Every query goes through the async `database` helper, so either works.
   dbClient: (process.env.DB_CLIENT === "mysql" ? "mysql" : "sqlite") as "sqlite" | "mysql",
   databasePath: process.env.DATABASE_PATH ?? path.join(BASE_DIR, "ssaa.db"),
   mysql: {

@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { db } from "../db.js";
+import { database } from "../db.js";
 
 export const healthRouter = Router();
 
-healthRouter.get("/health", (_req, res) => {
+healthRouter.get("/health", async (_req, res) => {
   try {
-    db.prepare("SELECT 1").get();
-    res.json({ status: "ok", db: "sqlite ok" });
+    await database.get("SELECT 1");
+    res.json({ status: "ok", db: `${database.dialect} ok` });
   } catch (err) {
     res.status(500).json({ status: "error", db: String(err) });
   }

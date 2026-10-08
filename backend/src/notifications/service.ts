@@ -5,15 +5,15 @@
  * same events is not ported.
  */
 import crypto from "node:crypto";
-import { database, db } from "../db.js";
+import { database } from "../db.js";
 import { emit } from "../realtime/index.js";
 import { EVENT, ROOM } from "../realtime/events.js";
 import { findUserById } from "../models/users.js";
 import { findCompanyById, findJoinRequestById } from "../rbac/models.js";
 import type { ScheduleRequest } from "../scheduling/types.js";
 
-export function ensureNotificationTables() {
-  db.exec(`
+export async function ensureNotificationTables(): Promise<void> {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS user_notifications (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

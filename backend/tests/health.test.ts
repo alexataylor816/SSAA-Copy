@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 
+const { app } = await createApp();
+
 describe("health", () => {
-  const { app } = createApp();
 
   it("GET / returns service info", async () => {
     const res = await request(app).get("/");

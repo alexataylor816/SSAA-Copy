@@ -11,7 +11,7 @@
  * so the client can invalidate its cache.
  */
 import type { Server as SocketIOServer, Socket } from "socket.io";
-import { db } from "../db.js";
+import { database } from "../db.js";
 import { verifyToken } from "../services/tokens.js";
 import { findUserById } from "../models/users.js";
 import { room, ROOM, type RoomTemplate } from "./events.js";
@@ -44,7 +44,7 @@ export function emitProject(event: string, payload: unknown, projectId: string, 
  * Auto-join on connect: a client never has to ask for the rooms it is already
  * entitled to, so a plain `io()` gets a working live feed.
  */
-function roomsFor(session: Session): string[] {
+async function roomsFor(session: Session): Promise<string[]> {
   const rooms: string[] = [
     room(ROOM.user_profile, session.userId),
     room(ROOM.user_messages, session.userId),
@@ -64,16 +64,17 @@ function roomsFor(session: Session): string[] {
 
   // Being connected to someone else's project means their schedule changes
   // are relevant to you too.
-  const connected = db
-    .prepare("SELECT project_id FROM project_connections WHERE sub_company_id = ?")
-    .all(companyId) as { project_id: string }[];
+  const connected = await database.all<{ project_id: string }>(
+    "SELECT project_id FROM project_connections WHERE sub_company_id = ?",
+    [companyId],
+  );
   for (const row of connected) {
     rooms.push(room(ROOM.schedule_requests, row.project_id));
     rooms.push(room(ROOM.availability, row.project_id));
   }
 
   // Own projects are addressable by project id as well as company id.
-  const owned = db.prepare("SELECT id FROM projects WHERE company_id = ?").all(companyId) as { id: string }[];
+  const owned = await database.all<{ id: string }>("SELECT id FROM projects WHERE company_id = ?", [companyId]);
   for (const row of owned) {
     rooms.push(room(ROOM.project_connections, row.id));
   }
@@ -105,15 +106,11 @@ export function attachRealtime(io: SocketIOServer) {
     }
   });
 
-  io.on("connection", (socket: Socket) => {
+  io.on("connection", async (socket: Socket) => {
     const session = socket.data as Session;
 
-    for (const name of roomsFor(session)) {
-      void socket.join(name);
-    }
-    socket.emit("ready", { userId: session.userId, companyId: session.companyId });
-
     // Explicit joins for conversation rooms, which cannot be derived up front.
+    // Registered before the room lookup below so an early "join" isn't dropped.
     socket.on("join", (payload: { conversationId?: string; room?: string }) => {
       if (payload?.conversationId) {
         void socket.join(room(ROOM.conversation, payload.conversationId));
@@ -129,5 +126,16 @@ export function attachRealtime(io: SocketIOServer) {
         void socket.leave(payload.room);
       }
     });
+
+    try {
+      for (const name of await roomsFor(session)) {
+        void socket.join(name);
+      }
+    } catch (err) {
+      console.error("Failed to resolve realtime rooms:", err);
+      socket.disconnect(true);
+      return;
+    }
+    socket.emit("ready", { userId: session.userId, companyId: session.companyId });
   });
 }

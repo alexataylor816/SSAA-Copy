@@ -11,10 +11,10 @@
  *   user_project_assignments    — which login can see/act on which project
  *   employee_project_assignments— which employee works which project
  */
-import { db } from "../db.js";
+import { database } from "../db.js";
 
-export function ensureProjectTables() {
-  db.exec(`
+export async function ensureProjectTables(): Promise<void> {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -30,10 +30,10 @@ export function ensureProjectTables() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_dates ON tasks(start_date, end_date)");
+  await database.exec("CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)");
+  await database.exec("CREATE INDEX IF NOT EXISTS idx_tasks_dates ON tasks(start_date, end_date)");
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS project_aliases (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -46,7 +46,7 @@ export function ensureProjectTables() {
     )
   `);
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS user_project_assignments (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -56,9 +56,9 @@ export function ensureProjectTables() {
       UNIQUE (user_id, project_id)
     )
   `);
-  db.exec("CREATE INDEX IF NOT EXISTS idx_upa_project ON user_project_assignments(project_id)");
+  await database.exec("CREATE INDEX IF NOT EXISTS idx_upa_project ON user_project_assignments(project_id)");
 
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS employee_project_assignments (
       id TEXT PRIMARY KEY,
       employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
@@ -68,26 +68,29 @@ export function ensureProjectTables() {
       UNIQUE (employee_id, project_id)
     )
   `);
-  db.exec("CREATE INDEX IF NOT EXISTS idx_epa_project ON employee_project_assignments(project_id)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_epa_employee ON employee_project_assignments(employee_id)");
+  await database.exec("CREATE INDEX IF NOT EXISTS idx_epa_project ON employee_project_assignments(project_id)");
+  await database.exec("CREATE INDEX IF NOT EXISTS idx_epa_employee ON employee_project_assignments(employee_id)");
 
   // Multi-stop availability (the original's stop_number INTEGER / stop_label TEXT).
   // Databases created before this was typed have stop_number as TEXT; the
   // scheduling model writes whole numbers and reads them back as numbers either way.
-  for (const [table, column, type] of [
-    ["availability", "stop_number", "INTEGER"],
-    ["availability", "stop_label", "TEXT"],
-  ] as const) {
-    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (!cols.some((c) => c.name === column)) {
-      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  // PRAGMA is SQLite-only; MySQL gets these columns from the MySQL schema file.
+  if (database.dialect === "sqlite") {
+    for (const [table, column, type] of [
+      ["availability", "stop_number", "INTEGER"],
+      ["availability", "stop_label", "TEXT"],
+    ] as const) {
+      const cols = await database.all<{ name: string }>(`PRAGMA table_info(${table})`);
+      if (!cols.some((c) => c.name === column)) {
+        await database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      }
     }
-  }
 
-  // The dashboard's team rail (RightPanel -> MatrixEmployeeCard) shows each
-  // employee's trade, and creating an employee there sends job_title.
-  const employeeCols = db.prepare("PRAGMA table_info(employees)").all() as { name: string }[];
-  if (!employeeCols.some((c) => c.name === "job_title")) {
-    db.exec("ALTER TABLE employees ADD COLUMN job_title TEXT");
+    // The dashboard's team rail (RightPanel -> MatrixEmployeeCard) shows each
+    // employee's trade, and creating an employee there sends job_title.
+    const employeeCols = await database.all<{ name: string }>("PRAGMA table_info(employees)");
+    if (!employeeCols.some((c) => c.name === "job_title")) {
+      await database.exec("ALTER TABLE employees ADD COLUMN job_title TEXT");
+    }
   }
 }

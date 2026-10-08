@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { database, db } from "../db.js";
+import { database } from "../db.js";
 
 const CODE_TTL_MS = 15 * 60 * 1000;
 
@@ -11,8 +11,8 @@ interface PasswordResetRow {
   used_at: string | null;
 }
 
-export function ensurePasswordResetsTable() {
-  db.exec(`
+export async function ensurePasswordResetsTable(): Promise<void> {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS password_resets (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

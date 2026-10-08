@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { database, db } from "../db.js";
+import { database } from "../db.js";
 import type { CompanyType } from "../rbac/types.js";
 
 export type ContractorConnectionStatus = "pending" | "accepted" | "declined";
@@ -48,8 +48,8 @@ export interface ContractorConnectionProject {
   shared: boolean;
 }
 
-export function ensureContractorTables() {
-  db.exec(`
+export async function ensureContractorTables(): Promise<void> {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS contractor_connections (
       id TEXT PRIMARY KEY,
       company_a_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -66,11 +66,11 @@ export function ensureContractorTables() {
       CHECK (company_a_id <> company_b_id)
     )
   `);
-  db.exec(`
+  await database.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS contractor_connections_pair_unique
     ON contractor_connections (company_a_id, company_b_id)
   `);
-  db.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS contractor_connection_projects (
       id TEXT PRIMARY KEY,
       connection_id TEXT NOT NULL REFERENCES contractor_connections(id) ON DELETE CASCADE,

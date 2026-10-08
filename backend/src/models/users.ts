@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { database, db } from "../db.js";
+import { database } from "../db.js";
 
 export interface User {
   id: string;
@@ -29,8 +29,8 @@ interface UserRow {
   created_at: string;
 }
 
-export function ensureUsersTable() {
-  db.exec(`
+export async function ensureUsersTable(): Promise<void> {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -45,30 +45,33 @@ export function ensureUsersTable() {
     )
   `);
 
-  // Additive column migrations for databases created before these existed.
-  const columns = new Set(
-    (db.prepare("PRAGMA table_info(users)").all() as { name: string }[]).map((c) => c.name),
-  );
-  if (!columns.has("company_id")) {
-    db.exec("ALTER TABLE users ADD COLUMN company_id TEXT");
-  }
-  if (!columns.has("is_admin")) {
-    db.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
-  }
-  if (!columns.has("google_sub")) {
-    db.exec("ALTER TABLE users ADD COLUMN google_sub TEXT");
-    // NULLs stay distinct in SQLite, so Googlers get deduplication while
-    // password-only rows are untouched.
-    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)");
-  }
-  if (!columns.has("phone")) {
-    db.exec("ALTER TABLE users ADD COLUMN phone TEXT");
-  }
-  if (!columns.has("language")) {
-    db.exec("ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'en'");
-  }
-  if (!columns.has("profile_picture_url")) {
-    db.exec("ALTER TABLE users ADD COLUMN profile_picture_url TEXT");
+  // Additive column migrations for SQLite databases created before these
+  // existed. PRAGMA is SQLite-only; MySQL gets them from the MySQL schema file.
+  if (database.dialect === "sqlite") {
+    const columns = new Set(
+      (await database.all<{ name: string }>("PRAGMA table_info(users)")).map((c) => c.name),
+    );
+    if (!columns.has("company_id")) {
+      await database.exec("ALTER TABLE users ADD COLUMN company_id TEXT");
+    }
+    if (!columns.has("is_admin")) {
+      await database.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!columns.has("google_sub")) {
+      await database.exec("ALTER TABLE users ADD COLUMN google_sub TEXT");
+      // NULLs stay distinct in SQLite, so Googlers get deduplication while
+      // password-only rows are untouched.
+      await database.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)");
+    }
+    if (!columns.has("phone")) {
+      await database.exec("ALTER TABLE users ADD COLUMN phone TEXT");
+    }
+    if (!columns.has("language")) {
+      await database.exec("ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'en'");
+    }
+    if (!columns.has("profile_picture_url")) {
+      await database.exec("ALTER TABLE users ADD COLUMN profile_picture_url TEXT");
+    }
   }
 }
 

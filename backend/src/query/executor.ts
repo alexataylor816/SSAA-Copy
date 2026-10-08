@@ -7,8 +7,8 @@
  * every value is bound — no user input is ever concatenated into SQL.
  */
 import { randomUUID } from "node:crypto";
-import { db } from "../db.js";
-import { ForbiddenError } from "../rbac/errors.js";
+import { database } from "../db.js";
+import { BadRequestError, ForbiddenError } from "../rbac/errors.js";
 import { TABLE_RULES, type Caller } from "./registry.js";
 
 export type QueryOperation = "select" | "insert" | "update" | "delete" | "upsert";
@@ -57,7 +57,10 @@ const SQL_OP: Record<QueryFilter["op"], string> = {
   not: "NOT",
 };
 
-/** SQLite has no ILIKE; emulate it the way Postgres does (case-insensitive). */
+/**
+ * Neither SQLite nor MySQL has ILIKE; emulate it the way Postgres does
+ * (case-insensitive) by lowering both sides. buildWhere wraps the column.
+ */
 function normaliseOp(op: QueryFilter["op"]): { sql: string; transform?: (v: unknown) => unknown } {
   if (op === "ilike") {
     return { sql: "LIKE", transform: (v) => (typeof v === "string" ? v.toLowerCase() : v) };
@@ -138,6 +141,10 @@ function buildWhere(
       clauses.push(`${filter.column} IS NOT NULL`);
       continue;
     }
+    if (filter.op === "ilike") {
+      clauses.push(`LOWER(${filter.column}) ${op} ${params.bind(value)}`);
+      continue;
+    }
     clauses.push(`${filter.column} ${op} ${params.bind(value)}`);
   }
 
@@ -169,8 +176,8 @@ function buildWhere(
   return clauses.join(" AND ");
 }
 
-function applyScope(params: Params, caller: Caller, table: string, rule: (typeof TABLE_RULES)[string]): string {
-  const scoped = rule.scope?.(caller);
+async function applyScope(params: Params, caller: Caller, table: string, rule: (typeof TABLE_RULES)[string]): Promise<string> {
+  const scoped = await rule.scope?.(caller);
   if (!scoped) return "";
   params.merge(scoped.params);
   return scoped.sql;
@@ -234,7 +241,16 @@ function assertWritableColumns(rule: { readonlyColumns?: readonly string[] }, ro
   }
 }
 
-function readRows(
+/** A non-negative whole number for LIMIT/OFFSET, which can't be bound as parameters. */
+function wholeNumber(name: string, value: unknown): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) throw new BadRequestError(`${name} must be a non-negative whole number.`);
+  return n;
+}
+
+const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+async function readRows(
   table: string,
   columns: string[],
   where: string,
@@ -243,17 +259,27 @@ function readRows(
   limit?: number,
   offset?: number,
 ) {
+  // ORDER BY names and LIMIT/OFFSET are spliced into the SQL text, so they
+  // must be plain identifiers and integers: MySQL runs with multipleStatements,
+  // where anything else could smuggle in a second statement.
+  for (const o of order) {
+    if (typeof o.column !== "string" || !IDENTIFIER_RE.test(o.column)) {
+      throw new BadRequestError(`Unsupported order column "${String(o.column)}".`);
+    }
+  }
   const orderSql = order.map((o) => `${o.column} ${o.ascending ? "ASC" : "DESC"}`).join(", ");
   const sql = `SELECT ${columns.join(", ")} FROM ${table}${where ? ` WHERE ${where}` : ""}${
     orderSql ? ` ORDER BY ${orderSql}` : ""
-  }${limit != null ? ` LIMIT ${limit}` : ""}${offset != null ? ` OFFSET ${offset}` : ""}`;
-  return db
-    .prepare(sql)
-    .all(params.values)
-    .map((r) => denormaliseRow(r as Record<string, unknown>));
+  }${limit != null ? ` LIMIT ${wholeNumber("limit", limit)}` : ""}${offset != null ? ` OFFSET ${wholeNumber("offset", offset)}` : ""}`;
+  const rows = await database.all<Record<string, unknown>>(sql, params.values);
+  return rows.map(denormaliseRow);
 }
 
-function resolveEmbedded(table: string, column: string, baseRows: Record<string, unknown>[]): Record<string, unknown>[] {
+async function resolveEmbedded(
+  table: string,
+  column: string,
+  baseRows: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
   // `companies(*)` style embedding: resolve once per distinct id, then fan out.
   const [targetTable, targetColumn] = column.split(":");
   const rule = TABLE_RULES[targetTable];
@@ -265,10 +291,10 @@ function resolveEmbedded(table: string, column: string, baseRows: Record<string,
   }
   const params = new Params();
   const placeholders = ids.map((id) => params.bind(id)).join(", ");
-  const related = db.prepare(`SELECT * FROM ${targetTable} WHERE id IN (${placeholders})`).all(params.values) as Record<
-    string,
-    unknown
-  >[];
+  const related = await database.all<Record<string, unknown>>(
+    `SELECT * FROM ${targetTable} WHERE id IN (${placeholders})`,
+    params.values,
+  );
   const byId = new Map(related.map((r) => [r.id as string, denormaliseRow(r)]));
 
   return baseRows.map((r) => ({ ...r, [targetTable]: byId.get(r[targetColumn] as string) ?? null }));
@@ -316,16 +342,16 @@ export async function runQuery(caller: Caller, req: QueryRequest): Promise<unkno
     case "select": {
       const where = [
         buildWhere(params, rule, req.filters, req.or),
-        applyScope(params, caller, req.table, rule),
+        await applyScope(params, caller, req.table, rule),
       ]
         .filter(Boolean)
         .join(" AND ");
       const columns = projectColumns(req.select, rule);
-      let rows = readRows(req.table, columns, where, req.order ?? [], params, req.limit, req.offset);
+      let rows = await readRows(req.table, columns, where, req.order ?? [], params, req.limit, req.offset);
 
       const embedded = (req.select ?? "*").match(/\w+\(.+\)/g) ?? [];
       for (const column of embedded) {
-        rows = resolveEmbedded(req.table, column, rows);
+        rows = await resolveEmbedded(req.table, column, rows);
       }
 
       if (req.single) {
@@ -340,7 +366,8 @@ export async function runQuery(caller: Caller, req: QueryRequest): Promise<unkno
       const rows = rowsFrom(req.data);
       await rule.canWrite?.(caller, rows);
 
-      const inserted = rows.map((row) => {
+      const inserted: Record<string, unknown>[] = [];
+      for (const row of rows) {
         // The server owns ids and timestamps. Clients never supply them, and
         // SQLite would happily store NULL into an unconstrained TEXT primary
         // key, which produced unaddressable rows before this was fixed.
@@ -360,29 +387,22 @@ export async function runQuery(caller: Caller, req: QueryRequest): Promise<unkno
         // explicit sort_order from the client is honoured but an omitted one
         // appends to the end of the project instead of tying with every sibling.
         if (req.table === "tasks" && clean.sort_order == null) {
-          const maxRow = db
-            .prepare(
-              `SELECT MAX(sort_order) AS max FROM tasks WHERE project_id = @projectId`,
-            )
-            .get({ projectId: clean.project_id }) as { max: number | null } | undefined;
+          const maxRow = await database.get<{ max: number | null }>(
+            `SELECT MAX(sort_order) AS max FROM tasks WHERE project_id = @projectId`,
+            { projectId: clean.project_id },
+          );
           clean.sort_order = (maxRow?.max ?? -1) + 1;
         }
 
         const columns = Object.keys(clean);
         const placeholders = columns.map((c) => params.bind(normaliseValue(clean[c]))).join(", ");
-        db.prepare(`INSERT INTO ${req.table} (${columns.join(", ")}) VALUES (${placeholders})`).run(
-          params.values,
-        );
-        return clean;
-      });
+        await database.run(`INSERT INTO ${req.table} (${columns.join(", ")}) VALUES (${placeholders})`, params.values);
+        inserted.push(clean);
+      }
 
       const ids = inserted.map((r) => r.id).filter(Boolean) as string[];
       if (!ids.length) return inserted;
-      const readParams = ids.map((id) => params.bind(id)).join(", ");
-      return db
-        .prepare(`SELECT * FROM ${req.table} WHERE id IN (${readParams})`)
-        .all(params.values)
-        .map((r) => denormaliseRow(r as Record<string, unknown>));
+      return readBackInOrder(req.table, ids, params);
     }
 
     case "update": {
@@ -410,17 +430,13 @@ export async function runQuery(caller: Caller, req: QueryRequest): Promise<unkno
         if (setColumns.length === 0) continue;
         const setSql = setColumns.map((c) => `${c} = ${params.bind(normaliseValue(row[c]))}`).join(", ");
         const where = buildWhere(params, rule, req.filters, req.or);
-        const scopeSql = applyScope(params, caller, req.table, rule);
+        const scopeSql = await applyScope(params, caller, req.table, rule);
         const fullWhere = [where, scopeSql, `id = ${params.bind(row.id)}`].filter(Boolean).join(" AND ");
-        db.prepare(`UPDATE ${req.table} SET ${setSql} WHERE ${fullWhere}`).run(params.values);
+        await database.run(`UPDATE ${req.table} SET ${setSql} WHERE ${fullWhere}`, params.values);
         touched.push(String(row.id));
       }
       if (!touched.length) return [];
-      const readParams = touched.map((id) => params.bind(id)).join(", ");
-      return db
-        .prepare(`SELECT * FROM ${req.table} WHERE id IN (${readParams})`)
-        .all(params.values)
-        .map((r) => denormaliseRow(r as Record<string, unknown>));
+      return readBackInOrder(req.table, touched, params);
     }
 
     case "delete": {
@@ -432,7 +448,7 @@ export async function runQuery(caller: Caller, req: QueryRequest): Promise<unkno
         throw new ForbiddenError("Refusing to delete every row: pass a filter naming the rows to delete.");
       }
       const where = buildWhere(params, rule, req.filters, req.or);
-      const scopeSql = applyScope(params, caller, req.table, rule);
+      const scopeSql = await applyScope(params, caller, req.table, rule);
       const fullWhere = [where, scopeSql].filter(Boolean).join(" AND ");
       if (rule.canWrite) {
         // Deletes used to skip canWrite entirely: anything the scope let you
@@ -440,12 +456,18 @@ export async function runQuery(caller: Caller, req: QueryRequest): Promise<unkno
         // coworker's availability row that REST would have refused with 403.
         // Load exactly the rows the DELETE below would touch and run the same
         // per-row guard insert/update/upsert get. Same WHERE, same bindings.
-        const doomed = db
-          .prepare(`SELECT * FROM ${req.table} WHERE ${fullWhere}`)
-          .all(params.values) as Record<string, unknown>[];
+        const doomed = await database.all<Record<string, unknown>>(`SELECT * FROM ${req.table} WHERE ${fullWhere}`, params.values);
         await rule.canWrite(caller, doomed.map(denormaliseRow));
       }
-      return db.prepare(`DELETE FROM ${req.table} WHERE ${fullWhere}`).run(params.values);
+      const { changes } = await database.run(`DELETE FROM ${req.table} WHERE ${fullWhere}`, params.values);
+      // The response has always been better-sqlite3's RunResult. lastInsertRowid
+      // means nothing for a DELETE, but it stays for the same shape: SQLite's
+      // connection-wide value as before, 0 on MySQL (UUID keys, no row ids).
+      const lastInsertRowid =
+        database.dialect === "sqlite"
+          ? (await database.get<{ id: number }>("SELECT last_insert_rowid() AS id"))!.id
+          : 0;
+      return { changes, lastInsertRowid };
     }
 
     case "upsert": {
@@ -456,7 +478,8 @@ export async function runQuery(caller: Caller, req: QueryRequest): Promise<unkno
       const conflictColumns = req.onConflict.split(",").map((c) => c.trim());
       conflictColumns.forEach((c) => assertColumn(rule, c));
 
-      return rows.map((row) => {
+      const results: (Record<string, unknown> | null)[] = [];
+      for (const row of rows) {
         const clean: Record<string, unknown> = {};
         for (const [column, value] of Object.entries(row)) {
           if (column === "id" || (rule.readonlyColumns ?? []).includes(column)) continue;
@@ -470,21 +493,27 @@ export async function runQuery(caller: Caller, req: QueryRequest): Promise<unkno
         const columns = Object.keys(clean);
         const placeholders = columns.map((c) => params.bind(normaliseValue(clean[c]))).join(", ");
         const updates = columns.filter((c) => !conflictColumns.includes(c));
-        const updateSql = updates.length
-          ? `DO UPDATE SET ${updates.map((c) => `${c} = excluded.${c}`).join(", ")}`
-          : "DO NOTHING";
-        db.prepare(
-          `INSERT INTO ${req.table} (${columns.join(", ")}) VALUES (${placeholders}) ON CONFLICT(${conflictColumns.join(
-            ", ",
-          )}) ${updateSql}`,
-        ).run(params.values);
+        let conflictSql: string;
+        if (database.dialect === "mysql") {
+          // MySQL matches on whichever unique key collides; "do nothing" is a no-op assignment.
+          conflictSql = updates.length
+            ? `AS new_row ON DUPLICATE KEY UPDATE ${updates.map((c) => `${c} = new_row.${c}`).join(", ")}`
+            : `ON DUPLICATE KEY UPDATE ${conflictColumns[0]} = ${conflictColumns[0]}`;
+        } else {
+          conflictSql = `ON CONFLICT(${conflictColumns.join(", ")}) ${
+            updates.length ? `DO UPDATE SET ${updates.map((c) => `${c} = excluded.${c}`).join(", ")}` : "DO NOTHING"
+          }`;
+        }
+        await database.run(
+          `INSERT INTO ${req.table} (${columns.join(", ")}) VALUES (${placeholders}) ${conflictSql}`,
+          params.values,
+        );
 
         const where = conflictColumns.map((c) => `${c} = ${params.bind(normaliseValue(clean[c]))}`).join(" AND ");
-        const found = db.prepare(`SELECT * FROM ${req.table} WHERE ${where}`).get(params.values) as
-          | Record<string, unknown>
-          | undefined;
-        return found ? denormaliseRow(found) : null;
-      });
+        const found = await database.get<Record<string, unknown>>(`SELECT * FROM ${req.table} WHERE ${where}`, params.values);
+        results.push(found ? denormaliseRow(found) : null);
+      }
+      return results;
     }
   }
 }
@@ -501,6 +530,18 @@ function normaliseValue(value: unknown): unknown {
   if (typeof value === "boolean") return value ? 1 : 0;
   if (Array.isArray(value)) return JSON.stringify(value);
   return value;
+}
+
+/**
+ * Rows re-read with `id IN (...)`, in the order the ids were written. SQLite
+ * happened to return insertion order; MySQL returns primary-key order, and
+ * with random UUID keys that shuffles a multi-row write's response.
+ */
+async function readBackInOrder(table: string, ids: string[], params: Params): Promise<Record<string, unknown>[]> {
+  const readParams = ids.map((id) => params.bind(id)).join(", ");
+  const rows = await database.all<Record<string, unknown>>(`SELECT * FROM ${table} WHERE id IN (${readParams})`, params.values);
+  const byId = new Map(rows.map((r) => [String(r.id), denormaliseRow(r)]));
+  return ids.map((id) => byId.get(id)).filter((r): r is Record<string, unknown> => r !== undefined);
 }
 
 /** Undo normaliseValue for reads so the client sees what Postgres would return. */

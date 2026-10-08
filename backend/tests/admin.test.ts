@@ -3,7 +3,7 @@ import request from "supertest";
 import { createApp } from "../src/app.js";
 import { setUserIsAdmin } from "../src/models/users.js";
 
-const { app } = createApp();
+const { app } = await createApp();
 
 async function signUp(email: string) {
   const res = await request(app).post("/auth/signup").send({ email, password: "hunter22", fullName: "Test User" });
