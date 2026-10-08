@@ -6,7 +6,7 @@
  * attachments are not ported yet.
  */
 import crypto from "node:crypto";
-import { db } from "../db.js";
+import { database, db } from "../db.js";
 import { findUserById, type User } from "../models/users.js";
 import { findUserRole } from "../rbac/models.js";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../rbac/errors.js";
@@ -107,16 +107,37 @@ async function requireUser(userId: string): Promise<User> {
   return user;
 }
 
-function visibleProjects(companyId: string): { id: string; name: string; company_id: string }[] {
-  return db
-    .prepare(
-      `SELECT id, name, company_id FROM projects WHERE company_id = @c
-       UNION
-       SELECT p.id, p.name, p.company_id FROM projects p
-         JOIN project_connections pc ON pc.project_id = p.id
-        WHERE pc.sub_company_id = @c`,
-    )
-    .all({ c: companyId }) as { id: string; name: string; company_id: string }[];
+/**
+ * Newest message first. Messages created in the same millisecond tie on
+ * created_at; SQLite breaks the tie by insertion order (rowid). MySQL has no
+ * rowid and the table has no sequence column, so it falls back to id, which
+ * is stable but not insertion order.
+ */
+const NEWEST_FIRST =
+  database.dialect === "sqlite" ? "m.created_at DESC, m.rowid DESC" : "m.created_at DESC, m.id DESC";
+
+/** Records that the user has read the conversation up to `ts` (insert or update). */
+async function upsertRead(conversationId: string, userId: string, ts: string) {
+  const conflict =
+    database.dialect === "mysql"
+      ? "AS new ON DUPLICATE KEY UPDATE last_read_at = new.last_read_at"
+      : "ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_at = excluded.last_read_at";
+  await database.run(
+    `INSERT INTO message_reads (conversation_id, user_id, last_read_at) VALUES (?, ?, ?)
+     ${conflict}`,
+    [conversationId, userId, ts],
+  );
+}
+
+async function visibleProjects(companyId: string): Promise<{ id: string; name: string; company_id: string }[]> {
+  return database.all<{ id: string; name: string; company_id: string }>(
+    `SELECT id, name, company_id FROM projects WHERE company_id = @c
+     UNION
+     SELECT p.id, p.name, p.company_id FROM projects p
+       JOIN project_connections pc ON pc.project_id = p.id
+      WHERE pc.sub_company_id = @c`,
+    { c: companyId },
+  );
 }
 
 /**
@@ -124,89 +145,105 @@ function visibleProjects(companyId: string): { id: string; name: string; company
  * holds everyone at the owning company plus everyone at this one sub, and
  * drops the sub's people if the sub is no longer connected.
  */
-function syncProjectSubConversation(projectId: string, subCompanyId: string, createdBy: string | null): string {
-  const project = db.prepare("SELECT name, company_id FROM projects WHERE id = ?").get(projectId) as
-    | { name: string; company_id: string }
-    | undefined;
+async function syncProjectSubConversation(projectId: string, subCompanyId: string, createdBy: string | null): Promise<string> {
+  const project = await database.get<{ name: string; company_id: string }>(
+    "SELECT name, company_id FROM projects WHERE id = ?",
+    [projectId],
+  );
   if (!project) throw new NotFoundError("Project not found.");
 
-  let conv = db
-    .prepare("SELECT id FROM conversations WHERE project_id = ? AND sub_company_id = ?")
-    .get(projectId, subCompanyId) as { id: string } | undefined;
+  let conv = await database.get<{ id: string }>(
+    "SELECT id FROM conversations WHERE project_id = ? AND sub_company_id = ?",
+    [projectId, subCompanyId],
+  );
   if (!conv) {
     const id = crypto.randomUUID();
     const ts = now();
-    db.prepare(
+    await database.run(
       `INSERT INTO conversations (id, type, project_id, sub_company_id, title, created_by, created_at, last_message_at)
        VALUES (?, 'project', ?, ?, ?, ?, ?, ?)`,
-    ).run(id, projectId, subCompanyId, project.name, createdBy, ts, ts);
+      [id, projectId, subCompanyId, project.name, createdBy, ts, ts],
+    );
     conv = { id };
   }
 
-  const stillConnected = !!db
-    .prepare("SELECT 1 FROM project_connections WHERE project_id = ? AND sub_company_id = ?")
-    .get(projectId, subCompanyId);
+  const stillConnected = !!(await database.get(
+    "SELECT 1 FROM project_connections WHERE project_id = ? AND sub_company_id = ?",
+    [projectId, subCompanyId],
+  ));
   const companies = stillConnected ? [project.company_id, subCompanyId] : [project.company_id];
-  const eligible = db
-    .prepare(`SELECT id, company_id FROM users WHERE company_id IN (${companies.map(() => "?").join(", ")})`)
-    .all(...companies) as { id: string; company_id: string }[];
+  const eligible = await database.all<{ id: string; company_id: string }>(
+    `SELECT id, company_id FROM users WHERE company_id IN (${companies.map(() => "?").join(", ")})`,
+    companies,
+  );
 
   const ts = now();
   const convId = conv.id;
-  db.transaction(() => {
+  // Two requests can sync the same channel at once, so an existing row is skipped rather than an error.
+  const insertIgnore = database.dialect === "mysql" ? "INSERT IGNORE" : "INSERT OR IGNORE";
+  await database.transaction(async () => {
     const keep = new Set(eligible.map((u) => u.id));
-    const current = db
-      .prepare("SELECT user_id FROM conversation_participants WHERE conversation_id = ?")
-      .all(convId) as { user_id: string }[];
-    const remove = db.prepare("DELETE FROM conversation_participants WHERE conversation_id = ? AND user_id = ?");
-    for (const row of current) if (!keep.has(row.user_id)) remove.run(convId, row.user_id);
-    const insert = db.prepare(
-      "INSERT OR IGNORE INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)",
+    const current = await database.all<{ user_id: string }>(
+      "SELECT user_id FROM conversation_participants WHERE conversation_id = ?",
+      [convId],
     );
-    for (const u of eligible) insert.run(convId, u.id, u.company_id, ts);
-  })();
+    for (const row of current) {
+      if (!keep.has(row.user_id)) {
+        await database.run("DELETE FROM conversation_participants WHERE conversation_id = ? AND user_id = ?", [
+          convId,
+          row.user_id,
+        ]);
+      }
+    }
+    for (const u of eligible) {
+      await database.run(
+        `${insertIgnore} INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)`,
+        [convId, u.id, u.company_id, ts],
+      );
+    }
+  });
   return convId;
 }
 
 /** One channel per sub on projects this company owns; its own channel on projects it joined. */
-function syncChannelsFor(user: User) {
+async function syncChannelsFor(user: User) {
   if (!user.companyId) return;
-  for (const project of visibleProjects(user.companyId)) {
+  for (const project of await visibleProjects(user.companyId)) {
     if (project.company_id === user.companyId) {
-      const subs = db.prepare("SELECT sub_company_id FROM project_connections WHERE project_id = ?").all(project.id) as {
-        sub_company_id: string;
-      }[];
-      for (const sub of subs) syncProjectSubConversation(project.id, sub.sub_company_id, user.id);
+      const subs = await database.all<{ sub_company_id: string }>(
+        "SELECT sub_company_id FROM project_connections WHERE project_id = ?",
+        [project.id],
+      );
+      for (const sub of subs) await syncProjectSubConversation(project.id, sub.sub_company_id, user.id);
     } else {
-      syncProjectSubConversation(project.id, user.companyId, user.id);
+      await syncProjectSubConversation(project.id, user.companyId, user.id);
     }
   }
 }
 
-function isParticipant(conversationId: string, userId: string): boolean {
-  return !!db
-    .prepare("SELECT 1 FROM conversation_participants WHERE conversation_id = ? AND user_id = ?")
-    .get(conversationId, userId);
+async function isParticipant(conversationId: string, userId: string): Promise<boolean> {
+  return !!(await database.get(
+    "SELECT 1 FROM conversation_participants WHERE conversation_id = ? AND user_id = ?",
+    [conversationId, userId],
+  ));
 }
 
-function requireConversation(conversationId: string, user: User): ConversationRow {
-  const conv = db.prepare("SELECT * FROM conversations WHERE id = ?").get(conversationId) as
-    | ConversationRow
-    | undefined;
+async function requireConversation(conversationId: string, user: User): Promise<ConversationRow> {
+  const conv = await database.get<ConversationRow>("SELECT * FROM conversations WHERE id = ?", [conversationId]);
   if (!conv) throw new NotFoundError("Conversation not found.");
   if (conv.type === "project" && conv.project_id && conv.sub_company_id) {
-    syncProjectSubConversation(conv.project_id, conv.sub_company_id, null);
+    await syncProjectSubConversation(conv.project_id, conv.sub_company_id, null);
   }
-  if (!isParticipant(conv.id, user.id)) throw new NotFoundError("Conversation not found.");
+  if (!(await isParticipant(conv.id, user.id))) throw new NotFoundError("Conversation not found.");
   return conv;
 }
 
 /** can_post_in_project_conversation: subs below partial read the channel but can't post. */
 async function canPost(conv: ConversationRow, user: User): Promise<boolean> {
   if (user.isAdmin || conv.type !== "project" || !user.companyId) return true;
-  const company = db.prepare("SELECT company_type FROM companies WHERE id = ?").get(user.companyId) as
-    | { company_type: string }
-    | undefined;
+  const company = await database.get<{ company_type: string }>("SELECT company_type FROM companies WHERE id = ?", [
+    user.companyId,
+  ]);
   if (company?.company_type !== "sub") return true;
   const level = (await findUserRole(user.id, user.companyId))?.permissionLevel;
   return level !== "basic" && level !== "level_1";
@@ -214,75 +251,66 @@ async function canPost(conv: ConversationRow, user: User): Promise<boolean> {
 
 export async function listConversations(userId: string): Promise<ConversationSummary[]> {
   const user = await requireUser(userId);
-  syncChannelsFor(user);
+  await syncChannelsFor(user);
 
-  const rows = db
-    .prepare(
-      `SELECT c.* FROM conversations c
-         JOIN conversation_participants cp ON cp.conversation_id = c.id
-        WHERE cp.user_id = ?
-        ORDER BY c.last_message_at DESC`,
-    )
-    .all(user.id) as ConversationRow[];
+  const rows = await database.all<ConversationRow>(
+    `SELECT c.* FROM conversations c
+       JOIN conversation_participants cp ON cp.conversation_id = c.id
+      WHERE cp.user_id = ?
+      ORDER BY c.last_message_at DESC`,
+    [user.id],
+  );
 
   return Promise.all(rows.map(async (conv): Promise<ConversationSummary> => {
     let title = conv.title ?? "Conversation";
     let subtitle: string | null = null;
     if (conv.type === "project" && conv.project_id) {
-      const project = db
-        .prepare(
-          `SELECT p.name, p.company_id, gc.name AS gc_name, sub.name AS sub_name FROM projects p
-             JOIN companies gc ON gc.id = p.company_id
-             LEFT JOIN companies sub ON sub.id = ?
-            WHERE p.id = ?`,
-        )
-        .get(conv.sub_company_id, conv.project_id) as
-        | { name: string; company_id: string; gc_name: string; sub_name: string | null }
-        | undefined;
+      const project = await database.get<{ name: string; company_id: string; gc_name: string; sub_name: string | null }>(
+        `SELECT p.name, p.company_id, gc.name AS gc_name, sub.name AS sub_name FROM projects p
+           JOIN companies gc ON gc.id = p.company_id
+           LEFT JOIN companies sub ON sub.id = ?
+          WHERE p.id = ?`,
+        [conv.sub_company_id, conv.project_id],
+      );
       title = project?.name ?? title;
       // Name whoever is on the other side of this channel.
       subtitle = (project?.company_id === user.companyId ? project?.sub_name : project?.gc_name) ?? null;
     } else if (conv.type === "dm") {
-      const other = db
-        .prepare(
-          `SELECT u.full_name, u.email, co.name AS company FROM conversation_participants cp
-             JOIN users u ON u.id = cp.user_id
-             LEFT JOIN companies co ON co.id = u.company_id
-            WHERE cp.conversation_id = ? AND cp.user_id <> ?`,
-        )
-        .get(conv.id, user.id) as { full_name: string; email: string; company: string | null } | undefined;
+      const other = await database.get<{ full_name: string; email: string; company: string | null }>(
+        `SELECT u.full_name, u.email, co.name AS company FROM conversation_participants cp
+           JOIN users u ON u.id = cp.user_id
+           LEFT JOIN companies co ON co.id = u.company_id
+          WHERE cp.conversation_id = ? AND cp.user_id <> ?`,
+        [conv.id, user.id],
+      );
       title = other?.full_name || other?.email || "Direct message";
       subtitle = other?.company ?? null;
     } else if (conv.type === "group") {
-      const count = (
-        db.prepare("SELECT COUNT(*) AS n FROM conversation_participants WHERE conversation_id = ?").get(conv.id) as {
-          n: number;
-        }
-      ).n;
+      const count = (await database.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM conversation_participants WHERE conversation_id = ?",
+        [conv.id],
+      ))!.n;
       subtitle = `${count} member${count === 1 ? "" : "s"}`;
     }
 
-    const last = db
-      .prepare(
-        `SELECT m.body, m.created_at, u.full_name FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id
-          WHERE m.conversation_id = ? ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1`,
-      )
-      .get(conv.id) as { body: string; created_at: string; full_name: string | null } | undefined;
+    const last = await database.get<{ body: string; created_at: string; full_name: string | null }>(
+      `SELECT m.body, m.created_at, u.full_name FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id
+        WHERE m.conversation_id = ? ORDER BY ${NEWEST_FIRST} LIMIT 1`,
+      [conv.id],
+    );
 
     const readAt =
       (
-        db.prepare("SELECT last_read_at FROM message_reads WHERE conversation_id = ? AND user_id = ?").get(conv.id, user.id) as
-          | { last_read_at: string }
-          | undefined
-      )?.last_read_at ?? "";
-    const unread = (
-      db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM messages
-            WHERE conversation_id = ? AND created_at > ? AND (sender_user_id IS NULL OR sender_user_id <> ?)`,
+        await database.get<{ last_read_at: string }>(
+          "SELECT last_read_at FROM message_reads WHERE conversation_id = ? AND user_id = ?",
+          [conv.id, user.id],
         )
-        .get(conv.id, readAt, user.id) as { n: number }
-    ).n;
+      )?.last_read_at ?? "";
+    const unread = (await database.get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM messages
+        WHERE conversation_id = ? AND created_at > ? AND (sender_user_id IS NULL OR sender_user_id <> ?)`,
+      [conv.id, readAt, user.id],
+    ))!.n;
 
     return {
       id: conv.id,
@@ -330,13 +358,13 @@ const toView = (r: MessageRow): MessageView => ({
 
 export async function listMessages(userId: string, conversationId: string): Promise<MessageView[]> {
   const user = await requireUser(userId);
-  requireConversation(conversationId, user);
-  const rows = db
-    .prepare(
-      `SELECT * FROM (${MESSAGE_SELECT} WHERE m.conversation_id = ? ORDER BY m.created_at DESC, m.rowid DESC LIMIT 300)
-        ORDER BY created_at ASC`,
-    )
-    .all(conversationId) as MessageRow[];
+  await requireConversation(conversationId, user);
+  // MySQL requires an alias on a derived table; SQLite accepts one.
+  const rows = await database.all<MessageRow>(
+    `SELECT * FROM (${MESSAGE_SELECT} WHERE m.conversation_id = ? ORDER BY ${NEWEST_FIRST} LIMIT 300) AS recent
+      ORDER BY created_at ASC`,
+    [conversationId],
+  );
   return rows.map(toView);
 }
 
@@ -347,7 +375,7 @@ export async function sendMessage(
   body: unknown,
 ): Promise<{ message: MessageView; recipientIds: string[] }> {
   const user = await requireUser(userId);
-  const conv = requireConversation(conversationId, user);
+  const conv = await requireConversation(conversationId, user);
   const text = typeof body === "string" ? body.trim() : "";
   if (!text) throw new BadRequestError("Message can't be empty.");
   if (text.length > MAX_BODY) throw new BadRequestError(`Messages are limited to ${MAX_BODY} characters.`);
@@ -357,42 +385,45 @@ export async function sendMessage(
 
   const id = crypto.randomUUID();
   const ts = now();
-  db.transaction(() => {
-    db.prepare(
+  await database.transaction(async () => {
+    await database.run(
       "INSERT INTO messages (id, conversation_id, sender_user_id, sender_company_id, body, kind, created_at) VALUES (?, ?, ?, ?, ?, 'user', ?)",
-    ).run(id, conv.id, user.id, user.companyId, text, ts);
-    db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(ts, conv.id);
+      [id, conv.id, user.id, user.companyId, text, ts],
+    );
+    await database.run("UPDATE conversations SET last_message_at = ? WHERE id = ?", [ts, conv.id]);
     // Sending implies you've read everything up to your own message.
-    db.prepare(
-      `INSERT INTO message_reads (conversation_id, user_id, last_read_at) VALUES (?, ?, ?)
-       ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_at = excluded.last_read_at`,
-    ).run(conv.id, user.id, ts);
-  })();
+    await upsertRead(conv.id, user.id, ts);
+  });
 
-  const message = toView(db.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).get(id) as MessageRow);
+  const message = toView((await database.get<MessageRow>(`${MESSAGE_SELECT} WHERE m.id = ?`, [id]))!);
   const recipientIds = (
-    db.prepare("SELECT user_id FROM conversation_participants WHERE conversation_id = ?").all(conv.id) as {
-      user_id: string;
-    }[]
+    await database.all<{ user_id: string }>("SELECT user_id FROM conversation_participants WHERE conversation_id = ?", [
+      conv.id,
+    ])
   ).map((r) => r.user_id);
   return { message, recipientIds };
 }
 
 /** A "Gina added Sam" line in the thread (the original's system_participant_added). */
-function postSystemMessage(conversationId: string, actor: User, text: string): { message: MessageView; recipientIds: string[] } {
+async function postSystemMessage(
+  conversationId: string,
+  actor: User,
+  text: string,
+): Promise<{ message: MessageView; recipientIds: string[] }> {
   const id = crypto.randomUUID();
   const ts = now();
-  db.transaction(() => {
-    db.prepare(
+  await database.transaction(async () => {
+    await database.run(
       "INSERT INTO messages (id, conversation_id, sender_user_id, sender_company_id, body, kind, created_at) VALUES (?, ?, ?, ?, ?, 'system', ?)",
-    ).run(id, conversationId, actor.id, actor.companyId, text, ts);
-    db.prepare("UPDATE conversations SET last_message_at = ? WHERE id = ?").run(ts, conversationId);
-  })();
-  const message = toView(db.prepare(`${MESSAGE_SELECT} WHERE m.id = ?`).get(id) as MessageRow);
+      [id, conversationId, actor.id, actor.companyId, text, ts],
+    );
+    await database.run("UPDATE conversations SET last_message_at = ? WHERE id = ?", [ts, conversationId]);
+  });
+  const message = toView((await database.get<MessageRow>(`${MESSAGE_SELECT} WHERE m.id = ?`, [id]))!);
   const recipientIds = (
-    db.prepare("SELECT user_id FROM conversation_participants WHERE conversation_id = ?").all(conversationId) as {
-      user_id: string;
-    }[]
+    await database.all<{ user_id: string }>("SELECT user_id FROM conversation_participants WHERE conversation_id = ?", [
+      conversationId,
+    ])
   ).map((r) => r.user_id);
   return { message, recipientIds };
 }
@@ -429,30 +460,28 @@ export async function createGroup(
 
   const id = crypto.randomUUID();
   const ts = now();
-  db.transaction(() => {
-    db.prepare(
+  await database.transaction(async () => {
+    await database.run(
       "INSERT INTO conversations (id, type, title, created_by, created_at, last_message_at) VALUES (?, 'group', ?, ?, ?, ?)",
-    ).run(id, name, user.id, ts, ts);
-    const insert = db.prepare(
-      "INSERT INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)",
+      [id, name, user.id, ts, ts],
     );
-    insert.run(id, user.id, user.companyId, ts);
-    for (const m of members) insert.run(id, m.id, m.companyId, ts);
-  })();
-  const announced = postSystemMessage(id, user, `${displayName(user)} created the group "${name}"`);
+    const insert = "INSERT INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)";
+    await database.run(insert, [id, user.id, user.companyId, ts]);
+    for (const m of members) await database.run(insert, [id, m.id, m.companyId, ts]);
+  });
+  const announced = await postSystemMessage(id, user, `${displayName(user)} created the group "${name}"`);
   return { conversationId: id, ...announced };
 }
 
 export async function listParticipants(userId: string, conversationId: string): Promise<Contact[]> {
   const user = await requireUser(userId);
-  requireConversation(conversationId, user);
-  const rows = db
-    .prepare(
-      `SELECT u.id, u.full_name, u.email, co.name AS company FROM conversation_participants cp
-         JOIN users u ON u.id = cp.user_id LEFT JOIN companies co ON co.id = u.company_id
-        WHERE cp.conversation_id = ? ORDER BY u.full_name`,
-    )
-    .all(conversationId) as { id: string; full_name: string; email: string; company: string | null }[];
+  await requireConversation(conversationId, user);
+  const rows = await database.all<{ id: string; full_name: string; email: string; company: string | null }>(
+    `SELECT u.id, u.full_name, u.email, co.name AS company FROM conversation_participants cp
+       JOIN users u ON u.id = cp.user_id LEFT JOIN companies co ON co.id = u.company_id
+      WHERE cp.conversation_id = ? ORDER BY u.full_name`,
+    [conversationId],
+  );
   return rows.map((r) => ({ userId: r.id, fullName: r.full_name, email: r.email, companyName: r.company }));
 }
 
@@ -463,24 +492,22 @@ export async function addGroupParticipant(
   targetUserId: unknown,
 ): Promise<{ message: MessageView; recipientIds: string[] }> {
   const user = await requireUser(userId);
-  const conv = requireConversation(conversationId, user);
+  const conv = await requireConversation(conversationId, user);
   if (conv.type !== "group") throw new BadRequestError("People can only be added to group chats.");
   if (typeof targetUserId !== "string" || !targetUserId) throw new BadRequestError("userId is required.");
-  if (isParticipant(conv.id, targetUserId)) throw new BadRequestError("They're already in this group.");
+  if (await isParticipant(conv.id, targetUserId)) throw new BadRequestError("They're already in this group.");
   const [target] = await requireContacts(user, [targetUserId]);
-  db.prepare(
+  await database.run(
     "INSERT INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)",
-  ).run(conv.id, target.id, target.companyId, now());
+    [conv.id, target.id, target.companyId, now()],
+  );
   return postSystemMessage(conv.id, user, `${displayName(user)} added ${displayName(target)}`);
 }
 
 export async function markRead(userId: string, conversationId: string): Promise<void> {
   const user = await requireUser(userId);
-  requireConversation(conversationId, user);
-  db.prepare(
-    `INSERT INTO message_reads (conversation_id, user_id, last_read_at) VALUES (?, ?, ?)
-     ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_at = excluded.last_read_at`,
-  ).run(conversationId, user.id, now());
+  await requireConversation(conversationId, user);
+  await upsertRead(conversationId, user.id, now());
 }
 
 export interface Contact {
@@ -495,22 +522,22 @@ export async function listContacts(userId: string): Promise<Contact[]> {
   const user = await requireUser(userId);
   if (!user.companyId) return [];
   const companyIds = new Set<string>([user.companyId]);
-  for (const project of visibleProjects(user.companyId)) {
+  for (const project of await visibleProjects(user.companyId)) {
     companyIds.add(project.company_id);
-    const subs = db.prepare("SELECT sub_company_id FROM project_connections WHERE project_id = ?").all(project.id) as {
-      sub_company_id: string;
-    }[];
+    const subs = await database.all<{ sub_company_id: string }>(
+      "SELECT sub_company_id FROM project_connections WHERE project_id = ?",
+      [project.id],
+    );
     for (const s of subs) companyIds.add(s.sub_company_id);
   }
   const ids = [...companyIds];
-  const rows = db
-    .prepare(
-      `SELECT u.id, u.full_name, u.email, co.name AS company FROM users u
-         LEFT JOIN companies co ON co.id = u.company_id
-        WHERE u.company_id IN (${ids.map(() => "?").join(", ")}) AND u.id <> ?
-        ORDER BY co.name, u.full_name`,
-    )
-    .all(...ids, user.id) as { id: string; full_name: string; email: string; company: string | null }[];
+  const rows = await database.all<{ id: string; full_name: string; email: string; company: string | null }>(
+    `SELECT u.id, u.full_name, u.email, co.name AS company FROM users u
+       LEFT JOIN companies co ON co.id = u.company_id
+      WHERE u.company_id IN (${ids.map(() => "?").join(", ")}) AND u.id <> ?
+      ORDER BY co.name, u.full_name`,
+    [...ids, user.id],
+  );
   return rows.map((r) => ({ userId: r.id, fullName: r.full_name, email: r.email, companyName: r.company }));
 }
 
@@ -524,29 +551,27 @@ export async function getOrCreateDm(userId: string, otherUserId: unknown): Promi
     throw new ForbiddenError("You can only message people in your company or on a shared project.");
   }
 
-  const existing = db
-    .prepare(
-      `SELECT c.id FROM conversations c
-        WHERE c.type = 'dm'
-          AND EXISTS (SELECT 1 FROM conversation_participants WHERE conversation_id = c.id AND user_id = @me)
-          AND EXISTS (SELECT 1 FROM conversation_participants WHERE conversation_id = c.id AND user_id = @other)
-          AND (SELECT COUNT(*) FROM conversation_participants WHERE conversation_id = c.id) = 2
-        LIMIT 1`,
-    )
-    .get({ me: user.id, other: other.id }) as { id: string } | undefined;
+  const existing = await database.get<{ id: string }>(
+    `SELECT c.id FROM conversations c
+      WHERE c.type = 'dm'
+        AND EXISTS (SELECT 1 FROM conversation_participants WHERE conversation_id = c.id AND user_id = @me)
+        AND EXISTS (SELECT 1 FROM conversation_participants WHERE conversation_id = c.id AND user_id = @other)
+        AND (SELECT COUNT(*) FROM conversation_participants WHERE conversation_id = c.id) = 2
+      LIMIT 1`,
+    { me: user.id, other: other.id },
+  );
   if (existing) return existing.id;
 
   const id = crypto.randomUUID();
   const ts = now();
-  db.transaction(() => {
-    db.prepare(
+  await database.transaction(async () => {
+    await database.run(
       "INSERT INTO conversations (id, type, created_by, created_at, last_message_at) VALUES (?, 'dm', ?, ?, ?)",
-    ).run(id, user.id, ts, ts);
-    const insert = db.prepare(
-      "INSERT INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)",
+      [id, user.id, ts, ts],
     );
-    insert.run(id, user.id, user.companyId, ts);
-    insert.run(id, other.id, other.companyId, ts);
-  })();
+    const insert = "INSERT INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)";
+    await database.run(insert, [id, user.id, user.companyId, ts]);
+    await database.run(insert, [id, other.id, other.companyId, ts]);
+  });
   return id;
 }

@@ -5,7 +5,7 @@
  * same events is not ported.
  */
 import crypto from "node:crypto";
-import { db } from "../db.js";
+import { database, db } from "../db.js";
 import { emit } from "../realtime/index.js";
 import { EVENT, ROOM } from "../realtime/events.js";
 import { findUserById } from "../models/users.js";
@@ -62,41 +62,43 @@ const toNotification = (r: Row): Notification => ({
   createdAt: r.created_at,
 });
 
-export function listNotifications(userId: string): Notification[] {
-  const rows = db
-    .prepare("SELECT * FROM user_notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 30")
-    .all(userId) as Row[];
+export async function listNotifications(userId: string): Promise<Notification[]> {
+  const rows = await database.all<Row>(
+    "SELECT * FROM user_notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 30",
+    [userId],
+  );
   return rows.map(toNotification);
 }
 
 /** Marks the given ids (or everything unread when none are given) as read — only ever the caller's own. */
-export function markNotificationsRead(userId: string, ids?: unknown): void {
+export async function markNotificationsRead(userId: string, ids?: unknown): Promise<void> {
   const now = new Date().toISOString();
   if (Array.isArray(ids) && ids.length > 0) {
     const clean = ids.filter((id): id is string => typeof id === "string");
     if (clean.length === 0) return;
-    db.prepare(
+    await database.run(
       `UPDATE user_notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL AND id IN (${clean.map(() => "?").join(", ")})`,
-    ).run(now, userId, ...clean);
+      [now, userId, ...clean],
+    );
     return;
   }
-  db.prepare("UPDATE user_notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(now, userId);
+  await database.run("UPDATE user_notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL", [now, userId]);
 }
 
-function notify(
+async function notify(
   userIds: Iterable<string>,
   message: { eventType: string; title: string; body: string; projectId?: string | null; link?: string | null },
 ) {
   // Runs after the real action has succeeded; a failure here must not turn
   // that success into an error response.
   try {
-    const insert = db.prepare(
-      `INSERT INTO user_notifications (id, user_id, event_type, title, body, project_id, link, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
     for (const userId of new Set(userIds)) {
       const id = crypto.randomUUID();
-      insert.run(id, userId, message.eventType, message.title, message.body, message.projectId ?? null, message.link ?? null, new Date().toISOString());
+      await database.run(
+        `INSERT INTO user_notifications (id, user_id, event_type, title, body, project_id, link, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, userId, message.eventType, message.title, message.body, message.projectId ?? null, message.link ?? null, new Date().toISOString()],
+      );
       emit(EVENT.notificationCreated, { id }, ROOM.notifications, userId);
     }
   } catch (err) {
@@ -105,13 +107,12 @@ function notify(
 }
 
 /** People who can act on schedule requests for a company: partial and up (the creator always counts). */
-function schedulers(companyId: string, exceptUserId: string): string[] {
-  const rows = db
-    .prepare(
-      `SELECT u.id FROM users u JOIN user_roles r ON r.user_id = u.id AND r.company_id = u.company_id
-        WHERE u.company_id = ? AND (r.permission_level IN ('partial', 'full', 'account_holder') OR r.is_company_creator = 1)`,
-    )
-    .all(companyId) as { id: string }[];
+async function schedulers(companyId: string, exceptUserId: string): Promise<string[]> {
+  const rows = await database.all<{ id: string }>(
+    `SELECT u.id FROM users u JOIN user_roles r ON r.user_id = u.id AND r.company_id = u.company_id
+      WHERE u.company_id = ? AND (r.permission_level IN ('partial', 'full', 'account_holder') OR r.is_company_creator = 1)`,
+    [companyId],
+  );
   return rows.map((r) => r.id).filter((id) => id !== exceptUserId);
 }
 
@@ -119,12 +120,11 @@ function schedulers(companyId: string, exceptUserId: string): string[] {
 async function approvers(companyId: string): Promise<string[]> {
   const company = await findCompanyById(companyId);
   const levels = company?.companyType === "sub" ? "('full', 'account_holder')" : "('account_holder')";
-  const rows = db
-    .prepare(
-      `SELECT u.id FROM users u JOIN user_roles r ON r.user_id = u.id AND r.company_id = u.company_id
-        WHERE u.company_id = ? AND (r.permission_level IN ${levels} OR r.is_company_creator = 1)`,
-    )
-    .all(companyId) as { id: string }[];
+  const rows = await database.all<{ id: string }>(
+    `SELECT u.id FROM users u JOIN user_roles r ON r.user_id = u.id AND r.company_id = u.company_id
+      WHERE u.company_id = ? AND (r.permission_level IN ${levels} OR r.is_company_creator = 1)`,
+    [companyId],
+  );
   return rows.map((r) => r.id);
 }
 
@@ -134,7 +134,7 @@ const dayLabel = (iso: string) => {
 };
 
 async function requestContext(request: ScheduleRequest) {
-  const project = db.prepare("SELECT name FROM projects WHERE id = ?").get(request.projectId) as { name: string } | undefined;
+  const project = await database.get<{ name: string }>("SELECT name FROM projects WHERE id = ?", [request.projectId]);
   return {
     projectName: project?.name ?? "a project",
     gcName: (await findCompanyById(request.requestingCompanyId))?.name ?? "The GC",
@@ -147,7 +147,7 @@ async function requestContext(request: ScheduleRequest) {
 export async function notifyScheduleRequestCreated(actorUserId: string, request: ScheduleRequest) {
   const c = await requestContext(request);
   const crew = request.employeeIds.length;
-  notify(schedulers(request.subCompanyId, actorUserId), {
+  await notify(await schedulers(request.subCompanyId, actorUserId), {
     eventType: "schedule_created",
     title: "New schedule request",
     body: `${c.gcName} requested ${crew} ${crew === 1 ? "person" : "people"} for ${c.day} on ${c.projectName}.`,
@@ -160,7 +160,7 @@ export async function notifyScheduleRequestUpdated(actorUserId: string, request:
   const c = await requestContext(request);
   const reason = request.statusReason ? ` Reason: ${request.statusReason}` : "";
   if (request.status === "confirmed" || request.status === "rejected") {
-    notify(schedulers(request.requestingCompanyId, actorUserId), {
+    await notify(await schedulers(request.requestingCompanyId, actorUserId), {
       eventType: request.status === "confirmed" ? "schedule_confirmed" : "schedule_rejected",
       title: request.status === "confirmed" ? "Request confirmed" : "Request declined",
       body: `${c.subName} ${request.status === "confirmed" ? "confirmed" : "declined"} ${c.day} on ${c.projectName}.${reason}`,
@@ -172,7 +172,7 @@ export async function notifyScheduleRequestUpdated(actorUserId: string, request:
     const actorCompany = (await findUserById(actorUserId))?.companyId;
     const other = actorCompany === request.subCompanyId ? request.requestingCompanyId : request.subCompanyId;
     const by = actorCompany === request.subCompanyId ? c.subName : c.gcName;
-    notify(schedulers(other, actorUserId), {
+    await notify(await schedulers(other, actorUserId), {
       eventType: "schedule_cancelled",
       title: "Request cancelled",
       body: `${by} cancelled ${c.day} on ${c.projectName}.${reason}`,
@@ -185,7 +185,7 @@ export async function notifyScheduleRequestUpdated(actorUserId: string, request:
 export async function notifyJoinRequestCreated(requesterUserId: string, companyId: string) {
   const requester = await findUserById(requesterUserId);
   const company = await findCompanyById(companyId);
-  notify(await approvers(companyId), {
+  await notify(await approvers(companyId), {
     eventType: "join_request",
     title: "New join request",
     body: `${requester?.fullName || requester?.email || "Someone"} asked to join ${company?.name ?? "your company"}.`,
@@ -197,7 +197,7 @@ export async function notifyJoinRequestResolved(requestId: string, approved: boo
   const joinRequest = await findJoinRequestById(requestId);
   if (!joinRequest) return;
   const company = await findCompanyById(joinRequest.companyId);
-  notify([joinRequest.userId], {
+  await notify([joinRequest.userId], {
     eventType: approved ? "join_approved" : "join_rejected",
     title: approved ? "You're in" : "Join request declined",
     body: approved

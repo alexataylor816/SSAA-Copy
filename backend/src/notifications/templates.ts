@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { db } from "../db.js";
+import { database, db } from "../db.js";
 import { BadRequestError } from "../rbac/errors.js";
 
 /**
@@ -134,15 +134,15 @@ function mapRow(r: Row): NotificationTemplate {
   };
 }
 
-export function listTemplates(): NotificationTemplate[] {
-  const rows = db.prepare("SELECT * FROM notification_templates ORDER BY event_type").all() as Row[];
+export async function listTemplates(): Promise<NotificationTemplate[]> {
+  const rows = await database.all<Row>("SELECT * FROM notification_templates ORDER BY event_type");
   return rows.map(mapRow);
 }
 
-export function updateTemplate(
+export async function updateTemplate(
   id: string,
   updates: { subject?: string; bodyHtml?: string; channel?: string; isActive?: boolean },
-): NotificationTemplate | undefined {
+): Promise<NotificationTemplate | undefined> {
   const sets: string[] = [];
   const values: unknown[] = [];
   if (updates.subject !== undefined) {
@@ -165,13 +165,11 @@ export function updateTemplate(
     values.push(updates.isActive ? 1 : 0);
   }
   if (sets.length === 0) {
-    const row = db.prepare("SELECT * FROM notification_templates WHERE id = ?").get(id) as Row | undefined;
+    const row = await database.get<Row>("SELECT * FROM notification_templates WHERE id = ?", [id]);
     return row ? mapRow(row) : undefined;
   }
-  values.push(id);
-  db.prepare(`UPDATE notification_templates SET ${sets.join(", ")}, updated_at = datetime('now') WHERE id = ?`).run(
-    ...values,
-  );
-  const row = db.prepare("SELECT * FROM notification_templates WHERE id = ?").get(id) as Row | undefined;
+  values.push(database.now(), id);
+  await database.run(`UPDATE notification_templates SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`, values);
+  const row = await database.get<Row>("SELECT * FROM notification_templates WHERE id = ?", [id]);
   return row ? mapRow(row) : undefined;
 }

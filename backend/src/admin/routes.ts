@@ -99,7 +99,7 @@ adminRouter.get(
   "/admin/templates",
   route(async (req, res) => {
     await requireAdmin(req);
-    res.json({ templates: listTemplates() });
+    res.json({ templates: await listTemplates() });
   }),
 );
 
@@ -108,7 +108,7 @@ adminRouter.patch(
   route(async (req, res) => {
     await requireAdmin(req);
     const { subject, bodyHtml, channel, isActive } = req.body ?? {};
-    const updated = updateTemplate(req.params.id, { subject, bodyHtml, channel, isActive });
+    const updated = await updateTemplate(req.params.id, { subject, bodyHtml, channel, isActive });
     if (!updated) throw new NotFoundError("Template not found.");
     res.json(updated);
   }),
