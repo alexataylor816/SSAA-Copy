@@ -19,10 +19,10 @@ export const queryRouter = Router();
 
 queryRouter.use(express.json({ limit: "2mb" }));
 
-function handle(handler: RequestHandler): RequestHandler {
-  return (req, res, next) => {
+function handle(handler: (...args: Parameters<RequestHandler>) => unknown): RequestHandler {
+  return async (req, res, next) => {
     try {
-      handler(req, res, next);
+      await handler(req, res, next);
     } catch (err) {
       if (err instanceof HttpError) {
         res.status(err.status).json({ error: err.message });
@@ -45,10 +45,10 @@ function statusFor(err: unknown): number {
 queryRouter.post(
   "/query",
   requireAuth,
-  handle((req, res) => {
-    const caller = resolveCaller(req.userId!);
+  handle(async (req, res) => {
+    const caller = await resolveCaller(req.userId!);
     try {
-      res.json({ data: runQuery(caller, req.body as QueryRequest) });
+      res.json({ data: await runQuery(caller, req.body as QueryRequest) });
     } catch (err) {
       res.status(statusFor(err)).json({ error: err instanceof Error ? err.message : "Query failed." });
     }
@@ -58,8 +58,8 @@ queryRouter.post(
 queryRouter.post(
   "/rpc/:name",
   requireAuth,
-  handle((req, res) => {
-    const caller = resolveCaller(req.userId!);
+  handle(async (req, res) => {
+    const caller = await resolveCaller(req.userId!);
     const fn = RPC_REGISTRY[req.params.name];
     if (!fn) {
       res.status(404).json({ error: `Function rpc/${req.params.name} is not available yet.` });

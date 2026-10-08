@@ -23,10 +23,10 @@ function broadcast(message: MessageView, recipientIds: string[]) {
 
 export const messagingRouter = Router();
 
-function route(handler: RequestHandler): RequestHandler {
-  return (req, res, next) => {
+function route(handler: (...args: Parameters<RequestHandler>) => unknown): RequestHandler {
+  return async (req, res, next) => {
     try {
-      handler(req, res, next);
+      await handler(req, res, next);
     } catch (err) {
       if (err instanceof HttpError) {
         res.status(err.status).json({ error: err.message });
@@ -40,24 +40,24 @@ function route(handler: RequestHandler): RequestHandler {
 messagingRouter.get(
   "/conversations",
   requireAuth,
-  route((req, res) => {
-    res.json({ conversations: listConversations(req.userId!) });
+  route(async (req, res) => {
+    res.json({ conversations: await listConversations(req.userId!) });
   }),
 );
 
 messagingRouter.get(
   "/conversations/:id/messages",
   requireAuth,
-  route((req, res) => {
-    res.json({ messages: listMessages(req.userId!, req.params.id) });
+  route(async (req, res) => {
+    res.json({ messages: await listMessages(req.userId!, req.params.id) });
   }),
 );
 
 messagingRouter.post(
   "/conversations/:id/messages",
   requireAuth,
-  route((req, res) => {
-    const { message, recipientIds } = sendMessage(req.userId!, req.params.id, req.body?.body);
+  route(async (req, res) => {
+    const { message, recipientIds } = await sendMessage(req.userId!, req.params.id, req.body?.body);
     broadcast(message, recipientIds);
     res.status(201).json({ message });
   }),
@@ -66,8 +66,8 @@ messagingRouter.post(
 messagingRouter.post(
   "/conversations/:id/read",
   requireAuth,
-  route((req, res) => {
-    markRead(req.userId!, req.params.id);
+  route(async (req, res) => {
+    await markRead(req.userId!, req.params.id);
     res.json({ ok: true });
   }),
 );
@@ -75,8 +75,8 @@ messagingRouter.post(
 messagingRouter.post(
   "/conversations/group",
   requireAuth,
-  route((req, res) => {
-    const { conversationId, message, recipientIds } = createGroup(req.userId!, req.body?.title, req.body?.userIds);
+  route(async (req, res) => {
+    const { conversationId, message, recipientIds } = await createGroup(req.userId!, req.body?.title, req.body?.userIds);
     broadcast(message, recipientIds);
     res.status(201).json({ conversationId });
   }),
@@ -85,16 +85,16 @@ messagingRouter.post(
 messagingRouter.get(
   "/conversations/:id/participants",
   requireAuth,
-  route((req, res) => {
-    res.json({ participants: listParticipants(req.userId!, req.params.id) });
+  route(async (req, res) => {
+    res.json({ participants: await listParticipants(req.userId!, req.params.id) });
   }),
 );
 
 messagingRouter.post(
   "/conversations/:id/participants",
   requireAuth,
-  route((req, res) => {
-    const { message, recipientIds } = addGroupParticipant(req.userId!, req.params.id, req.body?.userId);
+  route(async (req, res) => {
+    const { message, recipientIds } = await addGroupParticipant(req.userId!, req.params.id, req.body?.userId);
     broadcast(message, recipientIds);
     res.status(201).json({ message });
   }),
@@ -103,15 +103,15 @@ messagingRouter.post(
 messagingRouter.post(
   "/conversations/dm",
   requireAuth,
-  route((req, res) => {
-    res.json({ conversationId: getOrCreateDm(req.userId!, req.body?.userId) });
+  route(async (req, res) => {
+    res.json({ conversationId: await getOrCreateDm(req.userId!, req.body?.userId) });
   }),
 );
 
 messagingRouter.get(
   "/messaging/contacts",
   requireAuth,
-  route((req, res) => {
-    res.json({ contacts: listContacts(req.userId!) });
+  route(async (req, res) => {
+    res.json({ contacts: await listContacts(req.userId!) });
   }),
 );

@@ -101,8 +101,8 @@ interface ConversationRow {
   last_message_at: string;
 }
 
-function requireUser(userId: string): User {
-  const user = findUserById(userId);
+async function requireUser(userId: string): Promise<User> {
+  const user = await findUserById(userId);
   if (!user) throw new NotFoundError("User not found.");
   return user;
 }
@@ -202,18 +202,18 @@ function requireConversation(conversationId: string, user: User): ConversationRo
 }
 
 /** can_post_in_project_conversation: subs below partial read the channel but can't post. */
-function canPost(conv: ConversationRow, user: User): boolean {
+async function canPost(conv: ConversationRow, user: User): Promise<boolean> {
   if (user.isAdmin || conv.type !== "project" || !user.companyId) return true;
   const company = db.prepare("SELECT company_type FROM companies WHERE id = ?").get(user.companyId) as
     | { company_type: string }
     | undefined;
   if (company?.company_type !== "sub") return true;
-  const level = findUserRole(user.id, user.companyId)?.permissionLevel;
+  const level = (await findUserRole(user.id, user.companyId))?.permissionLevel;
   return level !== "basic" && level !== "level_1";
 }
 
-export function listConversations(userId: string): ConversationSummary[] {
-  const user = requireUser(userId);
+export async function listConversations(userId: string): Promise<ConversationSummary[]> {
+  const user = await requireUser(userId);
   syncChannelsFor(user);
 
   const rows = db
@@ -225,7 +225,7 @@ export function listConversations(userId: string): ConversationSummary[] {
     )
     .all(user.id) as ConversationRow[];
 
-  return rows.map((conv) => {
+  return Promise.all(rows.map(async (conv): Promise<ConversationSummary> => {
     let title = conv.title ?? "Conversation";
     let subtitle: string | null = null;
     if (conv.type === "project" && conv.project_id) {
@@ -294,9 +294,9 @@ export function listConversations(userId: string): ConversationSummary[] {
       lastMessageAt: conv.last_message_at,
       lastMessage: last ? { body: last.body, senderName: last.full_name, createdAt: last.created_at } : null,
       unreadCount: unread,
-      canPost: canPost(conv, user),
+      canPost: await canPost(conv, user),
     };
-  });
+  }));
 }
 
 const MESSAGE_SELECT = `
@@ -328,8 +328,8 @@ const toView = (r: MessageRow): MessageView => ({
   createdAt: r.created_at,
 });
 
-export function listMessages(userId: string, conversationId: string): MessageView[] {
-  const user = requireUser(userId);
+export async function listMessages(userId: string, conversationId: string): Promise<MessageView[]> {
+  const user = await requireUser(userId);
   requireConversation(conversationId, user);
   const rows = db
     .prepare(
@@ -341,17 +341,17 @@ export function listMessages(userId: string, conversationId: string): MessageVie
 }
 
 /** Returns the stored message plus who should be told about it. */
-export function sendMessage(
+export async function sendMessage(
   userId: string,
   conversationId: string,
   body: unknown,
-): { message: MessageView; recipientIds: string[] } {
-  const user = requireUser(userId);
+): Promise<{ message: MessageView; recipientIds: string[] }> {
+  const user = await requireUser(userId);
   const conv = requireConversation(conversationId, user);
   const text = typeof body === "string" ? body.trim() : "";
   if (!text) throw new BadRequestError("Message can't be empty.");
   if (text.length > MAX_BODY) throw new BadRequestError(`Messages are limited to ${MAX_BODY} characters.`);
-  if (!canPost(conv, user)) {
+  if (!(await canPost(conv, user))) {
     throw new ForbiddenError("Your permission level can read this project channel but not post in it.");
   }
 
@@ -400,30 +400,32 @@ function postSystemMessage(conversationId: string, actor: User, text: string): {
 const displayName = (u: User) => u.fullName || u.email;
 
 /** Group members must be people you could DM: your company or a shared project. */
-function requireContacts(user: User, userIds: string[]): User[] {
-  const allowed = new Set(listContacts(user.id).map((c) => c.userId));
-  return userIds.map((id) => {
-    const other = findUserById(id);
-    if (!other || (!user.isAdmin && !allowed.has(id))) {
-      throw new ForbiddenError("You can only add people in your company or on a shared project.");
-    }
-    return other;
-  });
+async function requireContacts(user: User, userIds: string[]): Promise<User[]> {
+  const allowed = new Set((await listContacts(user.id)).map((c) => c.userId));
+  return Promise.all(
+    userIds.map(async (id) => {
+      const other = await findUserById(id);
+      if (!other || (!user.isAdmin && !allowed.has(id))) {
+        throw new ForbiddenError("You can only add people in your company or on a shared project.");
+      }
+      return other;
+    }),
+  );
 }
 
 /** create_group_conversation: a titled chat with you plus the people you pick. */
-export function createGroup(
+export async function createGroup(
   userId: string,
   title: unknown,
   userIds: unknown,
-): { conversationId: string; message: MessageView; recipientIds: string[] } {
-  const user = requireUser(userId);
+): Promise<{ conversationId: string; message: MessageView; recipientIds: string[] }> {
+  const user = await requireUser(userId);
   const name = typeof title === "string" ? title.trim() : "";
   if (!name) throw new BadRequestError("Give the group a name.");
   if (name.length > 80) throw new BadRequestError("Group names are limited to 80 characters.");
   const ids = Array.isArray(userIds) ? [...new Set(userIds.filter((id): id is string => typeof id === "string" && id !== user.id))] : [];
   if (ids.length === 0) throw new BadRequestError("Pick at least one person to add.");
-  const members = requireContacts(user, ids);
+  const members = await requireContacts(user, ids);
 
   const id = crypto.randomUUID();
   const ts = now();
@@ -441,8 +443,8 @@ export function createGroup(
   return { conversationId: id, ...announced };
 }
 
-export function listParticipants(userId: string, conversationId: string): Contact[] {
-  const user = requireUser(userId);
+export async function listParticipants(userId: string, conversationId: string): Promise<Contact[]> {
+  const user = await requireUser(userId);
   requireConversation(conversationId, user);
   const rows = db
     .prepare(
@@ -455,25 +457,25 @@ export function listParticipants(userId: string, conversationId: string): Contac
 }
 
 /** GroupAddParticipantModal: any member can add one of their contacts to a group. */
-export function addGroupParticipant(
+export async function addGroupParticipant(
   userId: string,
   conversationId: string,
   targetUserId: unknown,
-): { message: MessageView; recipientIds: string[] } {
-  const user = requireUser(userId);
+): Promise<{ message: MessageView; recipientIds: string[] }> {
+  const user = await requireUser(userId);
   const conv = requireConversation(conversationId, user);
   if (conv.type !== "group") throw new BadRequestError("People can only be added to group chats.");
   if (typeof targetUserId !== "string" || !targetUserId) throw new BadRequestError("userId is required.");
   if (isParticipant(conv.id, targetUserId)) throw new BadRequestError("They're already in this group.");
-  const [target] = requireContacts(user, [targetUserId]);
+  const [target] = await requireContacts(user, [targetUserId]);
   db.prepare(
     "INSERT INTO conversation_participants (conversation_id, user_id, company_id, joined_at) VALUES (?, ?, ?, ?)",
   ).run(conv.id, target.id, target.companyId, now());
   return postSystemMessage(conv.id, user, `${displayName(user)} added ${displayName(target)}`);
 }
 
-export function markRead(userId: string, conversationId: string): void {
-  const user = requireUser(userId);
+export async function markRead(userId: string, conversationId: string): Promise<void> {
+  const user = await requireUser(userId);
   requireConversation(conversationId, user);
   db.prepare(
     `INSERT INTO message_reads (conversation_id, user_id, last_read_at) VALUES (?, ?, ?)
@@ -489,8 +491,8 @@ export interface Contact {
 }
 
 /** People you work with: your own company, plus companies you share a project with. */
-export function listContacts(userId: string): Contact[] {
-  const user = requireUser(userId);
+export async function listContacts(userId: string): Promise<Contact[]> {
+  const user = await requireUser(userId);
   if (!user.companyId) return [];
   const companyIds = new Set<string>([user.companyId]);
   for (const project of visibleProjects(user.companyId)) {
@@ -513,12 +515,12 @@ export function listContacts(userId: string): Contact[] {
 }
 
 /** get_or_create_dm_conversation, limited to people you actually work with. */
-export function getOrCreateDm(userId: string, otherUserId: unknown): string {
-  const user = requireUser(userId);
+export async function getOrCreateDm(userId: string, otherUserId: unknown): Promise<string> {
+  const user = await requireUser(userId);
   if (typeof otherUserId !== "string" || !otherUserId) throw new BadRequestError("userId is required.");
   if (otherUserId === user.id) throw new BadRequestError("You can't message yourself.");
-  const other = findUserById(otherUserId);
-  if (!other || (!user.isAdmin && !listContacts(user.id).some((c) => c.userId === other.id))) {
+  const other = await findUserById(otherUserId);
+  if (!other || (!user.isAdmin && !(await listContacts(user.id)).some((c) => c.userId === other.id))) {
     throw new ForbiddenError("You can only message people in your company or on a shared project.");
   }
 

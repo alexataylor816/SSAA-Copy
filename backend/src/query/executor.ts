@@ -300,7 +300,7 @@ function projectColumns(raw: string | undefined, rule: (typeof TABLE_RULES)[stri
   return out.length > 0 ? out : ["id"];
 }
 
-export function runQuery(caller: Caller, req: QueryRequest): unknown {
+export async function runQuery(caller: Caller, req: QueryRequest): Promise<unknown> {
   const rule = TABLE_RULES[req.table];
   if (!rule) {
     throw new ForbiddenError(`Table "${req.table}" is not available through the query API.`);
@@ -338,7 +338,7 @@ export function runQuery(caller: Caller, req: QueryRequest): unknown {
 
     case "insert": {
       const rows = rowsFrom(req.data);
-      rule.canWrite?.(caller, rows);
+      await rule.canWrite?.(caller, rows);
 
       const inserted = rows.map((row) => {
         // The server owns ids and timestamps. Clients never supply them, and
@@ -391,7 +391,7 @@ export function runQuery(caller: Caller, req: QueryRequest): unknown {
       // row already, so it has to be resolved first rather than at write time.
       const filterId = rowIdFromFilters(rule, req);
       const rows = rowsFrom(req.data).map((row) => (row.id == null && filterId != null ? { ...row, id: filterId } : row));
-      rule.canWrite?.(caller, rows);
+      await rule.canWrite?.(caller, rows);
 
       const touched: string[] = [];
       for (const row of rows) {
@@ -443,14 +443,14 @@ export function runQuery(caller: Caller, req: QueryRequest): unknown {
         const doomed = db
           .prepare(`SELECT * FROM ${req.table} WHERE ${fullWhere}`)
           .all(params.values) as Record<string, unknown>[];
-        rule.canWrite(caller, doomed.map(denormaliseRow));
+        await rule.canWrite(caller, doomed.map(denormaliseRow));
       }
       return db.prepare(`DELETE FROM ${req.table} WHERE ${fullWhere}`).run(params.values);
     }
 
     case "upsert": {
       const rows = rowsFrom(req.data);
-      rule.canWrite?.(caller, rows);
+      await rule.canWrite?.(caller, rows);
 
       if (!req.onConflict) throw new ForbiddenError("upsert requires onConflict.");
       const conflictColumns = req.onConflict.split(",").map((c) => c.trim());

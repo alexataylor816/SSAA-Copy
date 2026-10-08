@@ -1,4 +1,4 @@
-import { db } from "../db.js";
+import { database } from "../db.js";
 import { findUserById, setUserCompany, type User } from "../models/users.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "./errors.js";
 import {
@@ -32,8 +32,8 @@ import {
 } from "./permissions.js";
 import type { Company, CompanyType, JoinRequest, PermissionLevel, UserRole } from "./types.js";
 
-function actorFor(user: User, companyId: string | null): Actor {
-  const role = companyId ? findUserRole(user.id, companyId) : undefined;
+async function actorFor(user: User, companyId: string | null): Promise<Actor> {
+  const role = companyId ? await findUserRole(user.id, companyId) : undefined;
   return {
     userId: user.id,
     isAdmin: user.isAdmin,
@@ -43,20 +43,20 @@ function actorFor(user: User, companyId: string | null): Actor {
   };
 }
 
-function requireUser(userId: string): User {
-  const user = findUserById(userId);
+async function requireUser(userId: string): Promise<User> {
+  const user = await findUserById(userId);
   if (!user) throw new NotFoundError("User not found.");
   return user;
 }
 
-function requireCompany(companyId: string): Company {
-  const company = findCompanyById(companyId);
+async function requireCompany(companyId: string): Promise<Company> {
+  const company = await findCompanyById(companyId);
   if (!company) throw new NotFoundError("Company not found.");
   return company;
 }
 
-export function createCompany(userId: string, params: { name: string; companyType: CompanyType; address?: string; trade?: string }) {
-  const user = requireUser(userId);
+export async function createCompany(userId: string, params: { name: string; companyType: CompanyType; address?: string; trade?: string }) {
+  const user = await requireUser(userId);
   if (user.companyId) {
     throw new ConflictError("You already belong to a company.");
   }
@@ -71,24 +71,24 @@ export function createCompany(userId: string, params: { name: string; companyTyp
     throw new BadRequestError("Trade must be 60 characters or fewer.");
   }
 
-  const run = db.transaction(() => {
-    const company = createCompanyRow({
+  return database.transaction(async () => {
+    const company = await createCompanyRow({
       name: params.name.trim(),
       companyType: params.companyType,
       address: params.address?.trim() || null,
       trade,
     });
 
-    setUserCompany(user.id, company.id);
+    await setUserCompany(user.id, company.id);
 
-    const role = createUserRole({
+    const role = await createUserRole({
       userId: user.id,
       companyId: company.id,
       permissionLevel: "account_holder",
       isCompanyCreator: true,
     });
 
-    createEmployeeRow({
+    await createEmployeeRow({
       companyId: company.id,
       name: user.fullName,
       email: user.email,
@@ -97,31 +97,29 @@ export function createCompany(userId: string, params: { name: string; companyTyp
 
     return { company, role };
   });
-
-  return run();
 }
 
-export function requestToJoinCompany(userId: string, companyId: string): JoinRequest {
-  const user = requireUser(userId);
-  requireCompany(companyId);
+export async function requestToJoinCompany(userId: string, companyId: string): Promise<JoinRequest> {
+  const user = await requireUser(userId);
+  await requireCompany(companyId);
 
   if (user.companyId) {
     throw new ConflictError("You already belong to a company.");
   }
-  if (findPendingJoinRequest(userId, companyId)) {
+  if (await findPendingJoinRequest(userId, companyId)) {
     throw new ConflictError("You already have a pending request to join this company.");
   }
 
   return createJoinRequest(userId, companyId);
 }
 
-export function listJoinRequests(
+export async function listJoinRequests(
   companyId: string,
   requesterUserId: string,
-): (JoinRequest & { userName: string | null; userEmail: string | null })[] {
-  const company = requireCompany(companyId);
-  const requester = requireUser(requesterUserId);
-  const actor = actorFor(requester, companyId);
+): Promise<(JoinRequest & { userName: string | null; userEmail: string | null })[]> {
+  const company = await requireCompany(companyId);
+  const requester = await requireUser(requesterUserId);
+  const actor = await actorFor(requester, companyId);
 
   if (!canApproveJoinRequests(company.companyType, actor)) {
     throw new ForbiddenError("Only an account holder (or, for sub companies, a full-level admin) can view join requests.");
@@ -129,16 +127,18 @@ export function listJoinRequests(
 
   // The approver can't look the requester up themselves (they aren't in the
   // company yet), so name the person here.
-  return listPendingJoinRequests(companyId).map((request) => {
-    const user = findUserById(request.userId);
-    return { ...request, userName: user?.fullName ?? null, userEmail: user?.email ?? null };
-  });
+  return Promise.all(
+    (await listPendingJoinRequests(companyId)).map(async (request) => {
+      const user = await findUserById(request.userId);
+      return { ...request, userName: user?.fullName ?? null, userEmail: user?.email ?? null };
+    }),
+  );
 }
 
-function requireApprover(companyId: string, approverUserId: string): { company: Company; actor: Actor } {
-  const company = requireCompany(companyId);
-  const approver = requireUser(approverUserId);
-  const actor = actorFor(approver, companyId);
+async function requireApprover(companyId: string, approverUserId: string): Promise<{ company: Company; actor: Actor }> {
+  const company = await requireCompany(companyId);
+  const approver = await requireUser(approverUserId);
+  const actor = await actorFor(approver, companyId);
 
   if (!canApproveJoinRequests(company.companyType, actor)) {
     throw new ForbiddenError("You do not have permission to approve or reject join requests.");
@@ -147,15 +147,15 @@ function requireApprover(companyId: string, approverUserId: string): { company: 
   return { company, actor };
 }
 
-export function approveJoinRequest(
+export async function approveJoinRequest(
   companyId: string,
   requestId: string,
   approverUserId: string,
   permissionLevel: PermissionLevel,
-): UserRole {
-  const { company, actor } = requireApprover(companyId, approverUserId);
+): Promise<UserRole> {
+  const { company, actor } = await requireApprover(companyId, approverUserId);
 
-  const request = findJoinRequestById(requestId);
+  const request = await findJoinRequestById(requestId);
   if (!request || request.companyId !== companyId) {
     throw new NotFoundError("Join request not found.");
   }
@@ -169,31 +169,29 @@ export function approveJoinRequest(
     throw new ForbiddenError("Only an account holder or admin can grant that level.");
   }
 
-  const targetUser = requireUser(request.userId);
+  const targetUser = await requireUser(request.userId);
   if (targetUser.companyId) {
     throw new ConflictError("That user already belongs to a company.");
   }
 
-  const run = db.transaction(() => {
-    setUserCompany(targetUser.id, companyId);
-    const role = createUserRole({ userId: targetUser.id, companyId, permissionLevel, isCompanyCreator: false });
-    createEmployeeRow({
+  return database.transaction(async () => {
+    await setUserCompany(targetUser.id, companyId);
+    const role = await createUserRole({ userId: targetUser.id, companyId, permissionLevel, isCompanyCreator: false });
+    await createEmployeeRow({
       companyId,
       name: targetUser.fullName,
       email: targetUser.email,
       linkedUserId: targetUser.id,
     });
-    setJoinRequestStatus(requestId, "approved");
+    await setJoinRequestStatus(requestId, "approved");
     return role;
   });
-
-  return run();
 }
 
-export function rejectJoinRequest(companyId: string, requestId: string, approverUserId: string): void {
-  requireApprover(companyId, approverUserId);
+export async function rejectJoinRequest(companyId: string, requestId: string, approverUserId: string): Promise<void> {
+  await requireApprover(companyId, approverUserId);
 
-  const request = findJoinRequestById(requestId);
+  const request = await findJoinRequestById(requestId);
   if (!request || request.companyId !== companyId) {
     throw new NotFoundError("Join request not found.");
   }
@@ -201,20 +199,20 @@ export function rejectJoinRequest(companyId: string, requestId: string, approver
     throw new ConflictError("This join request has already been handled.");
   }
 
-  setJoinRequestStatus(requestId, "rejected");
+  await setJoinRequestStatus(requestId, "rejected");
 }
 
-export function assignPermissionLevel(
+export async function assignPermissionLevel(
   companyId: string,
   actorUserId: string,
   targetUserId: string,
   newLevel: PermissionLevel,
-): UserRole {
-  const company = requireCompany(companyId);
-  const actorUser = requireUser(actorUserId);
-  const actor = actorFor(actorUser, companyId);
+): Promise<UserRole> {
+  const company = await requireCompany(companyId);
+  const actorUser = await requireUser(actorUserId);
+  const actor = await actorFor(actorUser, companyId);
 
-  const targetRole = findUserRole(targetUserId, companyId);
+  const targetRole = await findUserRole(targetUserId, companyId);
   if (!targetRole) {
     throw new NotFoundError("That user is not a member of this company.");
   }
@@ -230,8 +228,8 @@ export function assignPermissionLevel(
     throw new ForbiddenError(check.reason);
   }
 
-  updateUserRolePermission(targetUserId, companyId, newLevel);
-  return findUserRole(targetUserId, companyId)!;
+  await updateUserRolePermission(targetUserId, companyId, newLevel);
+  return (await findUserRole(targetUserId, companyId))!;
 }
 
 /**
@@ -241,14 +239,14 @@ export function assignPermissionLevel(
  * holder-less in between. Only a holder or admin can initiate; the creator
  * flag moves with the status.
  */
-export function transferAccountHolder(
+export async function transferAccountHolder(
   companyId: string,
   actorUserId: string,
   targetUserId: string,
   demoteTo: PermissionLevel = "full",
-): { previousHolderId: string; newHolderId: string } {
-  const company = requireCompany(companyId);
-  const actor = actorFor(requireUser(actorUserId), companyId);
+): Promise<{ previousHolderId: string; newHolderId: string }> {
+  const company = await requireCompany(companyId);
+  const actor = await actorFor(await requireUser(actorUserId), companyId);
 
   if (!actor.isAdmin && !isAccountHolder(actor)) {
     throw new ForbiddenError("Only the account holder or an admin can transfer holdership.");
@@ -262,7 +260,7 @@ export function transferAccountHolder(
     );
   }
 
-  const targetRole = findUserRole(targetUserId, companyId);
+  const targetRole = await findUserRole(targetUserId, companyId);
   if (!targetRole) {
     throw new NotFoundError("That user is not a member of this company.");
   }
@@ -270,14 +268,14 @@ export function transferAccountHolder(
   // The status moves off whoever holds it now: the actor when they are a
   // holder-member, otherwise the current creator (or any holder) — this
   // covers an admin transferring on a company's behalf.
-  const actorRole = findUserRole(actorUserId, companyId);
+  const actorRole = await findUserRole(actorUserId, companyId);
   const actorHolds =
     !!actorRole &&
     (actorRole.permissionLevel === "account_holder" || actorRole.isCompanyCreator);
   const currentHolderId =
     (actorHolds ? actorUserId : null) ??
-    listCompanyRoles(companyId).find((r) => r.isCompanyCreator)?.userId ??
-    listCompanyRoles(companyId).find((r) => r.permissionLevel === "account_holder")?.userId ??
+    (await listCompanyRoles(companyId)).find((r) => r.isCompanyCreator)?.userId ??
+    (await listCompanyRoles(companyId)).find((r) => r.permissionLevel === "account_holder")?.userId ??
     null;
   if (!currentHolderId) {
     throw new ConflictError("This company has no account holder to transfer from.");
@@ -286,12 +284,12 @@ export function transferAccountHolder(
     throw new BadRequestError("That member already holds this company.");
   }
 
-  db.transaction(() => {
-    updateUserRolePermission(targetUserId, companyId, "account_holder");
-    setRoleCompanyCreator(targetUserId, companyId, true);
-    updateUserRolePermission(currentHolderId, companyId, demoteTo);
-    setRoleCompanyCreator(currentHolderId, companyId, false);
-  })();
+  await database.transaction(async () => {
+    await updateUserRolePermission(targetUserId, companyId, "account_holder");
+    await setRoleCompanyCreator(targetUserId, companyId, true);
+    await updateUserRolePermission(currentHolderId, companyId, demoteTo);
+    await setRoleCompanyCreator(currentHolderId, companyId, false);
+  });
 
   return { previousHolderId: currentHolderId, newHolderId: targetUserId };
 }
@@ -302,9 +300,9 @@ export function transferAccountHolder(
  * remaining holder. The roster rows stay — only the login link is detached —
  * so availability history and schedule references keep working.
  */
-export function removeMember(companyId: string, actorUserId: string, targetUserId: string): void {
-  requireCompany(companyId);
-  const actor = actorFor(requireUser(actorUserId), companyId);
+export async function removeMember(companyId: string, actorUserId: string, targetUserId: string): Promise<void> {
+  await requireCompany(companyId);
+  const actor = await actorFor(await requireUser(actorUserId), companyId);
 
   if (!actor.isAdmin && !isAccountHolder(actor)) {
     throw new ForbiddenError("Only the account holder or an admin can remove members.");
@@ -316,7 +314,7 @@ export function removeMember(companyId: string, actorUserId: string, targetUserI
     throw new BadRequestError("You cannot remove yourself. Transfer holdership first if you are leaving.");
   }
 
-  const targetRole = findUserRole(targetUserId, companyId);
+  const targetRole = await findUserRole(targetUserId, companyId);
   if (!targetRole) {
     throw new NotFoundError("That user is not a member of this company.");
   }
@@ -325,7 +323,7 @@ export function removeMember(companyId: string, actorUserId: string, targetUserI
   }
   const targetIsHolder = targetRole.permissionLevel === "account_holder";
   if (targetIsHolder) {
-    const otherHolders = listCompanyRoles(companyId).filter(
+    const otherHolders = (await listCompanyRoles(companyId)).filter(
       (r) => r.userId !== targetUserId && (r.permissionLevel === "account_holder" || r.isCompanyCreator),
     );
     if (otherHolders.length === 0) {
@@ -333,11 +331,11 @@ export function removeMember(companyId: string, actorUserId: string, targetUserI
     }
   }
 
-  db.transaction(() => {
-    deleteUserRole(targetUserId, companyId);
-    setUserCompany(targetUserId, null);
-    unlinkUserEmployees(targetUserId, companyId);
-  })();
+  await database.transaction(async () => {
+    await deleteUserRole(targetUserId, companyId);
+    await setUserCompany(targetUserId, null);
+    await unlinkUserEmployees(targetUserId, companyId);
+  });
 }
 
 export interface CompanyMember {
@@ -348,29 +346,31 @@ export interface CompanyMember {
   isCompanyCreator: boolean;
 }
 
-export function listCompanyMembers(companyId: string, requesterUserId: string): CompanyMember[] {
-  requireCompany(companyId);
-  const requester = requireUser(requesterUserId);
+export async function listCompanyMembers(companyId: string, requesterUserId: string): Promise<CompanyMember[]> {
+  await requireCompany(companyId);
+  const requester = await requireUser(requesterUserId);
 
   if (!requester.isAdmin && requester.companyId !== companyId) {
     throw new ForbiddenError("You are not a member of this company.");
   }
 
-  return listCompanyRoles(companyId).map((role) => {
-    const member = findUserById(role.userId);
-    return {
-      userId: role.userId,
-      email: member?.email ?? "",
-      fullName: member?.fullName ?? "",
-      permissionLevel: role.permissionLevel,
-      isCompanyCreator: role.isCompanyCreator,
-    };
-  });
+  return Promise.all(
+    (await listCompanyRoles(companyId)).map(async (role) => {
+      const member = await findUserById(role.userId);
+      return {
+        userId: role.userId,
+        email: member?.email ?? "",
+        fullName: member?.fullName ?? "",
+        permissionLevel: role.permissionLevel,
+        isCompanyCreator: role.isCompanyCreator,
+      };
+    }),
+  );
 }
 
-export function listEmployees(companyId: string, requesterUserId: string) {
-  requireCompany(companyId);
-  const requester = requireUser(requesterUserId);
+export async function listEmployees(companyId: string, requesterUserId: string) {
+  await requireCompany(companyId);
+  const requester = await requireUser(requesterUserId);
 
   if (!requester.isAdmin && requester.companyId !== companyId) {
     throw new ForbiddenError("You are not a member of this company.");
@@ -408,10 +408,10 @@ export interface UserContext {
   capabilities: UserCapabilities;
 }
 
-export function getUserContext(userId: string): UserContext {
-  const user = requireUser(userId);
-  const company = user.companyId ? findCompanyById(user.companyId) ?? null : null;
-  const actor = actorFor(user, user.companyId);
+export async function getUserContext(userId: string): Promise<UserContext> {
+  const user = await requireUser(userId);
+  const company = user.companyId ? (await findCompanyById(user.companyId)) ?? null : null;
+  const actor = await actorFor(user, user.companyId);
   const isSchedulingActor = hasPartialOrHigher(actor);
 
   return {

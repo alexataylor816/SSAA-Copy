@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import crypto from "node:crypto";
 import { config } from "../config.js";
 import { consumeResetCode, createResetCode } from "../models/passwordResets.js";
@@ -19,11 +19,21 @@ export const authRouter = Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Express 4 doesn't catch rejected promises, so pass them to the error
+ * handler the same way it handles a synchronous throw.
+ */
+function handle(fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler {
+  return (req, res, next) => {
+    fn(req, res, next).catch(next);
+  };
+}
+
 function serializeUser(user: User) {
   return { id: user.id, email: user.email, fullName: user.fullName, createdAt: user.createdAt };
 }
 
-authRouter.post("/auth/signup", (req, res) => {
+authRouter.post("/auth/signup", handle(async (req, res) => {
   const { email, password, fullName } = req.body ?? {};
 
   if (typeof email !== "string" || !EMAIL_RE.test(email)) {
@@ -36,45 +46,45 @@ authRouter.post("/auth/signup", (req, res) => {
     return res.status(400).json({ error: "Full name is required." });
   }
 
-  if (findUserByEmail(email)) {
+  if (await findUserByEmail(email)) {
     return res.status(409).json({ error: "An account with that email already exists." });
   }
 
-  const user = createUser({ email, passwordHash: hashPassword(password), fullName: fullName.trim() });
+  const user = await createUser({ email, passwordHash: hashPassword(password), fullName: fullName.trim() });
   const token = signToken({ sub: user.id, email: user.email });
   res.status(201).json({ token, user: serializeUser(user) });
-});
+}));
 
-authRouter.post("/auth/signin", (req, res) => {
+authRouter.post("/auth/signin", handle(async (req, res) => {
   const { email, password } = req.body ?? {};
 
   if (typeof email !== "string" || typeof password !== "string") {
     return res.status(400).json({ error: "Email and password are required." });
   }
 
-  const user = findUserByEmail(email);
+  const user = await findUserByEmail(email);
   if (!user || !verifyPassword(password, user.passwordHash)) {
     return res.status(401).json({ error: "Invalid email or password." });
   }
 
   const token = signToken({ sub: user.id, email: user.email });
   res.json({ token, user: serializeUser(user) });
-});
+}));
 
 // Sends the code via Resend when RESEND_API_KEY is configured. Without a key,
 // falls back to logging the code server-side and echoing it as `devCode` so
 // the flow stays testable locally.
-authRouter.post("/auth/request-password-reset", async (req, res) => {
+authRouter.post("/auth/request-password-reset", handle(async (req, res) => {
   const { email } = req.body ?? {};
 
   if (typeof email !== "string" || !EMAIL_RE.test(email)) {
     return res.status(400).json({ error: "A valid email is required." });
   }
 
-  const user = findUserByEmail(email);
+  const user = await findUserByEmail(email);
   let devCode: string | undefined;
   if (user) {
-    const code = createResetCode(user.id);
+    const code = await createResetCode(user.id);
     try {
       const sent = await sendPasswordResetEmail(user.email, code);
       if (!sent) {
@@ -89,9 +99,9 @@ authRouter.post("/auth/request-password-reset", async (req, res) => {
 
   // Always respond the same way so we don't reveal whether the email exists.
   res.json({ success: true, devCode: config.exposeDevCodes ? devCode : undefined });
-});
+}));
 
-authRouter.post("/auth/verify-reset-code", (req, res) => {
+authRouter.post("/auth/verify-reset-code", handle(async (req, res) => {
   const { email, code, newPassword } = req.body ?? {};
 
   if (typeof email !== "string" || typeof code !== "string") {
@@ -101,33 +111,33 @@ authRouter.post("/auth/verify-reset-code", (req, res) => {
     return res.status(400).json({ error: "Password must be at least 6 characters." });
   }
 
-  const user = findUserByEmail(email);
+  const user = await findUserByEmail(email);
   if (!user) {
     return res.status(400).json({ error: "Invalid or expired code." });
   }
 
-  const resetUserId = consumeResetCode(user.id, code);
+  const resetUserId = await consumeResetCode(user.id, code);
   if (!resetUserId) {
     return res.status(400).json({ error: "Invalid or expired code." });
   }
 
-  updateUserPassword(resetUserId, hashPassword(newPassword));
+  await updateUserPassword(resetUserId, hashPassword(newPassword));
   res.json({ success: true });
-});
+}));
 
 /**
  * Username/email reminder. `delivered` is false when no email provider is
  * configured so the client can tell the user the truth rather than claiming a
  * reminder was sent.
  */
-authRouter.post("/auth/request-username-reminder", async (req, res) => {
+authRouter.post("/auth/request-username-reminder", handle(async (req, res) => {
   const { email } = req.body ?? {};
 
   if (typeof email !== "string" || !EMAIL_RE.test(email)) {
     return res.status(400).json({ error: "A valid email is required." });
   }
 
-  const user = findUserByEmail(email);
+  const user = await findUserByEmail(email);
   let delivered = false;
   if (user) {
     try {
@@ -139,7 +149,7 @@ authRouter.post("/auth/request-username-reminder", async (req, res) => {
 
   // Always the same shape so we don't reveal whether the email exists.
   res.json({ success: true, delivered });
-});
+}));
 
 /**
  * "Continue with Google". The client obtains a Google ID token via Google
@@ -151,7 +161,7 @@ authRouter.post("/auth/request-username-reminder", async (req, res) => {
  * never sign in via `/auth/signin`. Without GOOGLE_CLIENT_ID configured this
  * returns 503 so the UI can say so honestly instead of failing opaquely.
  */
-authRouter.post("/auth/google", async (req, res) => {
+authRouter.post("/auth/google", handle(async (req, res) => {
   const { credential } = req.body ?? {};
 
   if (typeof credential !== "string" || !credential) {
@@ -186,30 +196,30 @@ authRouter.post("/auth/google", async (req, res) => {
   }
   const sub = typeof info.sub === "string" && info.sub ? info.sub : null;
 
-  let user = sub ? findUserByGoogleSub(sub) : undefined;
+  let user = sub ? await findUserByGoogleSub(sub) : undefined;
   let created = false;
   if (!user) {
-    user = findUserByEmail(email);
-    if (user && sub) linkGoogleSub(user.id, sub);
+    user = await findUserByEmail(email);
+    if (user && sub) await linkGoogleSub(user.id, sub);
   }
   if (!user) {
     const name = typeof info.name === "string" && info.name.trim() ? info.name.trim() : email.split("@")[0];
     // No ":" means verifyPassword() always returns false — this account can
     // only ever sign in through Google.
-    user = createUser({
+    user = await createUser({
       email,
       passwordHash: `google-oauth:${crypto.randomBytes(32).toString("hex")}`,
       fullName: name,
     });
     created = true;
-    if (sub) linkGoogleSub(user.id, sub);
+    if (sub) await linkGoogleSub(user.id, sub);
   }
 
   const token = signToken({ sub: user.id, email: user.email });
   res.json({ token, user: serializeUser(user), created });
-});
+}));
 
-authRouter.post("/auth/change-password", (req, res) => {
+authRouter.post("/auth/change-password", handle(async (req, res) => {
   const header = req.headers.authorization;
   const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
   if (!token) {
@@ -231,7 +241,7 @@ authRouter.post("/auth/change-password", (req, res) => {
     return res.status(400).json({ error: "Password must be at least 6 characters." });
   }
 
-  const user = findUserById(userId);
+  const user = await findUserById(userId);
   if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
     // Same answer for a bad token-owner and a wrong password: nothing here
     // should tell an attacker which one failed.
@@ -241,11 +251,11 @@ authRouter.post("/auth/change-password", (req, res) => {
     return res.status(400).json({ error: "The new password must be different from the current one." });
   }
 
-  updateUserPassword(user.id, hashPassword(newPassword));
+  await updateUserPassword(user.id, hashPassword(newPassword));
   res.json({ success: true });
-});
+}));
 
-authRouter.get("/auth/me", (req, res) => {
+authRouter.get("/auth/me", async (req, res) => {
   const header = req.headers.authorization;
   const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
   if (!token) {
@@ -254,7 +264,7 @@ authRouter.get("/auth/me", (req, res) => {
 
   try {
     const payload = verifyToken(token);
-    const user = findUserById(payload.sub);
+    const user = await findUserById(payload.sub);
     if (!user) {
       return res.status(401).json({ error: "Invalid token." });
     }

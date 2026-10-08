@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { db } from "../db.js";
+import { database, db } from "../db.js";
 
 export interface User {
   id: string;
@@ -72,46 +72,42 @@ export function ensureUsersTable() {
   }
 }
 
-export function findUserByEmail(email: string): User | undefined {
-  const row = db.prepare("SELECT * FROM users WHERE email = ?").get(email.toLowerCase()) as
-    | UserRow
-    | undefined;
+export async function findUserByEmail(email: string): Promise<User | undefined> {
+  const row = await database.get<UserRow>("SELECT * FROM users WHERE email = ?", [email.toLowerCase()]);
   return row ? mapRow(row) : undefined;
 }
 
-export function findUserById(id: string): User | undefined {
-  const row = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
+export async function findUserById(id: string): Promise<User | undefined> {
+  const row = await database.get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
   return row ? mapRow(row) : undefined;
 }
 
-export function findUserByGoogleSub(sub: string): User | undefined {
-  const row = db.prepare("SELECT * FROM users WHERE google_sub = ?").get(sub) as
-    | UserRow
-    | undefined;
+export async function findUserByGoogleSub(sub: string): Promise<User | undefined> {
+  const row = await database.get<UserRow>("SELECT * FROM users WHERE google_sub = ?", [sub]);
   return row ? mapRow(row) : undefined;
 }
 
 /** Links a Google subject to an account once; never overwrites an existing link. */
-export function linkGoogleSub(userId: string, sub: string) {
-  db.prepare("UPDATE users SET google_sub = ? WHERE id = ? AND google_sub IS NULL").run(sub, userId);
+export async function linkGoogleSub(userId: string, sub: string) {
+  await database.run("UPDATE users SET google_sub = ? WHERE id = ? AND google_sub IS NULL", [sub, userId]);
 }
 
-export function createUser(params: { email: string; passwordHash: string; fullName: string }): User {
+export async function createUser(params: { email: string; passwordHash: string; fullName: string }): Promise<User> {
   const id = crypto.randomUUID();
-  db.prepare("INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)").run(
+  await database.run("INSERT INTO users (id, email, password_hash, full_name) VALUES (?, ?, ?, ?)", [
     id,
     params.email.toLowerCase(),
     params.passwordHash,
     params.fullName,
-  );
-  return findUserById(id)!;
+  ]);
+  return (await findUserById(id))!;
 }
 
-export function updateUserPassword(userId: string, passwordHash: string) {
-  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, userId);
+export async function updateUserPassword(userId: string, passwordHash: string) {
+  await database.run("UPDATE users SET password_hash = ? WHERE id = ?", [passwordHash, userId]);
 }
 
-export function updateUserProfile(
+export async function updateUserProfile(
   userId: string,
   updates: { fullName?: string; phone?: string | null; language?: string; profilePictureUrl?: string | null },
 ) {
@@ -135,16 +131,16 @@ export function updateUserProfile(
   }
   if (sets.length === 0) return findUserById(userId);
   values.push(userId);
-  db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+  await database.run(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, values);
   return findUserById(userId);
 }
 
-export function setUserCompany(userId: string, companyId: string | null) {
-  db.prepare("UPDATE users SET company_id = ? WHERE id = ?").run(companyId, userId);
+export async function setUserCompany(userId: string, companyId: string | null) {
+  await database.run("UPDATE users SET company_id = ? WHERE id = ?", [companyId, userId]);
 }
 
-export function setUserIsAdmin(userId: string, isAdmin: boolean) {
-  db.prepare("UPDATE users SET is_admin = ? WHERE id = ?").run(isAdmin ? 1 : 0, userId);
+export async function setUserIsAdmin(userId: string, isAdmin: boolean) {
+  await database.run("UPDATE users SET is_admin = ? WHERE id = ?", [isAdmin ? 1 : 0, userId]);
 }
 
 function mapRow(row: UserRow): User {

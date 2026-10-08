@@ -26,10 +26,10 @@ export interface Caller {
   isCompanyCreator: boolean;
 }
 
-export function resolveCaller(userId: string): Caller {
-  const user = findUserById(userId);
+export async function resolveCaller(userId: string): Promise<Caller> {
+  const user = await findUserById(userId);
   if (!user) throw new ForbiddenError("User not found.");
-  const role = user.companyId ? findUserRole(user.id, user.companyId) : undefined;
+  const role = user.companyId ? await findUserRole(user.id, user.companyId) : undefined;
   return {
     userId: user.id,
     companyId: user.companyId ?? null,
@@ -73,7 +73,7 @@ export interface TableRule {
   /** Extra AND-ed filters restricting which rows the caller can see. */
   scope?: (caller: Caller) => { sql: string; params: Record<string, unknown> } | null;
   /** Reject the whole write before touching the database. */
-  canWrite?: (caller: Caller, rows: Record<string, unknown>[]) => void;
+  canWrite?: (caller: Caller, rows: Record<string, unknown>[]) => void | Promise<void>;
   /** Columns the client may never write directly (server-managed). */
   readonlyColumns?: readonly string[];
 }
@@ -162,10 +162,10 @@ export const TABLE_RULES: Record<string, TableRule> = {
         .all({ __own: caller.companyId }) as { id: string }[];
       return inList("id", rows.map((r) => r.id), "cv");
     },
-    canWrite: (caller, rows) => {
+    canWrite: async (caller, rows) => {
       for (const row of rows) {
         if (row.id && row.id !== caller.companyId) {
-          const role = caller.companyId ? findUserRole(caller.userId, String(row.id)) : undefined;
+          const role = caller.companyId ? await findUserRole(caller.userId, String(row.id)) : undefined;
           if (!caller.isAdmin && !role) {
             throw new ForbiddenError("You are not a member of that company.");
           }
@@ -356,7 +356,7 @@ export const TABLE_RULES: Record<string, TableRule> = {
         .all({ __own: caller.companyId }) as { id: string }[];
       return inList("id", rows.map((r) => r.id), "av");
     },
-    canWrite: (caller, rows) => {
+    canWrite: async (caller, rows) => {
       // Same rule as the REST path (`resolveEmployeeToSchedule` in
       // scheduling/service.ts): yourself always, someone else on your own
       // roster at partial+, never a connected company's crew. `employee_id`
@@ -365,18 +365,18 @@ export const TABLE_RULES: Record<string, TableRule> = {
       // REST: the facade has no "omit the target, mean yourself" default —
       // callers must name employee_id explicitly.
       const ownEmployee = caller.companyId
-        ? findEmployeeByLinkedUser(caller.companyId, caller.userId)
+        ? await findEmployeeByLinkedUser(caller.companyId, caller.userId)
         : undefined;
       for (const row of rows) {
         const namedId =
           typeof row.employee_id === "string" && row.employee_id ? row.employee_id : null;
-        let target = namedId ? findEmployeeById(namedId) : undefined;
+        let target = namedId ? await findEmployeeById(namedId) : undefined;
         if (!target && typeof row.id === "string" && row.id) {
           // Updates name the row by id without repeating employee_id.
           const existing = db
             .prepare("SELECT employee_id FROM availability WHERE id = ?")
             .get(row.id) as { employee_id: string } | undefined;
-          target = existing ? findEmployeeById(existing.employee_id) : undefined;
+          target = existing ? await findEmployeeById(existing.employee_id) : undefined;
         }
         if (ownEmployee && target && target.id === ownEmployee.id) continue;
         if (!target || target.companyId !== caller.companyId) {

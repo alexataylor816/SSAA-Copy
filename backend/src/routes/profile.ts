@@ -7,10 +7,10 @@ import { findEmployeeByLinkedUser, setEmployeeNumberForUser } from "../rbac/mode
 export const profileRouter = Router();
 profileRouter.use(requireAuth);
 
-function route(handler: RequestHandler): RequestHandler {
-  return (req, res, next) => {
+function route(handler: (...args: Parameters<RequestHandler>) => unknown): RequestHandler {
+  return async (req, res, next) => {
     try {
-      handler(req, res, next);
+      await handler(req, res, next);
     } catch (err) {
       if (err instanceof HttpError) {
         res.status(err.status).json({ error: err.message });
@@ -34,17 +34,17 @@ function serializeUser(user: User) {
   };
 }
 
-function employeeNumberOf(user: User): string | null {
-  return user.companyId ? (findEmployeeByLinkedUser(user.companyId, user.id)?.employeeNumber ?? null) : null;
+async function employeeNumberOf(user: User): Promise<string | null> {
+  return user.companyId ? ((await findEmployeeByLinkedUser(user.companyId, user.id))?.employeeNumber ?? null) : null;
 }
 
 /** What the profile dialog needs beyond the session: the caller's employee ID, if they have an employee record. */
 profileRouter.get(
   "/auth/profile",
-  route((req, res) => {
-    const user = findUserById(req.userId!);
+  route(async (req, res) => {
+    const user = await findUserById(req.userId!);
     if (!user) throw new HttpError(401, "User not found.");
-    const employee = user.companyId ? findEmployeeByLinkedUser(user.companyId, user.id) : undefined;
+    const employee = user.companyId ? await findEmployeeByLinkedUser(user.companyId, user.id) : undefined;
     res.json({ user: serializeUser(user), employeeNumber: employee?.employeeNumber ?? null, hasEmployeeRecord: !!employee });
   }),
 );
@@ -57,7 +57,7 @@ const AVATAR_RE = /^\/uploads\/(schedule-requests|avatars)\/[A-Za-z0-9._-]+\.(pn
  */
 profileRouter.patch(
   "/auth/profile",
-  route((req, res) => {
+  route(async (req, res) => {
     const { fullName, phone, language, profilePictureUrl, employeeNumber } = req.body ?? {};
     const updates: { fullName?: string; phone?: string | null; language?: string; profilePictureUrl?: string | null } = {};
 
@@ -96,12 +96,12 @@ profileRouter.patch(
       throw new HttpError(400, "Nothing to update.");
     }
 
-    const user = Object.keys(updates).length ? updateUserProfile(req.userId!, updates) : findUserById(req.userId!);
+    const user = Object.keys(updates).length ? await updateUserProfile(req.userId!, updates) : await findUserById(req.userId!);
     if (!user) throw new HttpError(401, "User not found.");
     // The ID lives on the user's employee record, as in the original; nothing to set without one.
     if (employeeNumberValue !== undefined && user.companyId) {
-      setEmployeeNumberForUser(user.companyId, user.id, employeeNumberValue);
+      await setEmployeeNumberForUser(user.companyId, user.id, employeeNumberValue);
     }
-    res.json({ user: serializeUser(user), employeeNumber: employeeNumberOf(user) });
+    res.json({ user: serializeUser(user), employeeNumber: await employeeNumberOf(user) });
   }),
 );

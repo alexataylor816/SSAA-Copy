@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { db } from "../db.js";
+import { database, db } from "../db.js";
 import { findCompanyById, findEmployeeById } from "../rbac/models.js";
 import type { Availability, Project, ProjectConnection, ScheduleRequest, ScheduleRequestStatus } from "./types.js";
 
@@ -154,30 +154,25 @@ export function findProjectById(id: string): Project | undefined {
  * they are deleted here by SQL because that module has no per-project
  * delete helper and importing it would couple the two domains.
  */
-export function deleteProjectAndChildren(projectId: string): void {
-  db.transaction(() => {
-    const convs = db.prepare("SELECT id FROM conversations WHERE project_id = ?").all(projectId) as {
-      id: string;
-    }[];
-    const delMessages = db.prepare("DELETE FROM messages WHERE conversation_id = ?");
-    const delReads = db.prepare("DELETE FROM message_reads WHERE conversation_id = ?");
-    const delParts = db.prepare("DELETE FROM conversation_participants WHERE conversation_id = ?");
+export async function deleteProjectAndChildren(projectId: string): Promise<void> {
+  await database.transaction(async () => {
+    const convs = await database.all<{ id: string }>("SELECT id FROM conversations WHERE project_id = ?", [projectId]);
     for (const conv of convs) {
-      delMessages.run(conv.id);
-      delReads.run(conv.id);
-      delParts.run(conv.id);
+      await database.run("DELETE FROM messages WHERE conversation_id = ?", [conv.id]);
+      await database.run("DELETE FROM message_reads WHERE conversation_id = ?", [conv.id]);
+      await database.run("DELETE FROM conversation_participants WHERE conversation_id = ?", [conv.id]);
     }
-    db.prepare("DELETE FROM conversations WHERE project_id = ?").run(projectId);
-    db.prepare("DELETE FROM schedule_requests WHERE project_id = ?").run(projectId);
-    db.prepare("DELETE FROM availability WHERE project_id = ?").run(projectId);
-    db.prepare("DELETE FROM tasks WHERE project_id = ?").run(projectId);
-    db.prepare("DELETE FROM project_aliases WHERE project_id = ?").run(projectId);
-    db.prepare("DELETE FROM user_project_assignments WHERE project_id = ?").run(projectId);
-    db.prepare("DELETE FROM employee_project_assignments WHERE project_id = ?").run(projectId);
-    db.prepare("DELETE FROM project_connections WHERE project_id = ?").run(projectId);
-    db.prepare("DELETE FROM contractor_connection_projects WHERE project_id = ?").run(projectId);
-    db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
-  })();
+    await database.run("DELETE FROM conversations WHERE project_id = ?", [projectId]);
+    await database.run("DELETE FROM schedule_requests WHERE project_id = ?", [projectId]);
+    await database.run("DELETE FROM availability WHERE project_id = ?", [projectId]);
+    await database.run("DELETE FROM tasks WHERE project_id = ?", [projectId]);
+    await database.run("DELETE FROM project_aliases WHERE project_id = ?", [projectId]);
+    await database.run("DELETE FROM user_project_assignments WHERE project_id = ?", [projectId]);
+    await database.run("DELETE FROM employee_project_assignments WHERE project_id = ?", [projectId]);
+    await database.run("DELETE FROM project_connections WHERE project_id = ?", [projectId]);
+    await database.run("DELETE FROM contractor_connection_projects WHERE project_id = ?", [projectId]);
+    await database.run("DELETE FROM projects WHERE id = ?", [projectId]);
+  });
 }
 
 export function findProjectByConnectionCode(code: string): Project | undefined {
@@ -318,7 +313,7 @@ function mapAvailabilityRow(row: AvailabilityRow): Availability {
 
 // --- schedule_requests ---
 
-export function createScheduleRequestRow(params: {
+export async function createScheduleRequestRow(params: {
   projectId: string;
   requestingCompanyId: string;
   subCompanyId: string;
@@ -328,7 +323,7 @@ export function createScheduleRequestRow(params: {
   endTime: string | null;
   description: string | null;
   imageUrls: string[];
-}): ScheduleRequest {
+}): Promise<ScheduleRequest> {
   const id = crypto.randomUUID();
   db.prepare(
     `INSERT INTO schedule_requests
@@ -346,19 +341,19 @@ export function createScheduleRequestRow(params: {
     params.description,
     JSON.stringify(params.imageUrls),
   );
-  return findScheduleRequestById(id)!;
+  return (await findScheduleRequestById(id))!;
 }
 
-export function findScheduleRequestById(id: string): ScheduleRequest | undefined {
+export async function findScheduleRequestById(id: string): Promise<ScheduleRequest | undefined> {
   const row = db.prepare("SELECT * FROM schedule_requests WHERE id = ?").get(id) as ScheduleRequestRow | undefined;
   return row ? mapScheduleRequestRow(row) : undefined;
 }
 
-export function listScheduleRequestsForCompany(
+export async function listScheduleRequestsForCompany(
   companyId: string,
   startDate: string,
   endDate: string,
-): ScheduleRequest[] {
+): Promise<ScheduleRequest[]> {
   const rows = db
     .prepare(
       `SELECT * FROM schedule_requests
@@ -366,7 +361,7 @@ export function listScheduleRequestsForCompany(
        ORDER BY date, start_time`,
     )
     .all(companyId, companyId, startDate, endDate) as ScheduleRequestRow[];
-  return rows.map(mapScheduleRequestRow);
+  return Promise.all(rows.map(mapScheduleRequestRow));
 }
 
 export function updateScheduleRequestStatusRow(id: string, status: ScheduleRequestStatus, reason: string | null) {
@@ -377,7 +372,7 @@ export function updateScheduleRequestStatusRow(id: string, status: ScheduleReque
   );
 }
 
-function mapScheduleRequestRow(row: ScheduleRequestRow): ScheduleRequest {
+async function mapScheduleRequestRow(row: ScheduleRequestRow): Promise<ScheduleRequest> {
   const employeeIds = JSON.parse(row.employee_ids) as string[];
   return {
     id: row.id,
@@ -385,7 +380,7 @@ function mapScheduleRequestRow(row: ScheduleRequestRow): ScheduleRequest {
     requestingCompanyId: row.requesting_company_id,
     subCompanyId: row.sub_company_id,
     employeeIds,
-    employeeNames: employeeIds.map((id) => findEmployeeById(id)?.name ?? "Unknown"),
+    employeeNames: await Promise.all(employeeIds.map(async (id) => (await findEmployeeById(id))?.name ?? "Unknown")),
     date: row.date,
     startTime: row.start_time,
     endTime: row.end_time,
@@ -393,8 +388,8 @@ function mapScheduleRequestRow(row: ScheduleRequestRow): ScheduleRequest {
     imageUrls: row.image_urls ? (JSON.parse(row.image_urls) as string[]) : [],
     status: row.status,
     statusReason: row.status_reason,
-    requestingCompanyName: findCompanyById(row.requesting_company_id)?.name ?? null,
-    subCompanyName: findCompanyById(row.sub_company_id)?.name ?? null,
+    requestingCompanyName: (await findCompanyById(row.requesting_company_id))?.name ?? null,
+    subCompanyName: (await findCompanyById(row.sub_company_id))?.name ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

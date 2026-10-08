@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { db } from "../db.js";
+import { database, db } from "../db.js";
 import type { Company, CompanyType, Employee, JoinRequest, JoinRequestStatus, PermissionLevel, UserRole } from "./types.js";
 
 interface CompanyRow {
@@ -107,38 +107,37 @@ export function ensureRbacTables() {
 }
 
 /** Sets the HR/payroll ID on the employee record linked to this user; false when they have none. */
-export function setEmployeeNumberForUser(companyId: string, userId: string, value: string | null): boolean {
-  const result = db
-    .prepare("UPDATE employees SET employee_number = ? WHERE company_id = ? AND linked_user_id = ?")
-    .run(value, companyId, userId);
+export async function setEmployeeNumberForUser(companyId: string, userId: string, value: string | null): Promise<boolean> {
+  const result = await database.run(
+    "UPDATE employees SET employee_number = ? WHERE company_id = ? AND linked_user_id = ?",
+    [value, companyId, userId],
+  );
   return result.changes > 0;
 }
 
 // --- companies ---
 
-export function createCompanyRow(params: { name: string; companyType: CompanyType; address?: string | null; trade?: string | null }): Company {
+export async function createCompanyRow(params: { name: string; companyType: CompanyType; address?: string | null; trade?: string | null }): Promise<Company> {
   const id = crypto.randomUUID();
-  db.prepare("INSERT INTO companies (id, name, company_type, address, trade) VALUES (?, ?, ?, ?, ?)").run(
+  await database.run("INSERT INTO companies (id, name, company_type, address, trade) VALUES (?, ?, ?, ?, ?)", [
     id,
     params.name,
     params.companyType,
     params.address ?? null,
     params.trade ?? null,
-  );
-  return findCompanyById(id)!;
+  ]);
+  return (await findCompanyById(id))!;
 }
 
-export function findCompanyById(id: string): Company | undefined {
-  const row = db.prepare("SELECT * FROM companies WHERE id = ?").get(id) as CompanyRow | undefined;
+export async function findCompanyById(id: string): Promise<Company | undefined> {
+  const row = await database.get<CompanyRow>("SELECT * FROM companies WHERE id = ?", [id]);
   return row ? mapCompanyRow(row) : undefined;
 }
 
-export function listCompanies(companyType?: CompanyType): Company[] {
-  const rows = (
-    companyType
-      ? db.prepare("SELECT * FROM companies WHERE company_type = ? ORDER BY name").all(companyType)
-      : db.prepare("SELECT * FROM companies ORDER BY name").all()
-  ) as CompanyRow[];
+export async function listCompanies(companyType?: CompanyType): Promise<Company[]> {
+  const rows = companyType
+    ? await database.all<CompanyRow>("SELECT * FROM companies WHERE company_type = ? ORDER BY name", [companyType])
+    : await database.all<CompanyRow>("SELECT * FROM companies ORDER BY name");
   return rows.map(mapCompanyRow);
 }
 
@@ -156,53 +155,57 @@ function mapCompanyRow(row: CompanyRow): Company {
 
 // --- user_roles ---
 
-export function createUserRole(params: {
+export async function createUserRole(params: {
   userId: string;
   companyId: string;
   permissionLevel: PermissionLevel;
   isCompanyCreator?: boolean;
-}): UserRole {
+}): Promise<UserRole> {
   const id = crypto.randomUUID();
-  db.prepare(
+  await database.run(
     "INSERT INTO user_roles (id, user_id, company_id, permission_level, is_company_creator) VALUES (?, ?, ?, ?, ?)",
-  ).run(id, params.userId, params.companyId, params.permissionLevel, params.isCompanyCreator ? 1 : 0);
-  return findUserRole(params.userId, params.companyId)!;
+    [id, params.userId, params.companyId, params.permissionLevel, params.isCompanyCreator ? 1 : 0],
+  );
+  return (await findUserRole(params.userId, params.companyId))!;
 }
 
-export function findUserRole(userId: string, companyId: string): UserRole | undefined {
-  const row = db.prepare("SELECT * FROM user_roles WHERE user_id = ? AND company_id = ?").get(userId, companyId) as
-    | UserRoleRow
-    | undefined;
+export async function findUserRole(userId: string, companyId: string): Promise<UserRole | undefined> {
+  const row = await database.get<UserRoleRow>("SELECT * FROM user_roles WHERE user_id = ? AND company_id = ?", [
+    userId,
+    companyId,
+  ]);
   return row ? mapUserRoleRow(row) : undefined;
 }
 
-export function listCompanyRoles(companyId: string): UserRole[] {
-  const rows = db.prepare("SELECT * FROM user_roles WHERE company_id = ?").all(companyId) as UserRoleRow[];
+export async function listCompanyRoles(companyId: string): Promise<UserRole[]> {
+  const rows = await database.all<UserRoleRow>("SELECT * FROM user_roles WHERE company_id = ?", [companyId]);
   return rows.map(mapUserRoleRow);
 }
 
-export function updateUserRolePermission(userId: string, companyId: string, permissionLevel: PermissionLevel) {
-  db.prepare(
-    "UPDATE user_roles SET permission_level = ?, updated_at = datetime('now') WHERE user_id = ? AND company_id = ?",
-  ).run(permissionLevel, userId, companyId);
+export async function updateUserRolePermission(userId: string, companyId: string, permissionLevel: PermissionLevel) {
+  await database.run(
+    "UPDATE user_roles SET permission_level = ?, updated_at = ? WHERE user_id = ? AND company_id = ?",
+    [permissionLevel, database.now(), userId, companyId],
+  );
 }
 
-export function deleteUserRole(userId: string, companyId: string) {
-  db.prepare("DELETE FROM user_roles WHERE user_id = ? AND company_id = ?").run(userId, companyId);
+export async function deleteUserRole(userId: string, companyId: string) {
+  await database.run("DELETE FROM user_roles WHERE user_id = ? AND company_id = ?", [userId, companyId]);
 }
 
-export function setRoleCompanyCreator(userId: string, companyId: string, isCreator: boolean) {
-  db.prepare(
-    "UPDATE user_roles SET is_company_creator = ?, updated_at = datetime('now') WHERE user_id = ? AND company_id = ?",
-  ).run(isCreator ? 1 : 0, userId, companyId);
+export async function setRoleCompanyCreator(userId: string, companyId: string, isCreator: boolean) {
+  await database.run(
+    "UPDATE user_roles SET is_company_creator = ?, updated_at = ? WHERE user_id = ? AND company_id = ?",
+    [isCreator ? 1 : 0, database.now(), userId, companyId],
+  );
 }
 
 /** Detach a user's login from their roster rows without deleting the rows themselves. */
-export function unlinkUserEmployees(userId: string, companyId: string) {
-  db.prepare("UPDATE employees SET linked_user_id = NULL WHERE linked_user_id = ? AND company_id = ?").run(
+export async function unlinkUserEmployees(userId: string, companyId: string) {
+  await database.run("UPDATE employees SET linked_user_id = NULL WHERE linked_user_id = ? AND company_id = ?", [
     userId,
     companyId,
-  );
+  ]);
 }
 
 function mapUserRoleRow(row: UserRoleRow): UserRole {
@@ -219,40 +222,43 @@ function mapUserRoleRow(row: UserRoleRow): UserRole {
 
 // --- company_join_requests ---
 
-export function createJoinRequest(userId: string, companyId: string): JoinRequest {
+export async function createJoinRequest(userId: string, companyId: string): Promise<JoinRequest> {
   const id = crypto.randomUUID();
-  db.prepare("INSERT INTO company_join_requests (id, user_id, company_id) VALUES (?, ?, ?)").run(
+  await database.run("INSERT INTO company_join_requests (id, user_id, company_id) VALUES (?, ?, ?)", [
     id,
     userId,
     companyId,
+  ]);
+  return (await findJoinRequestById(id))!;
+}
+
+export async function findJoinRequestById(id: string): Promise<JoinRequest | undefined> {
+  const row = await database.get<JoinRequestRow>("SELECT * FROM company_join_requests WHERE id = ?", [id]);
+  return row ? mapJoinRequestRow(row) : undefined;
+}
+
+export async function findPendingJoinRequest(userId: string, companyId: string): Promise<JoinRequest | undefined> {
+  const row = await database.get<JoinRequestRow>(
+    "SELECT * FROM company_join_requests WHERE user_id = ? AND company_id = ? AND status = 'pending'",
+    [userId, companyId],
   );
-  return findJoinRequestById(id)!;
-}
-
-export function findJoinRequestById(id: string): JoinRequest | undefined {
-  const row = db.prepare("SELECT * FROM company_join_requests WHERE id = ?").get(id) as JoinRequestRow | undefined;
   return row ? mapJoinRequestRow(row) : undefined;
 }
 
-export function findPendingJoinRequest(userId: string, companyId: string): JoinRequest | undefined {
-  const row = db
-    .prepare("SELECT * FROM company_join_requests WHERE user_id = ? AND company_id = ? AND status = 'pending'")
-    .get(userId, companyId) as JoinRequestRow | undefined;
-  return row ? mapJoinRequestRow(row) : undefined;
-}
-
-export function listPendingJoinRequests(companyId: string): JoinRequest[] {
-  const rows = db
-    .prepare("SELECT * FROM company_join_requests WHERE company_id = ? AND status = 'pending' ORDER BY created_at")
-    .all(companyId) as JoinRequestRow[];
+export async function listPendingJoinRequests(companyId: string): Promise<JoinRequest[]> {
+  const rows = await database.all<JoinRequestRow>(
+    "SELECT * FROM company_join_requests WHERE company_id = ? AND status = 'pending' ORDER BY created_at",
+    [companyId],
+  );
   return rows.map(mapJoinRequestRow);
 }
 
-export function setJoinRequestStatus(id: string, status: JoinRequestStatus) {
-  db.prepare("UPDATE company_join_requests SET status = ?, updated_at = datetime('now') WHERE id = ?").run(
+export async function setJoinRequestStatus(id: string, status: JoinRequestStatus) {
+  await database.run("UPDATE company_join_requests SET status = ?, updated_at = ? WHERE id = ?", [
     status,
+    database.now(),
     id,
-  );
+  ]);
 }
 
 function mapJoinRequestRow(row: JoinRequestRow): JoinRequest {
@@ -268,35 +274,37 @@ function mapJoinRequestRow(row: JoinRequestRow): JoinRequest {
 
 // --- employees ---
 
-export function createEmployeeRow(params: {
+export async function createEmployeeRow(params: {
   companyId: string;
   name: string;
   email?: string | null;
   phone?: string | null;
   linkedUserId?: string | null;
-}): Employee {
+}): Promise<Employee> {
   const id = crypto.randomUUID();
-  db.prepare(
+  await database.run(
     "INSERT INTO employees (id, company_id, name, email, phone, linked_user_id) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(id, params.companyId, params.name, params.email ?? null, params.phone ?? null, params.linkedUserId ?? null);
-  const row = db.prepare("SELECT * FROM employees WHERE id = ?").get(id) as EmployeeRow;
+    [id, params.companyId, params.name, params.email ?? null, params.phone ?? null, params.linkedUserId ?? null],
+  );
+  const row = (await database.get<EmployeeRow>("SELECT * FROM employees WHERE id = ?", [id]))!;
   return mapEmployeeRow(row);
 }
 
-export function listCompanyEmployees(companyId: string): Employee[] {
-  const rows = db.prepare("SELECT * FROM employees WHERE company_id = ? ORDER BY name").all(companyId) as EmployeeRow[];
+export async function listCompanyEmployees(companyId: string): Promise<Employee[]> {
+  const rows = await database.all<EmployeeRow>("SELECT * FROM employees WHERE company_id = ? ORDER BY name", [companyId]);
   return rows.map(mapEmployeeRow);
 }
 
-export function findEmployeeByLinkedUser(companyId: string, userId: string): Employee | undefined {
-  const row = db
-    .prepare("SELECT * FROM employees WHERE company_id = ? AND linked_user_id = ?")
-    .get(companyId, userId) as EmployeeRow | undefined;
+export async function findEmployeeByLinkedUser(companyId: string, userId: string): Promise<Employee | undefined> {
+  const row = await database.get<EmployeeRow>("SELECT * FROM employees WHERE company_id = ? AND linked_user_id = ?", [
+    companyId,
+    userId,
+  ]);
   return row ? mapEmployeeRow(row) : undefined;
 }
 
-export function findEmployeeById(id: string): Employee | undefined {
-  const row = db.prepare("SELECT * FROM employees WHERE id = ?").get(id) as EmployeeRow | undefined;
+export async function findEmployeeById(id: string): Promise<Employee | undefined> {
+  const row = await database.get<EmployeeRow>("SELECT * FROM employees WHERE id = ?", [id]);
   return row ? mapEmployeeRow(row) : undefined;
 }
 

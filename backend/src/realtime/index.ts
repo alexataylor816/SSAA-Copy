@@ -83,7 +83,7 @@ function roomsFor(session: Session): string[] {
 
 export function attachRealtime(io: SocketIOServer) {
   activeIo = io;
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token =
       (socket.handshake.auth as { token?: string } | undefined)?.token ??
       (typeof socket.handshake.headers.authorization === "string"
@@ -94,7 +94,7 @@ export function attachRealtime(io: SocketIOServer) {
 
     try {
       const payload = verifyToken(token);
-      const user = findUserById(payload.sub);
+      const user = await findUserById(payload.sub);
       if (!user) return next(new Error("Unknown user."));
       (socket.data as Session).userId = user.id;
       (socket.data as Session).companyId = user.companyId ?? null;

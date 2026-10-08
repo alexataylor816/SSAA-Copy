@@ -34,17 +34,17 @@ import type { Availability, Project, ScheduleRequest, ScheduleRequestStatus } fr
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
 
-function requireUserWithCompany(userId: string) {
-  const user = findUserById(userId);
+async function requireUserWithCompany(userId: string) {
+  const user = await findUserById(userId);
   if (!user) throw new NotFoundError("User not found.");
   if (!user.companyId) throw new ConflictError("You need to be part of a company first.");
   return user;
 }
 
-function actorHasPartialOrHigher(user: User): boolean {
+async function actorHasPartialOrHigher(user: User): Promise<boolean> {
   if (user.isAdmin) return true;
   if (!user.companyId) return false;
-  const role = findUserRole(user.id, user.companyId);
+  const role = await findUserRole(user.id, user.companyId);
   return hasPartialOrHigher({ isAdmin: user.isAdmin, permissionLevel: role?.permissionLevel ?? null });
 }
 
@@ -53,10 +53,10 @@ function actorHasPartialOrHigher(user: User): boolean {
  * full or account holder only — the dashboard's "+ New" button already hides
  * itself under the same rule, but the API never enforced it.
  */
-function actorHasFullOrHigher(user: User): boolean {
+async function actorHasFullOrHigher(user: User): Promise<boolean> {
   if (user.isAdmin) return true;
   if (!user.companyId) return false;
-  const role = findUserRole(user.id, user.companyId);
+  const role = await findUserRole(user.id, user.companyId);
   const level = role?.permissionLevel ?? null;
   return level !== null && hasAtLeast(level, "full");
 }
@@ -74,12 +74,12 @@ function assertDateUnlocked(date: string, user: User): void {
   }
 }
 
-export function createProject(userId: string, params: { name: string; address?: string }): Project {
-  const user = requireUserWithCompany(userId);
+export async function createProject(userId: string, params: { name: string; address?: string }): Promise<Project> {
+  const user = await requireUserWithCompany(userId);
   if (!params.name?.trim()) {
     throw new BadRequestError("Project name is required.");
   }
-  if (!actorHasFullOrHigher(user)) {
+  if (!(await actorHasFullOrHigher(user))) {
     throw new ForbiddenError("You need Full-level access or higher to create projects.");
   }
 
@@ -93,28 +93,28 @@ export function createProject(userId: string, params: { name: string; address?: 
  * tasks, aliases, assignments, and the messaging channel (+ its messages,
  * reads, and participants).
  */
-export function deleteProject(userId: string, projectId: string): void {
-  const user = requireUserWithCompany(userId);
+export async function deleteProject(userId: string, projectId: string): Promise<void> {
+  const user = await requireUserWithCompany(userId);
   const project = findProjectById(projectId);
   if (!project || project.companyId !== user.companyId) {
     throw new NotFoundError("Project not found.");
   }
-  if (!actorHasFullOrHigher(user)) {
+  if (!(await actorHasFullOrHigher(user))) {
     throw new ForbiddenError("You need Full-level access or higher to delete projects.");
   }
 
-  deleteProjectAndChildren(projectId);
+  await deleteProjectAndChildren(projectId);
 }
 
-export function listVisibleProjects(userId: string): Project[] {
-  const user = requireUserWithCompany(userId);
+export async function listVisibleProjects(userId: string): Promise<Project[]> {
+  const user = await requireUserWithCompany(userId);
   const owned = listOwnedProjects(user.companyId!);
   const connected = listConnectedProjects(user.companyId!);
   return [...owned, ...connected];
 }
 
-export function connectProjectByCode(userId: string, code: string): Project {
-  const user = requireUserWithCompany(userId);
+export async function connectProjectByCode(userId: string, code: string): Promise<Project> {
+  const user = await requireUserWithCompany(userId);
   const project = findProjectByConnectionCode(code.trim());
   if (!project) {
     throw new NotFoundError("No project found for that code.");
@@ -138,14 +138,13 @@ function canSeeProject(companyId: string, projectId: string): boolean {
 }
 
 /** Companies connected to a project — who a GC can pick from when requesting people. */
-export function listProjectConnectedCompanies(userId: string, projectId: string): Company[] {
-  const user = requireUserWithCompany(userId);
+export async function listProjectConnectedCompanies(userId: string, projectId: string): Promise<Company[]> {
+  const user = await requireUserWithCompany(userId);
   if (!canSeeProject(user.companyId!, projectId)) {
     throw new NotFoundError("Project not found.");
   }
-  return listProjectConnections(projectId)
-    .map((conn) => findCompanyById(conn.subCompanyId))
-    .filter((company): company is Company => !!company);
+  const companies = await Promise.all(listProjectConnections(projectId).map((conn) => findCompanyById(conn.subCompanyId)));
+  return companies.filter((company): company is Company => !!company);
 }
 
 function sharesAProject(companyA: string, companyB: string): boolean {
@@ -160,8 +159,8 @@ function sharesAProject(companyA: string, companyB: string): boolean {
  * project — what a GC needs to pick who to request from a connected sub
  * (mirrors the original's cross-company RLS for `employees`).
  */
-export function listConnectedCompanyEmployees(userId: string, targetCompanyId: string): Employee[] {
-  const user = requireUserWithCompany(userId);
+export async function listConnectedCompanyEmployees(userId: string, targetCompanyId: string): Promise<Employee[]> {
+  const user = await requireUserWithCompany(userId);
   if (!user.isAdmin && user.companyId !== targetCompanyId && !sharesAProject(user.companyId!, targetCompanyId)) {
     throw new ForbiddenError("You can only view employees of a company connected to a shared project.");
   }
@@ -201,14 +200,14 @@ export interface SetAvailabilityParams {
  * another company's crew goes through the schedule-request flow, which is the
  * entire point of it.
  */
-function resolveEmployeeToSchedule(user: User, employeeId?: string): Employee {
-  const ownEmployee = findEmployeeByLinkedUser(user.companyId!, user.id);
+async function resolveEmployeeToSchedule(user: User, employeeId?: string): Promise<Employee> {
+  const ownEmployee = await findEmployeeByLinkedUser(user.companyId!, user.id);
   const targetId = employeeId ?? ownEmployee?.id;
   if (!targetId) {
     throw new ConflictError("No employee record found for your account in this company.");
   }
 
-  const target = findEmployeeById(targetId);
+  const target = await findEmployeeById(targetId);
   if (!target) {
     throw new NotFoundError("Employee not found.");
   }
@@ -217,7 +216,7 @@ function resolveEmployeeToSchedule(user: User, employeeId?: string): Employee {
   if (target.companyId !== user.companyId) {
     throw new ForbiddenError("You can only publish availability for employees of your own company.");
   }
-  if (!actorHasPartialOrHigher(user)) {
+  if (!(await actorHasPartialOrHigher(user))) {
     throw new ForbiddenError(
       "You need Partial-level access or higher to publish availability for other people.",
     );
@@ -225,8 +224,8 @@ function resolveEmployeeToSchedule(user: User, employeeId?: string): Employee {
   return target;
 }
 
-export function setAvailability(userId: string, params: SetAvailabilityParams): Availability {
-  const user = requireUserWithCompany(userId);
+export async function setAvailability(userId: string, params: SetAvailabilityParams): Promise<Availability> {
+  const user = await requireUserWithCompany(userId);
 
   if (!DATE_RE.test(params.date)) throw new BadRequestError("date must be formatted YYYY-MM-DD.");
   if (!TIME_RE.test(params.startTime) || !TIME_RE.test(params.endTime)) {
@@ -243,7 +242,7 @@ export function setAvailability(userId: string, params: SetAvailabilityParams): 
   }
   assertDateUnlocked(params.date, user);
 
-  const employee = resolveEmployeeToSchedule(user, params.employeeId);
+  const employee = await resolveEmployeeToSchedule(user, params.employeeId);
 
   const stop = params.stopNumber;
   if (stop !== undefined && stop !== null && (!Number.isInteger(stop) || stop < 1 || stop > 10)) {
@@ -263,26 +262,26 @@ export function setAvailability(userId: string, params: SetAvailabilityParams): 
   });
 }
 
-export function listAvailability(userId: string, startDate: string, endDate: string): Availability[] {
-  const user = requireUserWithCompany(userId);
+export async function listAvailability(userId: string, startDate: string, endDate: string): Promise<Availability[]> {
+  const user = await requireUserWithCompany(userId);
   if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
     throw new BadRequestError("start/end must be formatted YYYY-MM-DD.");
   }
   return listAvailabilityForCompany(user.companyId!, startDate, endDate);
 }
 
-export function deleteAvailability(userId: string, availabilityId: string) {
-  const user = requireUserWithCompany(userId);
+export async function deleteAvailability(userId: string, availabilityId: string) {
+  const user = await requireUserWithCompany(userId);
   const row = findAvailabilityById(availabilityId);
   if (!row) throw new NotFoundError("Availability entry not found.");
 
-  const ownEmployee = findEmployeeByLinkedUser(user.companyId!, user.id);
+  const ownEmployee = await findEmployeeByLinkedUser(user.companyId!, user.id);
   const isOwnEntry = !!ownEmployee && ownEmployee.id === row.employeeId;
   if (!isOwnEntry) {
     // Removing somebody else's hours is the same privilege as publishing them,
     // so it goes through the same check rather than a blanket admin-only rule.
-    const owner = findEmployeeById(row.employeeId);
-    if (!owner || owner.companyId !== user.companyId || !actorHasPartialOrHigher(user)) {
+    const owner = await findEmployeeById(row.employeeId);
+    if (!owner || owner.companyId !== user.companyId || !(await actorHasPartialOrHigher(user))) {
       throw new ForbiddenError("You can only remove your own availability.");
     }
   }
@@ -303,10 +302,10 @@ export interface CreateScheduleRequestParams {
   imageUrls?: string[];
 }
 
-export function createScheduleRequest(userId: string, params: CreateScheduleRequestParams): ScheduleRequest {
-  const user = requireUserWithCompany(userId);
+export async function createScheduleRequest(userId: string, params: CreateScheduleRequestParams): Promise<ScheduleRequest> {
+  const user = await requireUserWithCompany(userId);
 
-  if (!actorHasPartialOrHigher(user)) {
+  if (!(await actorHasPartialOrHigher(user))) {
     throw new ForbiddenError("You need Partial-level access or higher to schedule people.");
   }
   if (!DATE_RE.test(params.date)) throw new BadRequestError("date must be formatted YYYY-MM-DD.");
@@ -330,7 +329,7 @@ export function createScheduleRequest(userId: string, params: CreateScheduleRequ
   }
 
   for (const employeeId of params.employeeIds) {
-    const employee = findEmployeeById(employeeId);
+    const employee = await findEmployeeById(employeeId);
     if (!employee || employee.companyId !== params.subCompanyId) {
       throw new BadRequestError(`Employee ${employeeId} does not belong to that company.`);
     }
@@ -361,25 +360,25 @@ export function createScheduleRequest(userId: string, params: CreateScheduleRequ
   });
 }
 
-export function listScheduleRequests(userId: string, startDate: string, endDate: string): ScheduleRequest[] {
-  const user = requireUserWithCompany(userId);
+export async function listScheduleRequests(userId: string, startDate: string, endDate: string): Promise<ScheduleRequest[]> {
+  const user = await requireUserWithCompany(userId);
   if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
     throw new BadRequestError("start/end must be formatted YYYY-MM-DD.");
   }
   return listScheduleRequestsForCompany(user.companyId!, startDate, endDate);
 }
 
-export function updateScheduleRequestStatus(
+export async function updateScheduleRequestStatus(
   userId: string,
   requestId: string,
   status: ScheduleRequestStatus,
   reason?: string,
-): ScheduleRequest {
-  const user = requireUserWithCompany(userId);
-  const req = findScheduleRequestById(requestId);
+): Promise<ScheduleRequest> {
+  const user = await requireUserWithCompany(userId);
+  const req = await findScheduleRequestById(requestId);
   if (!req) throw new NotFoundError("Schedule request not found.");
 
-  if (!actorHasPartialOrHigher(user)) {
+  if (!(await actorHasPartialOrHigher(user))) {
     throw new ForbiddenError("You need Partial-level access or higher to act on schedule requests.");
   }
   assertDateUnlocked(req.date, user);
@@ -408,5 +407,5 @@ export function updateScheduleRequestStatus(
   }
 
   updateScheduleRequestStatusRow(requestId, status, trimmed || null);
-  return findScheduleRequestById(requestId)!;
+  return (await findScheduleRequestById(requestId))!;
 }

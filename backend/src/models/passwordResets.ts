@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { db } from "../db.js";
+import { database, db } from "../db.js";
 
 const CODE_TTL_MS = 15 * 60 * 1000;
 
@@ -29,30 +29,32 @@ function hashCode(code: string): string {
 }
 
 /** Generates a 6-digit reset code for the user, invalidating any earlier ones. */
-export function createResetCode(userId: string): string {
-  db.prepare("DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL").run(userId);
+export async function createResetCode(userId: string): Promise<string> {
+  await database.run("DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL", [userId]);
 
   const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
   const expiresAt = new Date(Date.now() + CODE_TTL_MS).toISOString();
 
-  db.prepare(
-    "INSERT INTO password_resets (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)",
-  ).run(crypto.randomUUID(), userId, hashCode(code), expiresAt);
+  await database.run("INSERT INTO password_resets (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)", [
+    crypto.randomUUID(),
+    userId,
+    hashCode(code),
+    expiresAt,
+  ]);
 
   return code;
 }
 
 /** Marks the matching, unexpired code as used and returns the user id, or null if invalid. */
-export function consumeResetCode(userId: string, code: string): string | null {
-  const row = db
-    .prepare(
-      "SELECT * FROM password_resets WHERE user_id = ? AND code_hash = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-    )
-    .get(userId, hashCode(code)) as PasswordResetRow | undefined;
+export async function consumeResetCode(userId: string, code: string): Promise<string | null> {
+  const row = await database.get<PasswordResetRow>(
+    "SELECT * FROM password_resets WHERE user_id = ? AND code_hash = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+    [userId, hashCode(code)],
+  );
 
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) return null;
 
-  db.prepare("UPDATE password_resets SET used_at = datetime('now') WHERE id = ?").run(row.id);
+  await database.run("UPDATE password_resets SET used_at = ? WHERE id = ?", [database.now(), row.id]);
   return row.user_id;
 }

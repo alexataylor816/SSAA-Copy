@@ -116,8 +116,8 @@ function schedulers(companyId: string, exceptUserId: string): string[] {
 }
 
 /** Who may approve join requests: account holders, plus full-level for sub companies (rbac/permissions). */
-function approvers(companyId: string): string[] {
-  const company = findCompanyById(companyId);
+async function approvers(companyId: string): Promise<string[]> {
+  const company = await findCompanyById(companyId);
   const levels = company?.companyType === "sub" ? "('full', 'account_holder')" : "('account_holder')";
   const rows = db
     .prepare(
@@ -133,19 +133,19 @@ const dayLabel = (iso: string) => {
   return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 };
 
-function requestContext(request: ScheduleRequest) {
+async function requestContext(request: ScheduleRequest) {
   const project = db.prepare("SELECT name FROM projects WHERE id = ?").get(request.projectId) as { name: string } | undefined;
   return {
     projectName: project?.name ?? "a project",
-    gcName: findCompanyById(request.requestingCompanyId)?.name ?? "The GC",
-    subName: findCompanyById(request.subCompanyId)?.name ?? "The subcontractor",
+    gcName: (await findCompanyById(request.requestingCompanyId))?.name ?? "The GC",
+    subName: (await findCompanyById(request.subCompanyId))?.name ?? "The subcontractor",
     day: dayLabel(request.date),
     link: `/dashboard?day=${request.date}`,
   };
 }
 
-export function notifyScheduleRequestCreated(actorUserId: string, request: ScheduleRequest) {
-  const c = requestContext(request);
+export async function notifyScheduleRequestCreated(actorUserId: string, request: ScheduleRequest) {
+  const c = await requestContext(request);
   const crew = request.employeeIds.length;
   notify(schedulers(request.subCompanyId, actorUserId), {
     eventType: "schedule_created",
@@ -156,8 +156,8 @@ export function notifyScheduleRequestCreated(actorUserId: string, request: Sched
   });
 }
 
-export function notifyScheduleRequestUpdated(actorUserId: string, request: ScheduleRequest) {
-  const c = requestContext(request);
+export async function notifyScheduleRequestUpdated(actorUserId: string, request: ScheduleRequest) {
+  const c = await requestContext(request);
   const reason = request.statusReason ? ` Reason: ${request.statusReason}` : "";
   if (request.status === "confirmed" || request.status === "rejected") {
     notify(schedulers(request.requestingCompanyId, actorUserId), {
@@ -169,7 +169,7 @@ export function notifyScheduleRequestUpdated(actorUserId: string, request: Sched
     });
   } else if (request.status === "cancelled") {
     // Whoever didn't cancel it needs to know.
-    const actorCompany = findUserById(actorUserId)?.companyId;
+    const actorCompany = (await findUserById(actorUserId))?.companyId;
     const other = actorCompany === request.subCompanyId ? request.requestingCompanyId : request.subCompanyId;
     const by = actorCompany === request.subCompanyId ? c.subName : c.gcName;
     notify(schedulers(other, actorUserId), {
@@ -182,10 +182,10 @@ export function notifyScheduleRequestUpdated(actorUserId: string, request: Sched
   }
 }
 
-export function notifyJoinRequestCreated(requesterUserId: string, companyId: string) {
-  const requester = findUserById(requesterUserId);
-  const company = findCompanyById(companyId);
-  notify(approvers(companyId), {
+export async function notifyJoinRequestCreated(requesterUserId: string, companyId: string) {
+  const requester = await findUserById(requesterUserId);
+  const company = await findCompanyById(companyId);
+  notify(await approvers(companyId), {
     eventType: "join_request",
     title: "New join request",
     body: `${requester?.fullName || requester?.email || "Someone"} asked to join ${company?.name ?? "your company"}.`,
@@ -193,10 +193,10 @@ export function notifyJoinRequestCreated(requesterUserId: string, companyId: str
   });
 }
 
-export function notifyJoinRequestResolved(requestId: string, approved: boolean) {
-  const joinRequest = findJoinRequestById(requestId);
+export async function notifyJoinRequestResolved(requestId: string, approved: boolean) {
+  const joinRequest = await findJoinRequestById(requestId);
   if (!joinRequest) return;
-  const company = findCompanyById(joinRequest.companyId);
+  const company = await findCompanyById(joinRequest.companyId);
   notify([joinRequest.userId], {
     eventType: approved ? "join_approved" : "join_rejected",
     title: approved ? "You're in" : "Join request declined",

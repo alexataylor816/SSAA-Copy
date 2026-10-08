@@ -25,14 +25,14 @@ export const schedulingRouter = Router();
 schedulingRouter.use(requireAuth);
 
 /** The company a mutation belongs to, so we can emit to the right rooms. */
-function callerCompanyId(userId: string): string | null {
-  return findUserById(userId)?.companyId ?? null;
+async function callerCompanyId(userId: string): Promise<string | null> {
+  return (await findUserById(userId))?.companyId ?? null;
 }
 
-function route(handler: RequestHandler): RequestHandler {
-  return (req, res, next) => {
+function route(handler: (...args: Parameters<RequestHandler>) => unknown): RequestHandler {
+  return async (req, res, next) => {
     try {
-      handler(req, res, next);
+      await handler(req, res, next);
     } catch (err) {
       if (err instanceof HttpError) {
         res.status(err.status).json({ error: err.message });
@@ -45,16 +45,16 @@ function route(handler: RequestHandler): RequestHandler {
 
 schedulingRouter.get(
   "/projects",
-  route((req, res) => {
-    res.json({ projects: listVisibleProjects(req.userId!) });
+  route(async (req, res) => {
+    res.json({ projects: await listVisibleProjects(req.userId!) });
   }),
 );
 
 schedulingRouter.post(
   "/projects",
-  route((req, res) => {
+  route(async (req, res) => {
     const { name, address } = req.body ?? {};
-    const project = createProject(req.userId!, { name, address });
+    const project = await createProject(req.userId!, { name, address });
     emit(EVENT.projectConnectionChanged, { projectId: project.id, action: "created" }, ROOM.project_connections, project.id);
     res.status(201).json(project);
   }),
@@ -62,14 +62,14 @@ schedulingRouter.post(
 
 schedulingRouter.post(
   "/projects/connect",
-  route((req, res) => {
+  route(async (req, res) => {
     const { code } = req.body ?? {};
     if (typeof code !== "string" || !code.trim()) {
       res.status(400).json({ error: "code is required." });
       return;
     }
-    const project = connectProjectByCode(req.userId!, code);
-    const companyId = callerCompanyId(req.userId!);
+    const project = await connectProjectByCode(req.userId!, code);
+    const companyId = await callerCompanyId(req.userId!);
     if (companyId) {
       emit(EVENT.projectConnectionChanged, { projectId: project.id, companyId }, ROOM.project_connections, project.id);
     }
@@ -79,9 +79,9 @@ schedulingRouter.post(
 
 schedulingRouter.delete(
   "/projects/:id",
-  route((req, res) => {
-    deleteProject(req.userId!, req.params.id);
-    const companyId = callerCompanyId(req.userId!);
+  route(async (req, res) => {
+    await deleteProject(req.userId!, req.params.id);
+    const companyId = await callerCompanyId(req.userId!);
     if (companyId) {
       emit(EVENT.projectConnectionChanged, { projectId: req.params.id, action: "deleted" }, ROOM.project_connections, req.params.id);
     }
@@ -91,22 +91,22 @@ schedulingRouter.delete(
 
 schedulingRouter.get(
   "/availability",
-  route((req, res) => {
+  route(async (req, res) => {
     const { start, end } = req.query;
     if (typeof start !== "string" || typeof end !== "string") {
       res.status(400).json({ error: "start and end query params are required (YYYY-MM-DD)." });
       return;
     }
-    res.json({ availability: listAvailability(req.userId!, start, end) });
+    res.json({ availability: await listAvailability(req.userId!, start, end) });
   }),
 );
 
 schedulingRouter.post(
   "/availability",
-  route((req, res) => {
+  route(async (req, res) => {
     const { date, startTime, endTime, projectId, allProjects, employeeId, stopNumber } = req.body ?? {};
-    const entry = setAvailability(req.userId!, { date, startTime, endTime, projectId, allProjects, employeeId, stopNumber });
-    const companyId = callerCompanyId(req.userId!);
+    const entry = await setAvailability(req.userId!, { date, startTime, endTime, projectId, allProjects, employeeId, stopNumber });
+    const companyId = await callerCompanyId(req.userId!);
     if (companyId) {
       // The target employee is always on the caller's own roster (enforced in
       // resolveEmployeeToSchedule), so one room is enough — no cross-company fanout.
@@ -118,9 +118,9 @@ schedulingRouter.post(
 
 schedulingRouter.delete(
   "/availability/:id",
-  route((req, res) => {
-    deleteAvailability(req.userId!, req.params.id);
-    const companyId = callerCompanyId(req.userId!);
+  route(async (req, res) => {
+    await deleteAvailability(req.userId!, req.params.id);
+    const companyId = await callerCompanyId(req.userId!);
     if (companyId) {
       emit(EVENT.availabilityChanged, { action: "deleted", id: req.params.id }, ROOM.availability, companyId);
     }
@@ -130,36 +130,36 @@ schedulingRouter.delete(
 
 schedulingRouter.get(
   "/projects/:id/connections",
-  route((req, res) => {
-    res.json({ companies: listProjectConnectedCompanies(req.userId!, req.params.id) });
+  route(async (req, res) => {
+    res.json({ companies: await listProjectConnectedCompanies(req.userId!, req.params.id) });
   }),
 );
 
 schedulingRouter.get(
   "/companies/:id/connected-employees",
-  route((req, res) => {
-    res.json({ employees: listConnectedCompanyEmployees(req.userId!, req.params.id) });
+  route(async (req, res) => {
+    res.json({ employees: await listConnectedCompanyEmployees(req.userId!, req.params.id) });
   }),
 );
 
 schedulingRouter.get(
   "/schedule-requests",
-  route((req, res) => {
+  route(async (req, res) => {
     const { start, end } = req.query;
     if (typeof start !== "string" || typeof end !== "string") {
       res.status(400).json({ error: "start and end query params are required (YYYY-MM-DD)." });
       return;
     }
-    res.json({ requests: listScheduleRequests(req.userId!, start, end) });
+    res.json({ requests: await listScheduleRequests(req.userId!, start, end) });
   }),
 );
 
 schedulingRouter.post(
   "/schedule-requests",
-  route((req, res) => {
+  route(async (req, res) => {
     const { projectId, subCompanyId, employeeIds, date, startTime, endTime, description, imageUrls } =
       req.body ?? {};
-    const request = createScheduleRequest(req.userId!, {
+    const request = await createScheduleRequest(req.userId!, {
       projectId,
       subCompanyId,
       employeeIds,
@@ -170,25 +170,25 @@ schedulingRouter.post(
       imageUrls,
     });
     // Both companies care: the GC that asked, and the sub whose crew was named.
-    emitProject(EVENT.scheduleRequestCreated, { request }, projectId, [subCompanyId, callerCompanyId(req.userId!) ?? ""]);
-    notifyScheduleRequestCreated(req.userId!, request);
+    emitProject(EVENT.scheduleRequestCreated, { request }, projectId, [subCompanyId, (await callerCompanyId(req.userId!)) ?? ""]);
+    await notifyScheduleRequestCreated(req.userId!, request);
     res.status(201).json(request);
   }),
 );
 
 schedulingRouter.patch(
   "/schedule-requests/:id",
-  route((req, res) => {
+  route(async (req, res) => {
     const status = req.body?.status as ScheduleRequestStatus;
     const statusReason = req.body?.statusReason as string | undefined;
-    const request = updateScheduleRequestStatus(req.userId!, req.params.id, status, statusReason);
+    const request = await updateScheduleRequestStatus(req.userId!, req.params.id, status, statusReason);
     emitProject(
       EVENT.scheduleRequestUpdated,
       { request },
       request.projectId,
       [request.requestingCompanyId, request.subCompanyId],
     );
-    notifyScheduleRequestUpdated(req.userId!, request);
+    await notifyScheduleRequestUpdated(req.userId!, request);
     res.json(request);
   }),
 );
