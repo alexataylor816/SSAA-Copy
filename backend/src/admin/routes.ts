@@ -1,7 +1,7 @@
 import { Router, type RequestHandler } from "express";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { HttpError, ForbiddenError, NotFoundError } from "../rbac/errors.js";
-import { db } from "../db.js";
+import { database } from "../db.js";
 import { findUserByEmail, findUserById, setUserIsAdmin } from "../models/users.js";
 import { listCompanies } from "../rbac/models.js";
 import {
@@ -39,11 +39,13 @@ adminRouter.get(
   "/admin/companies",
   route(async (req, res) => {
     await requireAdmin(req);
-    const companies = (await listCompanies()).map((c) => {
-      const members = (db.prepare("SELECT COUNT(*) n FROM user_roles WHERE company_id = ?").get(c.id) as { n: number }).n;
-      const projects = (db.prepare("SELECT COUNT(*) n FROM projects WHERE company_id = ?").get(c.id) as { n: number }).n;
-      return { id: c.id, name: c.name, companyType: c.companyType, members, projects };
-    });
+    const companies = await Promise.all(
+      (await listCompanies()).map(async (c) => {
+        const members = (await database.get<{ n: number }>("SELECT COUNT(*) n FROM user_roles WHERE company_id = ?", [c.id]))!.n;
+        const projects = (await database.get<{ n: number }>("SELECT COUNT(*) n FROM projects WHERE company_id = ?", [c.id]))!.n;
+        return { id: c.id, name: c.name, companyType: c.companyType, members, projects };
+      }),
+    );
     res.json({ companies });
   }),
 );
@@ -52,9 +54,9 @@ adminRouter.get(
   "/admin/operators",
   route(async (req, res) => {
     await requireAdmin(req);
-    const rows = db
-      .prepare("SELECT id, email, full_name FROM users WHERE is_admin = 1 ORDER BY email")
-      .all() as { id: string; email: string; full_name: string }[];
+    const rows = await database.all<{ id: string; email: string; full_name: string }>(
+      "SELECT id, email, full_name FROM users WHERE is_admin = 1 ORDER BY email",
+    );
     res.json({ operators: rows.map((r) => ({ userId: r.id, email: r.email, fullName: r.full_name })) });
   }),
 );

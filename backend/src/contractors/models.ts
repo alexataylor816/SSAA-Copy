@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { db } from "../db.js";
+import { database, db } from "../db.js";
 import type { CompanyType } from "../rbac/types.js";
 
 export type ContractorConnectionStatus = "pending" | "accepted" | "declined";
@@ -103,54 +103,56 @@ function mapConnectionRow(row: ContractorConnectionRow): ContractorConnection {
   };
 }
 
-export function findContractorConnection(id: string): ContractorConnection | undefined {
-  const row = db.prepare("SELECT * FROM contractor_connections WHERE id = ?").get(id) as
-    | ContractorConnectionRow
-    | undefined;
+export async function findContractorConnection(id: string): Promise<ContractorConnection | undefined> {
+  const row = await database.get<ContractorConnectionRow>("SELECT * FROM contractor_connections WHERE id = ?", [id]);
   return row ? mapConnectionRow(row) : undefined;
 }
 
-export function findConnectionBetween(a: string, b: string): ContractorConnection | undefined {
+export async function findConnectionBetween(a: string, b: string): Promise<ContractorConnection | undefined> {
   const [low, high] = a < b ? [a, b] : [b, a];
-  const row = db
-    .prepare("SELECT * FROM contractor_connections WHERE company_a_id = ? AND company_b_id = ?")
-    .get(low, high) as ContractorConnectionRow | undefined;
+  const row = await database.get<ContractorConnectionRow>(
+    "SELECT * FROM contractor_connections WHERE company_a_id = ? AND company_b_id = ?",
+    [low, high],
+  );
   return row ? mapConnectionRow(row) : undefined;
 }
 
-export function listConnectionsForCompany(companyId: string): ContractorConnection[] {
-  const rows = db
-    .prepare("SELECT * FROM contractor_connections WHERE company_a_id = ? OR company_b_id = ? ORDER BY updated_at DESC")
-    .all(companyId, companyId) as ContractorConnectionRow[];
+export async function listConnectionsForCompany(companyId: string): Promise<ContractorConnection[]> {
+  const rows = await database.all<ContractorConnectionRow>(
+    "SELECT * FROM contractor_connections WHERE company_a_id = ? OR company_b_id = ? ORDER BY updated_at DESC",
+    [companyId, companyId],
+  );
   return rows.map(mapConnectionRow);
 }
 
-export function upsertConnectionRequest(params: {
+export async function upsertConnectionRequest(params: {
   companyAId: string;
   companyBId: string;
   initiatedByCompanyId: string;
   initiatedByUserId: string;
   proposedMainCompanyId: string;
-}): ContractorConnection {
-  const existing = findConnectionBetween(params.companyAId, params.companyBId);
+}): Promise<ContractorConnection> {
+  const existing = await findConnectionBetween(params.companyAId, params.companyBId);
   const ts = new Date().toISOString();
   if (existing) {
-    db.prepare(
+    await database.run(
       `UPDATE contractor_connections SET status = 'pending', initiated_by_company_id = ?, initiated_by_user_id = ?,
        proposed_main_company_id = ?, role_change_request = NULL, accepted_at = NULL, updated_at = ? WHERE id = ?`,
-    ).run(params.initiatedByCompanyId, params.initiatedByUserId, params.proposedMainCompanyId, ts, existing.id);
-    return findContractorConnection(existing.id)!;
+      [params.initiatedByCompanyId, params.initiatedByUserId, params.proposedMainCompanyId, ts, existing.id],
+    );
+    return (await findContractorConnection(existing.id))!;
   }
   const id = crypto.randomUUID();
-  db.prepare(
+  await database.run(
     `INSERT INTO contractor_connections
      (id, company_a_id, company_b_id, status, initiated_by_company_id, initiated_by_user_id, proposed_main_company_id, created_at, updated_at)
      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
-  ).run(id, params.companyAId, params.companyBId, params.initiatedByCompanyId, params.initiatedByUserId, params.proposedMainCompanyId, ts, ts);
-  return findContractorConnection(id)!;
+    [id, params.companyAId, params.companyBId, params.initiatedByCompanyId, params.initiatedByUserId, params.proposedMainCompanyId, ts, ts],
+  );
+  return (await findContractorConnection(id))!;
 }
 
-export function setConnectionResponse(
+export async function setConnectionResponse(
   id: string,
   accept: boolean,
   mainCompanyId: string | null,
@@ -158,42 +160,42 @@ export function setConnectionResponse(
 ) {
   const ts = new Date().toISOString();
   if (!accept) {
-    db.prepare("UPDATE contractor_connections SET status = 'declined', updated_at = ? WHERE id = ?").run(ts, id);
+    await database.run("UPDATE contractor_connections SET status = 'declined', updated_at = ? WHERE id = ?", [ts, id]);
     return;
   }
-  db.prepare(
+  await database.run(
     `UPDATE contractor_connections SET status = 'accepted', main_company_id = ?, accepted_at = ?,
      proposed_main_company_id = NULL, role_change_request = ?, updated_at = ? WHERE id = ?`,
-  ).run(mainCompanyId, ts, roleChangeRequest ? JSON.stringify(roleChangeRequest) : null, ts, id);
-}
-
-export function setConnectionMain(id: string, mainCompanyId: string) {
-  const ts = new Date().toISOString();
-  db.prepare(
-    "UPDATE contractor_connections SET main_company_id = ?, role_change_request = NULL, updated_at = ? WHERE id = ?",
-  ).run(mainCompanyId, ts, id);
-}
-
-export function setRoleChangeRequest(id: string, req: NonNullable<ContractorConnection["roleChangeRequest"]>) {
-  const ts = new Date().toISOString();
-  db.prepare("UPDATE contractor_connections SET role_change_request = ?, updated_at = ? WHERE id = ?").run(
-    JSON.stringify(req),
-    ts,
-    id,
+    [mainCompanyId, ts, roleChangeRequest ? JSON.stringify(roleChangeRequest) : null, ts, id],
   );
 }
 
-export function listConnectionProjects(connectionId: string): ContractorConnectionProject[] {
-  const rows = db
-    .prepare("SELECT * FROM contractor_connection_projects WHERE connection_id = ?")
-    .all(connectionId) as {
+export async function setConnectionMain(id: string, mainCompanyId: string) {
+  const ts = new Date().toISOString();
+  await database.run(
+    "UPDATE contractor_connections SET main_company_id = ?, role_change_request = NULL, updated_at = ? WHERE id = ?",
+    [mainCompanyId, ts, id],
+  );
+}
+
+export async function setRoleChangeRequest(id: string, req: NonNullable<ContractorConnection["roleChangeRequest"]>) {
+  const ts = new Date().toISOString();
+  await database.run("UPDATE contractor_connections SET role_change_request = ?, updated_at = ? WHERE id = ?", [
+    JSON.stringify(req),
+    ts,
+    id,
+  ]);
+}
+
+export async function listConnectionProjects(connectionId: string): Promise<ContractorConnectionProject[]> {
+  const rows = await database.all<{
     id: string;
     connection_id: string;
     project_id: string;
     main_company_id: string;
     sub_company_id: string;
     shared: number;
-  }[];
+  }>("SELECT * FROM contractor_connection_projects WHERE connection_id = ?", [connectionId]);
   return rows.map((r) => ({
     id: r.id,
     connectionId: r.connection_id,
@@ -204,7 +206,7 @@ export function listConnectionProjects(connectionId: string): ContractorConnecti
   }));
 }
 
-export function setConnectionProject(params: {
+export async function setConnectionProject(params: {
   connectionId: string;
   projectId: string;
   mainCompanyId: string;
@@ -214,33 +216,42 @@ export function setConnectionProject(params: {
 }) {
   const id = crypto.randomUUID();
   const ts = new Date().toISOString();
-  db.prepare(
+  // Upsert on (connection_id, project_id): same columns updated either way,
+  // only the conflict syntax differs between the two databases.
+  const upsert =
+    database.dialect === "mysql"
+      ? `AS new ON DUPLICATE KEY UPDATE
+       main_company_id = new.main_company_id, sub_company_id = new.sub_company_id,
+       shared = new.shared, updated_at = new.updated_at`
+      : `ON CONFLICT (connection_id, project_id) DO UPDATE SET
+       main_company_id = excluded.main_company_id, sub_company_id = excluded.sub_company_id,
+       shared = excluded.shared, updated_at = excluded.updated_at`;
+  await database.run(
     `INSERT INTO contractor_connection_projects
      (id, connection_id, project_id, main_company_id, sub_company_id, shared, created_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (connection_id, project_id) DO UPDATE SET
-       main_company_id = excluded.main_company_id, sub_company_id = excluded.sub_company_id,
-       shared = excluded.shared, updated_at = excluded.updated_at`,
-  ).run(
-    id,
-    params.connectionId,
-    params.projectId,
-    params.mainCompanyId,
-    params.subCompanyId,
-    params.shared ? 1 : 0,
-    params.createdBy,
-    ts,
-    ts,
+     ${upsert}`,
+    [
+      id,
+      params.connectionId,
+      params.projectId,
+      params.mainCompanyId,
+      params.subCompanyId,
+      params.shared ? 1 : 0,
+      params.createdBy,
+      ts,
+      ts,
+    ],
   );
 }
 
-export function unsetConnectionProject(connectionId: string, projectId: string) {
-  db.prepare("DELETE FROM contractor_connection_projects WHERE connection_id = ? AND project_id = ?").run(
+export async function unsetConnectionProject(connectionId: string, projectId: string) {
+  await database.run("DELETE FROM contractor_connection_projects WHERE connection_id = ? AND project_id = ?", [
     connectionId,
     projectId,
-  );
+  ]);
 }
 
-export function deleteContractorConnectionsForProject(projectId: string) {
-  db.prepare("DELETE FROM contractor_connection_projects WHERE project_id = ?").run(projectId);
+export async function deleteContractorConnectionsForProject(projectId: string) {
+  await database.run("DELETE FROM contractor_connection_projects WHERE project_id = ?", [projectId]);
 }

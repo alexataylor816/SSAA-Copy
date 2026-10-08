@@ -124,26 +124,33 @@ function randomConnectionCode(): string {
   return crypto.randomBytes(6).toString("hex").slice(0, 8);
 }
 
-export function createProjectRow(params: { name: string; address?: string | null; companyId: string }): Project {
+/** A UNIQUE-constraint violation, in either database's wording. */
+function isUniqueViolation(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.message.includes("UNIQUE") || (err as { code?: string }).code === "ER_DUP_ENTRY";
+}
+
+export async function createProjectRow(params: { name: string; address?: string | null; companyId: string }): Promise<Project> {
   const id = crypto.randomUUID();
   // Connection codes are short and drawn from a small alphabet — collisions
   // are rare but not impossible, so retry a few times against the UNIQUE constraint.
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const code = randomConnectionCode();
-      db.prepare(
+      await database.run(
         "INSERT INTO projects (id, name, address, company_id, connection_code) VALUES (?, ?, ?, ?, ?)",
-      ).run(id, params.name, params.address ?? null, params.companyId, code);
-      return findProjectById(id)!;
+        [id, params.name, params.address ?? null, params.companyId, code],
+      );
+      return (await findProjectById(id))!;
     } catch (err) {
-      if (attempt === 4 || !(err instanceof Error) || !err.message.includes("UNIQUE")) throw err;
+      if (attempt === 4 || !isUniqueViolation(err)) throw err;
     }
   }
   throw new Error("Failed to generate a unique connection code.");
 }
 
-export function findProjectById(id: string): Project | undefined {
-  const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow | undefined;
+export async function findProjectById(id: string): Promise<Project | undefined> {
+  const row = await database.get<ProjectRow>("SELECT * FROM projects WHERE id = ?", [id]);
   return row ? mapProjectRow(row) : undefined;
 }
 
@@ -175,25 +182,24 @@ export async function deleteProjectAndChildren(projectId: string): Promise<void>
   });
 }
 
-export function findProjectByConnectionCode(code: string): Project | undefined {
-  const row = db.prepare("SELECT * FROM projects WHERE connection_code = ?").get(code) as ProjectRow | undefined;
+export async function findProjectByConnectionCode(code: string): Promise<Project | undefined> {
+  const row = await database.get<ProjectRow>("SELECT * FROM projects WHERE connection_code = ?", [code]);
   return row ? mapProjectRow(row) : undefined;
 }
 
-export function listOwnedProjects(companyId: string): Project[] {
-  const rows = db.prepare("SELECT * FROM projects WHERE company_id = ? ORDER BY name").all(companyId) as ProjectRow[];
+export async function listOwnedProjects(companyId: string): Promise<Project[]> {
+  const rows = await database.all<ProjectRow>("SELECT * FROM projects WHERE company_id = ? ORDER BY name", [companyId]);
   return rows.map(mapProjectRow);
 }
 
-export function listConnectedProjects(companyId: string): Project[] {
-  const rows = db
-    .prepare(
-      `SELECT p.* FROM projects p
-       JOIN project_connections pc ON pc.project_id = p.id
-       WHERE pc.sub_company_id = ?
-       ORDER BY p.name`,
-    )
-    .all(companyId) as ProjectRow[];
+export async function listConnectedProjects(companyId: string): Promise<Project[]> {
+  const rows = await database.all<ProjectRow>(
+    `SELECT p.* FROM projects p
+     JOIN project_connections pc ON pc.project_id = p.id
+     WHERE pc.sub_company_id = ?
+     ORDER BY p.name`,
+    [companyId],
+  );
   return rows.map(mapProjectRow);
 }
 
@@ -211,28 +217,30 @@ function mapProjectRow(row: ProjectRow): Project {
 
 // --- project_connections ---
 
-export function findProjectConnection(projectId: string, subCompanyId: string): ProjectConnection | undefined {
-  const row = db
-    .prepare("SELECT * FROM project_connections WHERE project_id = ? AND sub_company_id = ?")
-    .get(projectId, subCompanyId) as ProjectConnectionRow | undefined;
+export async function findProjectConnection(projectId: string, subCompanyId: string): Promise<ProjectConnection | undefined> {
+  const row = await database.get<ProjectConnectionRow>(
+    "SELECT * FROM project_connections WHERE project_id = ? AND sub_company_id = ?",
+    [projectId, subCompanyId],
+  );
   return row ? mapConnectionRow(row) : undefined;
 }
 
-export function listProjectConnections(projectId: string): ProjectConnection[] {
-  const rows = db
-    .prepare("SELECT * FROM project_connections WHERE project_id = ? ORDER BY connected_at")
-    .all(projectId) as ProjectConnectionRow[];
+export async function listProjectConnections(projectId: string): Promise<ProjectConnection[]> {
+  const rows = await database.all<ProjectConnectionRow>(
+    "SELECT * FROM project_connections WHERE project_id = ? ORDER BY connected_at",
+    [projectId],
+  );
   return rows.map(mapConnectionRow);
 }
 
-export function createProjectConnection(projectId: string, subCompanyId: string): ProjectConnection {
+export async function createProjectConnection(projectId: string, subCompanyId: string): Promise<ProjectConnection> {
   const id = crypto.randomUUID();
-  db.prepare("INSERT INTO project_connections (id, project_id, sub_company_id) VALUES (?, ?, ?)").run(
+  await database.run("INSERT INTO project_connections (id, project_id, sub_company_id) VALUES (?, ?, ?)", [
     id,
     projectId,
     subCompanyId,
-  );
-  return findProjectConnection(projectId, subCompanyId)!;
+  ]);
+  return (await findProjectConnection(projectId, subCompanyId))!;
 }
 
 function mapConnectionRow(row: ProjectConnectionRow): ProjectConnection {
@@ -246,7 +254,7 @@ function mapConnectionRow(row: ProjectConnectionRow): ProjectConnection {
 
 // --- availability ---
 
-export function createAvailabilityRow(params: {
+export async function createAvailabilityRow(params: {
   employeeId: string;
   projectId: string | null;
   date: string;
@@ -255,45 +263,45 @@ export function createAvailabilityRow(params: {
   allProjects: boolean;
   stopNumber?: number | null;
   stopLabel?: string | null;
-}): Availability {
+}): Promise<Availability> {
   const id = crypto.randomUUID();
-  db.prepare(
+  await database.run(
     `INSERT INTO availability (id, employee_id, project_id, date, start_time, end_time, all_projects, stop_number, stop_label)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    params.employeeId,
-    params.allProjects ? null : params.projectId,
-    params.date,
-    params.startTime,
-    params.endTime,
-    params.allProjects ? 1 : 0,
-    // BigInt binds as an INTEGER, so a legacy TEXT column stores "1" rather than "1.0".
-    params.stopNumber == null ? null : BigInt(Math.trunc(params.stopNumber)),
-    params.stopLabel ?? null,
+    [
+      id,
+      params.employeeId,
+      params.allProjects ? null : params.projectId,
+      params.date,
+      params.startTime,
+      params.endTime,
+      params.allProjects ? 1 : 0,
+      // BigInt binds as an INTEGER, so a legacy TEXT column stores "1" rather than "1.0".
+      params.stopNumber == null ? null : BigInt(Math.trunc(params.stopNumber)),
+      params.stopLabel ?? null,
+    ],
   );
-  return findAvailabilityById(id)!;
+  return (await findAvailabilityById(id))!;
 }
 
-export function findAvailabilityById(id: string): Availability | undefined {
-  const row = db.prepare("SELECT * FROM availability WHERE id = ?").get(id) as AvailabilityRow | undefined;
+export async function findAvailabilityById(id: string): Promise<Availability | undefined> {
+  const row = await database.get<AvailabilityRow>("SELECT * FROM availability WHERE id = ?", [id]);
   return row ? mapAvailabilityRow(row) : undefined;
 }
 
-export function listAvailabilityForCompany(companyId: string, startDate: string, endDate: string): Availability[] {
-  const rows = db
-    .prepare(
-      `SELECT a.* FROM availability a
-       JOIN employees e ON e.id = a.employee_id
-       WHERE e.company_id = ? AND a.date BETWEEN ? AND ?
-       ORDER BY a.date, a.start_time`,
-    )
-    .all(companyId, startDate, endDate) as AvailabilityRow[];
+export async function listAvailabilityForCompany(companyId: string, startDate: string, endDate: string): Promise<Availability[]> {
+  const rows = await database.all<AvailabilityRow>(
+    `SELECT a.* FROM availability a
+     JOIN employees e ON e.id = a.employee_id
+     WHERE e.company_id = ? AND a.date BETWEEN ? AND ?
+     ORDER BY a.date, a.start_time`,
+    [companyId, startDate, endDate],
+  );
   return rows.map(mapAvailabilityRow);
 }
 
-export function deleteAvailabilityRow(id: string) {
-  db.prepare("DELETE FROM availability WHERE id = ?").run(id);
+export async function deleteAvailabilityRow(id: string) {
+  await database.run("DELETE FROM availability WHERE id = ?", [id]);
 }
 
 function mapAvailabilityRow(row: AvailabilityRow): Availability {
@@ -325,27 +333,28 @@ export async function createScheduleRequestRow(params: {
   imageUrls: string[];
 }): Promise<ScheduleRequest> {
   const id = crypto.randomUUID();
-  db.prepare(
+  await database.run(
     `INSERT INTO schedule_requests
        (id, project_id, requesting_company_id, sub_company_id, employee_ids, date, start_time, end_time, description, image_urls)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    params.projectId,
-    params.requestingCompanyId,
-    params.subCompanyId,
-    JSON.stringify(params.employeeIds),
-    params.date,
-    params.startTime,
-    params.endTime,
-    params.description,
-    JSON.stringify(params.imageUrls),
+    [
+      id,
+      params.projectId,
+      params.requestingCompanyId,
+      params.subCompanyId,
+      JSON.stringify(params.employeeIds),
+      params.date,
+      params.startTime,
+      params.endTime,
+      params.description,
+      JSON.stringify(params.imageUrls),
+    ],
   );
   return (await findScheduleRequestById(id))!;
 }
 
 export async function findScheduleRequestById(id: string): Promise<ScheduleRequest | undefined> {
-  const row = db.prepare("SELECT * FROM schedule_requests WHERE id = ?").get(id) as ScheduleRequestRow | undefined;
+  const row = await database.get<ScheduleRequestRow>("SELECT * FROM schedule_requests WHERE id = ?", [id]);
   return row ? mapScheduleRequestRow(row) : undefined;
 }
 
@@ -354,22 +363,22 @@ export async function listScheduleRequestsForCompany(
   startDate: string,
   endDate: string,
 ): Promise<ScheduleRequest[]> {
-  const rows = db
-    .prepare(
-      `SELECT * FROM schedule_requests
-       WHERE (requesting_company_id = ? OR sub_company_id = ?) AND date BETWEEN ? AND ?
-       ORDER BY date, start_time`,
-    )
-    .all(companyId, companyId, startDate, endDate) as ScheduleRequestRow[];
+  const rows = await database.all<ScheduleRequestRow>(
+    `SELECT * FROM schedule_requests
+     WHERE (requesting_company_id = ? OR sub_company_id = ?) AND date BETWEEN ? AND ?
+     ORDER BY date, start_time`,
+    [companyId, companyId, startDate, endDate],
+  );
   return Promise.all(rows.map(mapScheduleRequestRow));
 }
 
-export function updateScheduleRequestStatusRow(id: string, status: ScheduleRequestStatus, reason: string | null) {
-  db.prepare("UPDATE schedule_requests SET status = ?, status_reason = ?, updated_at = datetime('now') WHERE id = ?").run(
+export async function updateScheduleRequestStatusRow(id: string, status: ScheduleRequestStatus, reason: string | null) {
+  await database.run("UPDATE schedule_requests SET status = ?, status_reason = ?, updated_at = ? WHERE id = ?", [
     status,
     reason,
+    database.now(),
     id,
-  );
+  ]);
 }
 
 async function mapScheduleRequestRow(row: ScheduleRequestRow): Promise<ScheduleRequest> {

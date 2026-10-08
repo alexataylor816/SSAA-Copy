@@ -83,7 +83,7 @@ export async function createProject(userId: string, params: { name: string; addr
     throw new ForbiddenError("You need Full-level access or higher to create projects.");
   }
 
-  return createProjectRow({ name: params.name.trim(), address: params.address?.trim() || null, companyId: user.companyId! });
+  return await createProjectRow({ name: params.name.trim(), address: params.address?.trim() || null, companyId: user.companyId! });
 }
 
 /**
@@ -95,7 +95,7 @@ export async function createProject(userId: string, params: { name: string; addr
  */
 export async function deleteProject(userId: string, projectId: string): Promise<void> {
   const user = await requireUserWithCompany(userId);
-  const project = findProjectById(projectId);
+  const project = await findProjectById(projectId);
   if (!project || project.companyId !== user.companyId) {
     throw new NotFoundError("Project not found.");
   }
@@ -108,50 +108,55 @@ export async function deleteProject(userId: string, projectId: string): Promise<
 
 export async function listVisibleProjects(userId: string): Promise<Project[]> {
   const user = await requireUserWithCompany(userId);
-  const owned = listOwnedProjects(user.companyId!);
-  const connected = listConnectedProjects(user.companyId!);
+  const owned = await listOwnedProjects(user.companyId!);
+  const connected = await listConnectedProjects(user.companyId!);
   return [...owned, ...connected];
 }
 
 export async function connectProjectByCode(userId: string, code: string): Promise<Project> {
   const user = await requireUserWithCompany(userId);
-  const project = findProjectByConnectionCode(code.trim());
+  const project = await findProjectByConnectionCode(code.trim());
   if (!project) {
     throw new NotFoundError("No project found for that code.");
   }
   if (project.companyId === user.companyId) {
     throw new ConflictError("That's your own project.");
   }
-  if (findProjectConnection(project.id, user.companyId!)) {
+  if (await findProjectConnection(project.id, user.companyId!)) {
     throw new ConflictError("Already connected to that project.");
   }
 
-  createProjectConnection(project.id, user.companyId!);
+  await createProjectConnection(project.id, user.companyId!);
   return project;
 }
 
-function canSeeProject(companyId: string, projectId: string): boolean {
-  const project = findProjectById(projectId);
+async function canSeeProject(companyId: string, projectId: string): Promise<boolean> {
+  const project = await findProjectById(projectId);
   if (!project) return false;
   if (project.companyId === companyId) return true;
-  return !!findProjectConnection(projectId, companyId);
+  return !!(await findProjectConnection(projectId, companyId));
 }
 
 /** Companies connected to a project — who a GC can pick from when requesting people. */
 export async function listProjectConnectedCompanies(userId: string, projectId: string): Promise<Company[]> {
   const user = await requireUserWithCompany(userId);
-  if (!canSeeProject(user.companyId!, projectId)) {
+  if (!(await canSeeProject(user.companyId!, projectId))) {
     throw new NotFoundError("Project not found.");
   }
-  const companies = await Promise.all(listProjectConnections(projectId).map((conn) => findCompanyById(conn.subCompanyId)));
+  const companies = await Promise.all(
+    (await listProjectConnections(projectId)).map((conn) => findCompanyById(conn.subCompanyId)),
+  );
   return companies.filter((company): company is Company => !!company);
 }
 
-function sharesAProject(companyA: string, companyB: string): boolean {
-  const ownedByA = listOwnedProjects(companyA);
-  if (ownedByA.some((p) => findProjectConnection(p.id, companyB))) return true;
-  const ownedByB = listOwnedProjects(companyB);
-  return ownedByB.some((p) => findProjectConnection(p.id, companyA));
+async function sharesAProject(companyA: string, companyB: string): Promise<boolean> {
+  for (const p of await listOwnedProjects(companyA)) {
+    if (await findProjectConnection(p.id, companyB)) return true;
+  }
+  for (const p of await listOwnedProjects(companyB)) {
+    if (await findProjectConnection(p.id, companyA)) return true;
+  }
+  return false;
 }
 
 /**
@@ -161,7 +166,7 @@ function sharesAProject(companyA: string, companyB: string): boolean {
  */
 export async function listConnectedCompanyEmployees(userId: string, targetCompanyId: string): Promise<Employee[]> {
   const user = await requireUserWithCompany(userId);
-  if (!user.isAdmin && user.companyId !== targetCompanyId && !sharesAProject(user.companyId!, targetCompanyId)) {
+  if (!user.isAdmin && user.companyId !== targetCompanyId && !(await sharesAProject(user.companyId!, targetCompanyId))) {
     throw new ForbiddenError("You can only view employees of a company connected to a shared project.");
   }
   return listCompanyEmployees(targetCompanyId);
@@ -237,7 +242,7 @@ export async function setAvailability(userId: string, params: SetAvailabilityPar
   if (!params.allProjects && !params.projectId) {
     throw new BadRequestError("Provide a projectId, or set allProjects.");
   }
-  if (params.projectId && !canSeeProject(user.companyId!, params.projectId)) {
+  if (params.projectId && !(await canSeeProject(user.companyId!, params.projectId))) {
     throw new NotFoundError("Project not found.");
   }
   assertDateUnlocked(params.date, user);
@@ -249,7 +254,7 @@ export async function setAvailability(userId: string, params: SetAvailabilityPar
     throw new BadRequestError("stopNumber must be a whole number from 1 to 10.");
   }
 
-  return createAvailabilityRow({
+  return await createAvailabilityRow({
     employeeId: employee.id,
     projectId: params.allProjects ? null : params.projectId!,
     date: params.date,
@@ -267,12 +272,12 @@ export async function listAvailability(userId: string, startDate: string, endDat
   if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
     throw new BadRequestError("start/end must be formatted YYYY-MM-DD.");
   }
-  return listAvailabilityForCompany(user.companyId!, startDate, endDate);
+  return await listAvailabilityForCompany(user.companyId!, startDate, endDate);
 }
 
 export async function deleteAvailability(userId: string, availabilityId: string) {
   const user = await requireUserWithCompany(userId);
-  const row = findAvailabilityById(availabilityId);
+  const row = await findAvailabilityById(availabilityId);
   if (!row) throw new NotFoundError("Availability entry not found.");
 
   const ownEmployee = await findEmployeeByLinkedUser(user.companyId!, user.id);
@@ -287,7 +292,7 @@ export async function deleteAvailability(userId: string, availabilityId: string)
   }
   assertDateUnlocked(row.date, user);
 
-  deleteAvailabilityRow(availabilityId);
+  await deleteAvailabilityRow(availabilityId);
 }
 
 export interface CreateScheduleRequestParams {
@@ -317,13 +322,13 @@ export async function createScheduleRequest(userId: string, params: CreateSchedu
   if (!Array.isArray(params.employeeIds) || params.employeeIds.length === 0) {
     throw new BadRequestError("Pick at least one employee.");
   }
-  if (!canSeeProject(user.companyId!, params.projectId)) {
+  if (!(await canSeeProject(user.companyId!, params.projectId))) {
     throw new NotFoundError("Project not found.");
   }
   assertDateUnlocked(params.date, user);
 
   const sameCompany = params.subCompanyId === user.companyId;
-  const connected = !!findProjectConnection(params.projectId, params.subCompanyId);
+  const connected = !!(await findProjectConnection(params.projectId, params.subCompanyId));
   if (!sameCompany && !connected) {
     throw new BadRequestError("That company isn't connected to this project.");
   }
@@ -347,7 +352,7 @@ export async function createScheduleRequest(userId: string, params: CreateSchedu
     }
   }
 
-  return createScheduleRequestRow({
+  return await createScheduleRequestRow({
     projectId: params.projectId,
     requestingCompanyId: user.companyId!,
     subCompanyId: params.subCompanyId,
@@ -365,7 +370,7 @@ export async function listScheduleRequests(userId: string, startDate: string, en
   if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
     throw new BadRequestError("start/end must be formatted YYYY-MM-DD.");
   }
-  return listScheduleRequestsForCompany(user.companyId!, startDate, endDate);
+  return await listScheduleRequestsForCompany(user.companyId!, startDate, endDate);
 }
 
 export async function updateScheduleRequestStatus(
@@ -406,6 +411,6 @@ export async function updateScheduleRequestStatus(
     throw new BadRequestError("Reason must be 500 characters or fewer.");
   }
 
-  updateScheduleRequestStatusRow(requestId, status, trimmed || null);
+  await updateScheduleRequestStatusRow(requestId, status, trimmed || null);
   return (await findScheduleRequestById(requestId))!;
 }

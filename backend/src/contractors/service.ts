@@ -2,7 +2,7 @@ import { findUserById, type User } from "../models/users.js";
 import { findCompanyById, findUserRole } from "../rbac/models.js";
 import { hasPartialOrHigher } from "../rbac/permissions.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../rbac/errors.js";
-import { db } from "../db.js";
+import { database } from "../db.js";
 import { findProjectById } from "../scheduling/models.js";
 import {
   findContractorConnection,
@@ -52,7 +52,7 @@ export interface ConnectionView extends ContractorConnection {
 export async function listMyConnections(userId: string): Promise<ConnectionView[]> {
   const user = await requireUserWithCompany(userId);
   return Promise.all(
-    listConnectionsForCompany(user.companyId!).map(async (conn): Promise<ConnectionView> => {
+    (await listConnectionsForCompany(user.companyId!)).map(async (conn): Promise<ConnectionView> => {
       const otherId = otherSide(conn, user.companyId!);
       const other = await findCompanyById(otherId);
       const active = conn.status === "accepted";
@@ -88,7 +88,7 @@ export async function requestConnection(
 
   const mine = user.companyId!;
   const [a, b] = mine < otherCompanyId ? [mine, otherCompanyId] : [otherCompanyId, mine];
-  return upsertConnectionRequest({
+  return await upsertConnectionRequest({
     companyAId: a,
     companyBId: b,
     initiatedByCompanyId: mine,
@@ -106,7 +106,7 @@ export async function respondConnection(
 ): Promise<ContractorConnection> {
   const user = await requireUserWithCompany(userId);
   await requirePartialOrHigher(user);
-  const conn = findContractorConnection(connectionId);
+  const conn = await findContractorConnection(connectionId);
   if (!conn) throw new NotFoundError("Connection not found.");
   requireMember(user, conn);
   if (conn.status !== "pending") {
@@ -116,15 +116,15 @@ export async function respondConnection(
     throw new ForbiddenError("The initiating company cannot accept its own request.");
   }
   if (!accept) {
-    setConnectionResponse(connectionId, false, null, null);
-    return findContractorConnection(connectionId)!;
+    await setConnectionResponse(connectionId, false, null, null);
+    return (await findContractorConnection(connectionId))!;
   }
   const main = confirmMainCompanyId ?? conn.proposedMainCompanyId;
   if (main !== conn.companyAId && main !== conn.companyBId) {
     throw new BadRequestError("Main company must be one of the two connected companies.");
   }
-  setConnectionResponse(connectionId, true, main, null);
-  return findContractorConnection(connectionId)!;
+  await setConnectionResponse(connectionId, true, main, null);
+  return (await findContractorConnection(connectionId))!;
 }
 
 /**
@@ -138,7 +138,7 @@ export async function swapConnectionRole(
 ): Promise<{ result: "requested" | "confirmed"; connection: ContractorConnection }> {
   const user = await requireUserWithCompany(userId);
   await requirePartialOrHigher(user);
-  const conn = findContractorConnection(connectionId);
+  const conn = await findContractorConnection(connectionId);
   if (!conn) throw new NotFoundError("Connection not found.");
   requireMember(user, conn);
   if (conn.status !== "accepted") {
@@ -154,17 +154,17 @@ export async function swapConnectionRole(
     pending.requestedByCompanyId !== user.companyId &&
     pending.proposedMainCompanyId === proposedMainCompanyId
   ) {
-    setConnectionMain(connectionId, proposedMainCompanyId);
-    return { result: "confirmed", connection: findContractorConnection(connectionId)! };
+    await setConnectionMain(connectionId, proposedMainCompanyId);
+    return { result: "confirmed", connection: (await findContractorConnection(connectionId))! };
   }
   const ts = new Date().toISOString();
-  setRoleChangeRequest(connectionId, {
+  await setRoleChangeRequest(connectionId, {
     proposedMainCompanyId,
     requestedByCompanyId: user.companyId!,
     requestedByUserId: userId,
     requestedAt: ts,
   });
-  return { result: "requested", connection: findContractorConnection(connectionId)! };
+  return { result: "requested", connection: (await findContractorConnection(connectionId))! };
 }
 
 /** Share (or unshare) one of the main side's projects over the connection. */
@@ -176,7 +176,7 @@ export async function linkConnectionProject(
 ): Promise<void> {
   const user = await requireUserWithCompany(userId);
   await requirePartialOrHigher(user);
-  const conn = findContractorConnection(connectionId);
+  const conn = await findContractorConnection(connectionId);
   if (!conn) throw new NotFoundError("Connection not found.");
   requireMember(user, conn);
   if (conn.status !== "accepted" || !conn.mainCompanyId) {
@@ -185,13 +185,13 @@ export async function linkConnectionProject(
   if (user.companyId !== conn.mainCompanyId && !user.isAdmin) {
     throw new ForbiddenError("Only the main side manages shared projects.");
   }
-  const project = findProjectById(projectId);
+  const project = await findProjectById(projectId);
   if (!project || project.companyId !== conn.mainCompanyId) {
     throw new NotFoundError("Project not found on the main side.");
   }
   const subCompanyId = conn.mainCompanyId === conn.companyAId ? conn.companyBId : conn.companyAId;
   if (shared) {
-    setConnectionProject({
+    await setConnectionProject({
       connectionId,
       projectId,
       mainCompanyId: conn.mainCompanyId,
@@ -200,25 +200,25 @@ export async function linkConnectionProject(
       createdBy: userId,
     });
   } else {
-    unsetConnectionProject(connectionId, projectId);
+    await unsetConnectionProject(connectionId, projectId);
   }
 }
 
 export async function listConnectionProjectsFor(userId: string, connectionId: string) {
   const user = await requireUserWithCompany(userId);
-  const conn = findContractorConnection(connectionId);
+  const conn = await findContractorConnection(connectionId);
   if (!conn) throw new NotFoundError("Connection not found.");
   requireMember(user, conn);
-  return listConnectionProjects(connectionId);
+  return await listConnectionProjects(connectionId);
 }
 
 export async function deleteConnection(userId: string, connectionId: string): Promise<ContractorConnection> {
   const user = await requireUserWithCompany(userId);
   await requirePartialOrHigher(user);
-  const conn = findContractorConnection(connectionId);
+  const conn = await findContractorConnection(connectionId);
   if (!conn) throw new NotFoundError("Connection not found.");
   requireMember(user, conn);
-  db.prepare("DELETE FROM contractor_connection_projects WHERE connection_id = ?").run(connectionId);
-  db.prepare("DELETE FROM contractor_connections WHERE id = ?").run(connectionId);
+  await database.run("DELETE FROM contractor_connection_projects WHERE connection_id = ?", [connectionId]);
+  await database.run("DELETE FROM contractor_connections WHERE id = ?", [connectionId]);
   return conn;
 }
