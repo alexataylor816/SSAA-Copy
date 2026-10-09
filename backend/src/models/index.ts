@@ -23,7 +23,7 @@ export async function ensureSchema(): Promise<void> {
   if (database.dialect === "mysql") {
     // MySQL's tables (and the columns SQLite adds with ALTER TABLE) all live
     // in one idempotent file; only the default rows still need inserting.
-    await database.exec(fs.readFileSync(path.join(BASE_DIR, "db", "mysql", "schema.sql"), "utf8"));
+    await database.execScript(fs.readFileSync(path.join(BASE_DIR, "db", "mysql", "schema.sql"), "utf8"));
     await seedNotificationTemplates();
     return;
   }

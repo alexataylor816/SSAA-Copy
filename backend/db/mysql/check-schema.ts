@@ -21,6 +21,11 @@ interface Column {
 type Schema = Map<string, Map<string, Column>>;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+/** MySQL-only columns standing in for something SQLite has implicitly. */
+const MYSQL_ONLY_COLUMNS = new Set([
+  "messages.seq", // SQLite's rowid: insertion order for messages
+]);
 const useLiveMysql = process.argv.includes("--mysql");
 
 // Must be set before db.ts / config.ts load; dotenv never overrides these.
@@ -28,21 +33,18 @@ process.env.DB_CLIENT = "sqlite";
 process.env.DATABASE_PATH = ":memory:";
 
 async function sqliteSchema(): Promise<Schema> {
-  const { db } = await import("../../src/db.js");
+  const { database } = await import("../../src/db.js");
   const { ensureSchema } = await import("../../src/models/index.js");
-  ensureSchema();
+  await ensureSchema();
 
   const schema: Schema = new Map();
-  const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-    .all() as { name: string }[];
+  const tables = await database.all<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+  );
   for (const { name } of tables) {
-    const cols = db.prepare(`PRAGMA table_info(${name})`).all() as {
-      name: string;
-      notnull: number;
-      dflt_value: string | null;
-      pk: number;
-    }[];
+    const cols = await database.all<{ name: string; notnull: number; dflt_value: string | null; pk: number }>(
+      `PRAGMA table_info(${name})`,
+    );
     schema.set(
       name,
       new Map(
@@ -140,7 +142,9 @@ for (const [table, cols] of sqlite) {
     }
   }
   for (const name of other.keys()) {
-    if (!cols.has(name)) problems.push(`extra MySQL column (not in SQLite): ${table}.${name}`);
+    if (!cols.has(name) && !MYSQL_ONLY_COLUMNS.has(`${table}.${name}`)) {
+      problems.push(`extra MySQL column (not in SQLite): ${table}.${name}`);
+    }
   }
 }
 for (const table of mysqlSide.keys()) {

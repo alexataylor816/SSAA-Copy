@@ -300,8 +300,11 @@ CREATE TABLE IF NOT EXISTS conversation_participants (
   CONSTRAINT fk_participants_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- seq is MySQL's stand-in for SQLite's implicit rowid: it orders messages
+-- created in the same millisecond. Never returned by the API.
 CREATE TABLE IF NOT EXISTS messages (
   id                VARCHAR(36) NOT NULL PRIMARY KEY,
+  seq               BIGINT      NOT NULL AUTO_INCREMENT UNIQUE,
   conversation_id   VARCHAR(36) NOT NULL,
   sender_user_id    VARCHAR(36) NULL,
   sender_company_id VARCHAR(36) NULL,
@@ -380,4 +383,9 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedule_requests' AND COLUMN_NAME = 'status_reason') = 0,
   'ALTER TABLE schedule_requests ADD COLUMN status_reason TEXT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Existing rows are numbered in primary-key order; new ones in insert order.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'seq') = 0,
+  'ALTER TABLE messages ADD COLUMN seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

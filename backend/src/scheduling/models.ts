@@ -358,7 +358,7 @@ export async function createScheduleRequestRow(params: {
 
 export async function findScheduleRequestById(id: string): Promise<ScheduleRequest | undefined> {
   const row = await database.get<ScheduleRequestRow>("SELECT * FROM schedule_requests WHERE id = ?", [id]);
-  return row ? mapScheduleRequestRow(row) : undefined;
+  return row ? await mapScheduleRequestRow(row) : undefined;
 }
 
 export async function listScheduleRequestsForCompany(

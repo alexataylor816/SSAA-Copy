@@ -259,9 +259,8 @@ async function readRows(
   limit?: number,
   offset?: number,
 ) {
-  // ORDER BY names and LIMIT/OFFSET are spliced into the SQL text, so they
-  // must be plain identifiers and integers: MySQL runs with multipleStatements,
-  // where anything else could smuggle in a second statement.
+  // ORDER BY names and LIMIT/OFFSET can't be bound as parameters and are
+  // spliced into the SQL text, so they must be plain identifiers and integers.
   for (const o of order) {
     if (typeof o.column !== "string" || !IDENTIFIER_RE.test(o.column)) {
       throw new BadRequestError(`Unsupported order column "${String(o.column)}".`);

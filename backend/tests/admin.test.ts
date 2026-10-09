@@ -16,7 +16,7 @@ function authed(token: string) {
 
 async function admin() {
   const a = await signUp(`adm-${Date.now()}-${Math.random()}@example.com`);
-  setUserIsAdmin(a.user.id, true);
+  await setUserIsAdmin(a.user.id, true);
   return a;
 }
 

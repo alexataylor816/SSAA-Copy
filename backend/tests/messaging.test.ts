@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 
@@ -66,6 +66,35 @@ describe("messaging: project channels", () => {
 
     await request(app).post(`/conversations/${conv.id}/read`).set(authed(sub.token));
     expect((await projectConversation(sub.token, projectId))!.unreadCount).toBe(0);
+  });
+
+  it("keeps messages sent in the same instant in send order", async () => {
+    const { gc, sub, projectId } = await connectedPair();
+    const conv = (await projectConversation(gc.token, projectId))!;
+    const bodies = ["one", "two", "three", "four", "five", "six"];
+
+    // Freeze the clock so every message gets the same created_at: only the
+    // tie-breaker can put them in order.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    try {
+      for (const [i, body] of bodies.entries()) {
+        const token = i % 2 === 0 ? gc.token : sub.token;
+        const sent = await request(app).post(`/conversations/${conv.id}/messages`).set(authed(token)).send({ body });
+        expect(sent.status, JSON.stringify(sent.body)).toBe(201);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const thread = await request(app).get(`/conversations/${conv.id}/messages`).set(authed(gc.token));
+    const createdAt = new Set(thread.body.messages.map((m: { createdAt: string }) => m.createdAt));
+    expect(createdAt.size).toBe(1);
+    expect(thread.body.messages.map((m: { body: string }) => m.body)).toEqual(bodies);
+
+    const listed = await request(app).get("/conversations").set(authed(sub.token));
+    const summary = listed.body.conversations.find((c: { id: string }) => c.id === conv.id);
+    expect(summary.lastMessage.body).toBe("six");
   });
 
   it("hides the channel from a company that isn't on the project", async () => {

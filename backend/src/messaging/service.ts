@@ -111,13 +111,12 @@ async function requireUser(userId: string): Promise<User> {
 }
 
 /**
- * Newest message first. Messages created in the same millisecond tie on
- * created_at; SQLite breaks the tie by insertion order (rowid). MySQL has no
- * rowid and the table has no sequence column, so it falls back to id, which
- * is stable but not insertion order.
+ * Insertion order for messages, to break ties between messages created in
+ * the same millisecond: SQLite's implicit rowid, MySQL's AUTO_INCREMENT
+ * `seq` column (MySQL has no rowid). Selected as `seq` but never returned.
  */
-const NEWEST_FIRST =
-  database.dialect === "sqlite" ? "m.created_at DESC, m.rowid DESC" : "m.created_at DESC, m.id DESC";
+const SEQ = database.dialect === "sqlite" ? "m.rowid" : "m.seq";
+const NEWEST_FIRST = `m.created_at DESC, ${SEQ} DESC`;
 
 /** Records that the user has read the conversation up to `ts` (insert or update). */
 async function upsertRead(conversationId: string, userId: string, ts: string) {
@@ -331,7 +330,7 @@ export async function listConversations(userId: string): Promise<ConversationSum
 }
 
 const MESSAGE_SELECT = `
-  SELECT m.id, m.conversation_id, m.sender_user_id, m.body, m.kind, m.created_at,
+  SELECT m.id, m.conversation_id, m.sender_user_id, m.body, m.kind, m.created_at, ${SEQ} AS seq,
          u.full_name AS sender_name, co.name AS sender_company
     FROM messages m
     LEFT JOIN users u ON u.id = m.sender_user_id
@@ -362,10 +361,11 @@ const toView = (r: MessageRow): MessageView => ({
 export async function listMessages(userId: string, conversationId: string): Promise<MessageView[]> {
   const user = await requireUser(userId);
   await requireConversation(conversationId, user);
-  // MySQL requires an alias on a derived table; SQLite accepts one.
+  // MySQL requires an alias on a derived table; SQLite accepts one. The outer
+  // sort needs the tie-breaker too, or same-instant messages come out reversed.
   const rows = await database.all<MessageRow>(
     `SELECT * FROM (${MESSAGE_SELECT} WHERE m.conversation_id = ? ORDER BY ${NEWEST_FIRST} LIMIT 300) AS recent
-      ORDER BY created_at ASC`,
+      ORDER BY created_at ASC, seq ASC`,
     [conversationId],
   );
   return rows.map(toView);

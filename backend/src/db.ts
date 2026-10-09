@@ -9,6 +9,7 @@
  *   await database.all(SQL, { name })          `@name` placeholders work too
  *   await database.run(SQL, [a, b])            INSERT/UPDATE/DELETE -> { changes }
  *   await database.exec(SQL)                   raw SQL, no parameters
+ *   await database.execScript(SQL)             several statements, e.g. schema.sql
  *   await database.transaction(async () => {}) all-or-nothing; nested calls join it
  *   database.now()                             "YYYY-MM-DD HH:MM:SS" in UTC
  *   database.dialect                           "sqlite" | "mysql", for the few
@@ -34,20 +35,20 @@ export type SqlParams = unknown[] | Record<string, unknown>;
 
 const sqlite = dialect === "sqlite" ? new Database(config.databasePath) : null;
 
-const pool =
-  dialect === "mysql"
-    ? mysql.createPool({
-        host: config.mysql.host,
-        port: config.mysql.port,
-        user: config.mysql.user,
-        password: config.mysql.password,
-        database: config.mysql.database,
-        connectionLimit: 10,
-        timezone: "Z", // treat all times as UTC, same as SQLite's datetime('now')
-        dateStrings: true, // return DATE/DATETIME as strings, like SQLite does
-        multipleStatements: true, // needed to run schema.sql in one go
-      })
-    : null;
+const mysqlOptions = {
+  host: config.mysql.host,
+  port: config.mysql.port,
+  user: config.mysql.user,
+  password: config.mysql.password,
+  database: config.mysql.database,
+  timezone: "Z", // treat all times as UTC, same as SQLite's datetime('now')
+  dateStrings: true, // return DATE/DATETIME as strings, like SQLite does
+};
+
+// No multipleStatements here: every app query runs on this pool, and one
+// statement per call means a bad value can never smuggle in a second one.
+// Multi-statement scripts go through database.execScript() instead.
+const pool = dialect === "mysql" ? mysql.createPool({ ...mysqlOptions, connectionLimit: 10 }) : null;
 
 /** Holds the open MySQL connection while inside database.transaction(). */
 const txConnection = new AsyncLocalStorage<PoolConnection>();
@@ -140,6 +141,28 @@ export const database = {
       return;
     }
     await mysqlQuery(sql, []);
+  },
+
+  /**
+   * Run a trusted multi-statement script (db/mysql/schema.sql). On MySQL this
+   * opens its own short-lived connection with multipleStatements enabled and
+   * closes it afterwards, so the shared pool never allows more than one
+   * statement per query. Not transactional, and not for user input.
+   */
+  async execScript(sql: string): Promise<void> {
+    if (sqlite) {
+      sqlite.exec(sql);
+      return;
+    }
+    if (txConnection.getStore()) {
+      throw new Error("database.execScript() can't run inside database.transaction(): it uses its own connection.");
+    }
+    const conn = await mysql.createConnection({ ...mysqlOptions, multipleStatements: true });
+    try {
+      await conn.query(sql);
+    } finally {
+      await conn.end();
+    }
   },
 
   /**
