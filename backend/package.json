@@ -8,7 +8,8 @@
     "dev:sqlite": "cross-env DB_CLIENT=sqlite tsx watch src/server.ts",
     "dev:mysql": "cross-env DB_CLIENT=mysql tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:mysql": "cross-env DB_CLIENT=mysql MYSQL_DATABASE=ssaa_test vitest run"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
