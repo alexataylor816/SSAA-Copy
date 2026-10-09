@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { createApp } from "../src/app.js";
+import { startTestServer } from "./helpers/server.js";
 
-const { app } = await createApp();
+const server = await startTestServer();
 
 async function signUp(email: string) {
-  const res = await request(app).post("/auth/signup").send({ email, password: "hunter22", fullName: "Test User" });
+  const res = await request(server).post("/auth/signup").send({ email, password: "hunter22", fullName: "Test User" });
   return { token: res.body.token as string, id: res.body.user.id as string };
 }
 
@@ -14,18 +14,18 @@ function authed(token: string) {
 }
 
 function query(token: string) {
-  return (body: Record<string, unknown>) => request(app).post("/query").set(authed(token)).send(body);
+  return (body: Record<string, unknown>) => request(server).post("/query").set(authed(token)).send(body);
 }
 
 async function companyWithProject(token: string, name: string, companyType: "gc" | "sub" = "gc") {
-  await request(app).post("/companies").set(authed(token)).send({ name, companyType });
-  const res = await request(app).post("/projects").set(authed(token)).send({ name: `${name} Project` });
+  await request(server).post("/companies").set(authed(token)).send({ name, companyType });
+  const res = await request(server).post("/projects").set(authed(token)).send({ name: `${name} Project` });
   // /projects answers in camelCase, unlike the /query rows it mirrors.
   return res.body as { id: string; companyId: string; connectionCode: string };
 }
 
 function q() {
-  return request(app).post("/query");
+  return request(server).post("/query");
 }
 
 describe("query api: shape", () => {
@@ -89,7 +89,7 @@ describe("query api: shape", () => {
 
   it("generates the id on insert instead of trusting the client", async () => {
     const { token } = await signUp(`genid-${Date.now()}@example.com`);
-    const company = await request(app).post("/companies").set(authed(token)).send({ name: "Gen Id Co", companyType: "gc" });
+    const company = await request(server).post("/companies").set(authed(token)).send({ name: "Gen Id Co", companyType: "gc" });
 
     const inserted = await query(token)({
       table: "employees",
@@ -107,7 +107,7 @@ describe("query api: shape", () => {
 
   it("ignores a client-supplied id on insert", async () => {
     const { token } = await signUp(`forged-${Date.now()}@example.com`);
-    const company = await request(app).post("/companies").set(authed(token)).send({ name: "Forged Co", companyType: "gc" });
+    const company = await request(server).post("/companies").set(authed(token)).send({ name: "Forged Co", companyType: "gc" });
     const inserted = await query(token)({
       table: "employees",
       operation: "insert",
@@ -119,7 +119,7 @@ describe("query api: shape", () => {
 
   it("lets you update a row by its id", async () => {
     const { token } = await signUp(`upd-${Date.now()}@example.com`);
-    const company = await request(app).post("/companies").set(authed(token)).send({ name: "Upd Co", companyType: "gc" });
+    const company = await request(server).post("/companies").set(authed(token)).send({ name: "Upd Co", companyType: "gc" });
     const inserted = await query(token)({
       table: "employees",
       operation: "insert",
@@ -154,7 +154,7 @@ describe("query api: shape", () => {
     // must include its id" because the id was read from the payload, not the
     // filter, forcing every caller to inline the id a second time.
     const { token } = await signUp(`filterid-${Date.now()}@example.com`);
-    const company = await request(app).post("/companies").set(authed(token)).send({ name: "Filter Id Co", companyType: "gc" });
+    const company = await request(server).post("/companies").set(authed(token)).send({ name: "Filter Id Co", companyType: "gc" });
     const inserted = await query(token)({
       table: "employees",
       operation: "insert",
@@ -198,7 +198,7 @@ describe("query api: shape", () => {
 
   it("still refuses an id filter that names more than one row", async () => {
     const { token } = await signUp(`ambig-${Date.now()}@example.com`);
-    const company = await request(app).post("/companies").set(authed(token)).send({ name: "Ambig Co", companyType: "gc" });
+    const company = await request(server).post("/companies").set(authed(token)).send({ name: "Ambig Co", companyType: "gc" });
     const first = await query(token)({
       table: "employees",
       operation: "insert",
@@ -334,8 +334,8 @@ describe("query api: row-level scoping", () => {
     const gcProject = await companyWithProject(gc.token, "GC Conn", "gc");
 
     const sub = await signUp(`sub-conn-${Date.now()}@example.com`);
-    await request(app).post("/companies").set(authed(sub.token)).send({ name: "Sub Conn", companyType: "sub" });
-    await request(app)
+    await request(server).post("/companies").set(authed(sub.token)).send({ name: "Sub Conn", companyType: "sub" });
+    await request(server)
       .post("/projects/connect")
       .set(authed(sub.token))
       .send({ code: gcProject.connectionCode });
@@ -389,7 +389,7 @@ describe("query api: row-level scoping", () => {
     const bob = await signUp(`bob-av-${Date.now()}@example.com`);
     await companyWithProject(bob.token, "Bob Av", "gc");
 
-    await request(app)
+    await request(server)
       .post("/availability")
       .set(authed(alice.token))
       .send({ date: "2099-01-02", startTime: "08:00", endTime: "12:00", allProjects: true });
@@ -402,12 +402,12 @@ describe("query api: row-level scoping", () => {
 
     // The service validates that every named employee really belongs to the sub,
     // so use a real one rather than a placeholder id.
-    const crew = await request(app)
+    const crew = await request(server)
       .get(`/companies/${aliceCompany.companyId}/employees`)
       .set(authed(alice.token));
     expect(crew.body.employees.length).toBeGreaterThan(0);
 
-    const req = await request(app)
+    const req = await request(server)
       .post("/schedule-requests")
       .set(authed(alice.token))
       .send({
@@ -427,7 +427,7 @@ describe("query api: filters", () => {
   it("supports eq, in, gte and ilike", async () => {
     const { token } = await signUp(`filters-${Date.now()}@example.com`);
     await companyWithProject(token, "Filter Co", "gc");
-    await request(app).post("/projects").set(authed(token)).send({ name: "Second Project" });
+    await request(server).post("/projects").set(authed(token)).send({ name: "Second Project" });
 
     const byName = await query(token)({
       table: "projects",
@@ -467,26 +467,26 @@ describe("query api: filters", () => {
 
   it("returns employee_ids as an array, not a JSON string", async () => {
     const gc = await signUp(`gc-json-${Date.now()}@example.com`);
-    const gcCompany = await request(app)
+    const gcCompany = await request(server)
       .post("/companies")
       .set(authed(gc.token))
       .send({ name: "JSON GC", companyType: "gc" });
-    const project = await request(app).post("/projects").set(authed(gc.token)).send({ name: "JSON Project" });
+    const project = await request(server).post("/projects").set(authed(gc.token)).send({ name: "JSON Project" });
 
     const sub = await signUp(`sub-json-${Date.now()}@example.com`);
-    const subCompany = await request(app)
+    const subCompany = await request(server)
       .post("/companies")
       .set(authed(sub.token))
       .send({ name: "JSON Sub", companyType: "sub" });
-    await request(app)
+    await request(server)
       .post("/projects/connect")
       .set(authed(sub.token))
       .send({ code: project.body.connectionCode });
-    const employees = await request(app)
+    const employees = await request(server)
       .get(`/companies/${subCompany.body.company.id}/employees`)
       .set(authed(sub.token));
 
-    await request(app)
+    await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({
@@ -506,7 +506,7 @@ describe("query api: filters", () => {
 describe("query api: rpc", () => {
   it("404s an rpc that has not been migrated, naming it", async () => {
     const { token } = await signUp(`rpc-${Date.now()}@example.com`);
-    const res = await request(app).post("/rpc/create_guest_gc_account").set(authed(token)).send({});
+    const res = await request(server).post("/rpc/create_guest_gc_account").set(authed(token)).send({});
     expect(res.status).toBe(404);
     expect(res.body.error).toMatch(/not available yet/i);
   });
@@ -514,7 +514,7 @@ describe("query api: rpc", () => {
   it("answers get_company_usage", async () => {
     const { token } = await signUp(`usage-${Date.now()}@example.com`);
     await companyWithProject(token, "Usage Co", "gc");
-    const res = await request(app).post("/rpc/get_company_usage").set(authed(token)).send({});
+    const res = await request(server).post("/rpc/get_company_usage").set(authed(token)).send({});
     expect(res.status).toBe(200);
     expect(res.body.data.project_count).toBe(1);
     expect(res.body.data.employee_count).toBeGreaterThanOrEqual(1);
@@ -522,7 +522,7 @@ describe("query api: rpc", () => {
 
   it("refuses get_company_usage for a company you do not belong to", async () => {
     const { token } = await signUp(`usage-other-${Date.now()}@example.com`);
-    const res = await request(app)
+    const res = await request(server)
       .post("/rpc/get_company_usage")
       .set(authed(token))
       .send({ company_id_arg: "00000000-0000-0000-0000-000000000000" });
@@ -531,7 +531,7 @@ describe("query api: rpc", () => {
 
   it("reports which rpcs exist", async () => {
     const { token } = await signUp(`caps-${Date.now()}@example.com`);
-    const res = await request(app).get("/capabilities").set(authed(token));
+    const res = await request(server).get("/capabilities").set(authed(token));
     expect(res.status).toBe(200);
     expect(res.body.rpc).toContain("get_company_usage");
     expect(res.body.rpc).not.toContain("create_guest_gc_account");
@@ -547,7 +547,7 @@ describe("query api: rpc", () => {
  */
 describe("query api: availability writes follow the REST rule", () => {
   async function companyWithCrew(token: string, name: string, employeeName: string) {
-    const res = await request(app).post("/companies").set(authed(token)).send({ name, companyType: "sub" });
+    const res = await request(server).post("/companies").set(authed(token)).send({ name, companyType: "sub" });
     const companyId = res.body.company.id as string;
     const crew = await query(token)({
       table: "employees",
@@ -559,10 +559,10 @@ describe("query api: availability writes follow the REST rule", () => {
   }
 
   async function addMember(holderToken: string, companyId: string, joinerToken: string, permissionLevel: string) {
-    const join = await request(app).post(`/companies/${companyId}/join-requests`).set(authed(joinerToken));
+    const join = await request(server).post(`/companies/${companyId}/join-requests`).set(authed(joinerToken));
     expect(join.status).toBe(201);
-    const listed = await request(app).get(`/companies/${companyId}/join-requests`).set(authed(holderToken));
-    const approve = await request(app)
+    const listed = await request(server).get(`/companies/${companyId}/join-requests`).set(authed(holderToken));
+    const approve = await request(server)
       .post(`/companies/${companyId}/join-requests/${listed.body.requests[0].id}/approve`)
       .set(authed(holderToken))
       .send({ permissionLevel });

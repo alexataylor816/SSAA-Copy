@@ -1,25 +1,25 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { createApp } from "../src/app.js";
+import { startTestServer } from "./helpers/server.js";
 
-const { app } = await createApp();
+const server = await startTestServer();
 let n = 0;
 const authed = (token: string) => ({ Authorization: `Bearer ${token}` });
 
 async function signUp(tag: string, fullName = `User ${tag}`) {
-  const res = await request(app)
+  const res = await request(server)
     .post("/auth/signup")
     .send({ email: `notif-${tag}-${Date.now()}-${n++}@example.com`, password: "hunter22", fullName });
   return { token: res.body.token as string, id: res.body.user.id as string };
 }
 
 async function company(token: string, name: string, companyType: "gc" | "sub") {
-  const res = await request(app).post("/companies").set(authed(token)).send({ name, companyType });
+  const res = await request(server).post("/companies").set(authed(token)).send({ name, companyType });
   return res.body.company.id as string;
 }
 
 const inbox = async (token: string) =>
-  (await request(app).get("/notifications").set(authed(token))).body.notifications as {
+  (await request(server).get("/notifications").set(authed(token))).body.notifications as {
     id: string;
     eventType: string;
     title: string;
@@ -31,16 +31,16 @@ const inbox = async (token: string) =>
 async function connectedPair() {
   const gc = await signUp("gc", "Gina GC");
   await company(gc.token, "Notif GC", "gc");
-  const project = await request(app).post("/projects").set(authed(gc.token)).send({ name: "Notif Tower" });
+  const project = await request(server).post("/projects").set(authed(gc.token)).send({ name: "Notif Tower" });
   const sub = await signUp("sub", "Sam Sub");
   const subCompanyId = await company(sub.token, "Notif Sub", "sub");
-  await request(app).post("/projects/connect").set(authed(sub.token)).send({ code: project.body.connectionCode });
-  const crew = await request(app).get(`/companies/${subCompanyId}/connected-employees`).set(authed(gc.token));
+  await request(server).post("/projects/connect").set(authed(sub.token)).send({ code: project.body.connectionCode });
+  const crew = await request(server).get(`/companies/${subCompanyId}/connected-employees`).set(authed(gc.token));
   return { gc, sub, subCompanyId, projectId: project.body.id as string, employeeId: crew.body.employees[0].id as string };
 }
 
 async function sendRequest(pair: Awaited<ReturnType<typeof connectedPair>>) {
-  const res = await request(app).post("/schedule-requests").set(authed(pair.gc.token)).send({
+  const res = await request(server).post("/schedule-requests").set(authed(pair.gc.token)).send({
     projectId: pair.projectId,
     subCompanyId: pair.subCompanyId,
     employeeIds: [pair.employeeId],
@@ -68,7 +68,7 @@ describe("notifications: schedule requests", () => {
   it("tells the GC when the sub confirms", async () => {
     const pair = await connectedPair();
     const id = await sendRequest(pair);
-    await request(app).patch(`/schedule-requests/${id}`).set(authed(pair.sub.token)).send({ status: "confirmed" });
+    await request(server).patch(`/schedule-requests/${id}`).set(authed(pair.sub.token)).send({ status: "confirmed" });
 
     const gcInbox = await inbox(pair.gc.token);
     expect(gcInbox.map((x) => x.title)).toEqual(["Request confirmed"]);
@@ -78,7 +78,7 @@ describe("notifications: schedule requests", () => {
   it("tells the sub when the GC cancels", async () => {
     const pair = await connectedPair();
     const id = await sendRequest(pair);
-    await request(app).patch(`/schedule-requests/${id}`).set(authed(pair.gc.token)).send({ status: "cancelled" });
+    await request(server).patch(`/schedule-requests/${id}`).set(authed(pair.gc.token)).send({ status: "cancelled" });
 
     expect((await inbox(pair.sub.token)).map((x) => x.title)).toContain("Request cancelled");
   });
@@ -86,9 +86,9 @@ describe("notifications: schedule requests", () => {
   it("skips sub members below partial, who can't act on requests", async () => {
     const pair = await connectedPair();
     const basic = await signUp("basic");
-    await request(app).post(`/companies/${pair.subCompanyId}/join-requests`).set(authed(basic.token));
-    const listed = await request(app).get(`/companies/${pair.subCompanyId}/join-requests`).set(authed(pair.sub.token));
-    await request(app)
+    await request(server).post(`/companies/${pair.subCompanyId}/join-requests`).set(authed(basic.token));
+    const listed = await request(server).get(`/companies/${pair.subCompanyId}/join-requests`).set(authed(pair.sub.token));
+    await request(server)
       .post(`/companies/${pair.subCompanyId}/join-requests/${listed.body.requests[0].id}/approve`)
       .set(authed(pair.sub.token))
       .send({ permissionLevel: "basic" });
@@ -103,10 +103,10 @@ describe("notifications: schedule requests", () => {
     await sendRequest(pair);
     const [mine] = await inbox(pair.sub.token);
 
-    await request(app).post("/notifications/read").set(authed(pair.gc.token)).send({ ids: [mine.id] });
+    await request(server).post("/notifications/read").set(authed(pair.gc.token)).send({ ids: [mine.id] });
     expect((await inbox(pair.sub.token))[0].readAt).toBeNull();
 
-    await request(app).post("/notifications/read").set(authed(pair.sub.token)).send({});
+    await request(server).post("/notifications/read").set(authed(pair.sub.token)).send({});
     expect((await inbox(pair.sub.token))[0].readAt).not.toBeNull();
   });
 });
@@ -116,14 +116,14 @@ describe("notifications: join requests", () => {
     const holder = await signUp("holder");
     const companyId = await company(holder.token, "Notif Join Co", "gc");
     const joiner = await signUp("joiner", "Jo Joiner");
-    await request(app).post(`/companies/${companyId}/join-requests`).set(authed(joiner.token));
+    await request(server).post(`/companies/${companyId}/join-requests`).set(authed(joiner.token));
 
     const holderInbox = await inbox(holder.token);
     expect(holderInbox[0].title).toBe("New join request");
     expect(holderInbox[0].body).toContain("Jo Joiner");
 
-    const listed = await request(app).get(`/companies/${companyId}/join-requests`).set(authed(holder.token));
-    await request(app)
+    const listed = await request(server).get(`/companies/${companyId}/join-requests`).set(authed(holder.token));
+    await request(server)
       .post(`/companies/${companyId}/join-requests/${listed.body.requests[0].id}/approve`)
       .set(authed(holder.token))
       .send({ permissionLevel: "partial" });

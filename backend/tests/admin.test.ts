@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { createApp } from "../src/app.js";
+import { startTestServer } from "./helpers/server.js";
 import { setUserIsAdmin } from "../src/models/users.js";
 
-const { app } = await createApp();
+const server = await startTestServer();
 
 async function signUp(email: string) {
-  const res = await request(app).post("/auth/signup").send({ email, password: "hunter22", fullName: "Test User" });
+  const res = await request(server).post("/auth/signup").send({ email, password: "hunter22", fullName: "Test User" });
   return { token: res.body.token as string, user: res.body.user as { id: string; email: string } };
 }
 
@@ -31,20 +31,20 @@ describe("admin", () => {
     ] as const) {
       const res =
         method === "get"
-          ? await request(app).get(path).set(authed(u.token))
-          : await request(app).post(path).set(authed(u.token)).send({});
+          ? await request(server).get(path).set(authed(u.token))
+          : await request(server).post(path).set(authed(u.token)).send({});
       expect(res.status).toBe(403);
     }
   });
 
   it("manages templates: list seeded, update, bad channel rejected", async () => {
     const a = await admin();
-    const list = await request(app).get("/admin/templates").set(authed(a.token));
+    const list = await request(server).get("/admin/templates").set(authed(a.token));
     expect(list.status).toBe(200);
     expect(list.body.templates.length).toBeGreaterThanOrEqual(7);
     const first = list.body.templates[0];
 
-    const updated = await request(app)
+    const updated = await request(server)
       .patch(`/admin/templates/${first.id}`)
       .set(authed(a.token))
       .send({ subject: "New subject", isActive: false });
@@ -52,13 +52,13 @@ describe("admin", () => {
     expect(updated.body.subject).toBe("New subject");
     expect(updated.body.isActive).toBe(false);
 
-    const bad = await request(app)
+    const bad = await request(server)
       .patch(`/admin/templates/${first.id}`)
       .set(authed(a.token))
       .send({ channel: "carrier-pigeon" });
     expect(bad.status).toBe(400);
 
-    const missing = await request(app)
+    const missing = await request(server)
       .patch("/admin/templates/00000000-0000-0000-0000-000000000000")
       .set(authed(a.token))
       .send({ subject: "x" });
@@ -69,20 +69,20 @@ describe("admin", () => {
     const a = await admin();
     const u = await signUp(`op-${Date.now()}@example.com`);
 
-    const grant = await request(app).post("/admin/operators").set(authed(a.token)).send({ email: u.user.email });
+    const grant = await request(server).post("/admin/operators").set(authed(a.token)).send({ email: u.user.email });
     expect(grant.status).toBe(200);
     expect(grant.body.isAdmin).toBe(true);
 
-    const ops = await request(app).get("/admin/operators").set(authed(a.token));
+    const ops = await request(server).get("/admin/operators").set(authed(a.token));
     expect(ops.body.operators.some((o: { email: string }) => o.email === u.user.email)).toBe(true);
 
-    const revoke = await request(app)
+    const revoke = await request(server)
       .post("/admin/operators")
       .set(authed(a.token))
       .send({ userId: u.user.id, isAdmin: false });
     expect(revoke.body.isAdmin).toBe(false);
 
-    const selfDemote = await request(app)
+    const selfDemote = await request(server)
       .post("/admin/operators")
       .set(authed(a.token))
       .send({ userId: a.user.id, isAdmin: false });
@@ -92,33 +92,33 @@ describe("admin", () => {
   it("approves a deletion by removing the company and detaching members", async () => {
     const a = await admin();
     const holder = await signUp(`delh-${Date.now()}@example.com`);
-    const company = await request(app)
+    const company = await request(server)
       .post("/companies")
       .set(authed(holder.token))
       .send({ name: "Doomed Co", companyType: "gc" });
     const companyId = company.body.company.id as string;
-    await request(app).post("/projects").set(authed(holder.token)).send({ name: "Doomed Project" });
+    await request(server).post("/projects").set(authed(holder.token)).send({ name: "Doomed Project" });
 
-    const filed = await request(app)
+    const filed = await request(server)
       .post(`/companies/${companyId}/deletion-requests`)
       .set(authed(holder.token))
       .send({ reason: "test" });
     expect(filed.status).toBe(201);
 
-    const queue = await request(app).get("/admin/deletion-requests").set(authed(a.token));
+    const queue = await request(server).get("/admin/deletion-requests").set(authed(a.token));
     expect(queue.body.requests.some((r: { id: string }) => r.id === filed.body.id)).toBe(true);
 
-    const approved = await request(app)
+    const approved = await request(server)
       .post(`/admin/deletion-requests/${filed.body.id}/resolve`)
       .set(authed(a.token))
       .send({ approve: true });
     expect(approved.status).toBe(200);
 
-    const companies = await request(app).get("/admin/companies").set(authed(a.token));
+    const companies = await request(server).get("/admin/companies").set(authed(a.token));
     expect(companies.body.companies.some((c: { id: string }) => c.id === companyId)).toBe(false);
 
     // Holder login survives but belongs nowhere.
-    const me = await request(app)
+    const me = await request(server)
       .post("/query")
       .set(authed(holder.token))
       .send({ table: "users", operation: "select", filters: [{ op: "eq", column: "id", value: holder.user.id }] });
@@ -128,21 +128,21 @@ describe("admin", () => {
   it("rejects a deletion without touching the company", async () => {
     const a = await admin();
     const holder = await signUp(`delhr-${Date.now()}@example.com`);
-    const company = await request(app)
+    const company = await request(server)
       .post("/companies")
       .set(authed(holder.token))
       .send({ name: "Spared Co", companyType: "sub" });
-    const filed = await request(app)
+    const filed = await request(server)
       .post(`/companies/${company.body.company.id}/deletion-requests`)
       .set(authed(holder.token))
       .send({});
-    const rejected = await request(app)
+    const rejected = await request(server)
       .post(`/admin/deletion-requests/${filed.body.id}/resolve`)
       .set(authed(a.token))
       .send({ approve: false });
     expect(rejected.status).toBe(200);
 
-    const queue = await request(app).get("/admin/deletion-requests").set(authed(a.token));
+    const queue = await request(server).get("/admin/deletion-requests").set(authed(a.token));
     expect(queue.body.requests.some((r: { id: string }) => r.id === filed.body.id)).toBe(false);
   });
 });

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { createApp } from "../src/app.js";
+import { startTestServer } from "./helpers/server.js";
 import { getHistoricalLockDate } from "../src/scheduling/historicalLock.js";
 
-const { app } = await createApp();
+const server = await startTestServer();
 
 async function signUp(email: string, fullName = "Test User") {
-  const res = await request(app).post("/auth/signup").send({ email, password: "hunter22", fullName });
+  const res = await request(server).post("/auth/signup").send({ email, password: "hunter22", fullName });
   return { token: res.body.token as string, user: res.body.user as { id: string; email: string } };
 }
 
@@ -31,20 +31,20 @@ function futureDate(): string {
 /** A GC and a sub connected by a shared project, plus the sub's one employee. */
 async function connectedGcAndSub() {
   const gc = await signUp(`gc-${Date.now()}-${Math.random()}@example.com`, "GC Holder");
-  const gcCompany = await request(app)
+  const gcCompany = await request(server)
     .post("/companies")
     .set(authed(gc.token))
     .send({ name: "GC Co", companyType: "gc" });
-  const project = await request(app).post("/projects").set(authed(gc.token)).send({ name: "Tower" });
+  const project = await request(server).post("/projects").set(authed(gc.token)).send({ name: "Tower" });
 
   const sub = await signUp(`sub-${Date.now()}-${Math.random()}@example.com`, "Sub Holder");
-  const subCompany = await request(app)
+  const subCompany = await request(server)
     .post("/companies")
     .set(authed(sub.token))
     .send({ name: "Sub Co", companyType: "sub" });
-  await request(app).post("/projects/connect").set(authed(sub.token)).send({ code: project.body.connectionCode });
+  await request(server).post("/projects/connect").set(authed(sub.token)).send({ code: project.body.connectionCode });
 
-  const employees = await request(app).get(`/companies/${subCompany.body.company.id}/employees`).set(authed(sub.token));
+  const employees = await request(server).get(`/companies/${subCompany.body.company.id}/employees`).set(authed(sub.token));
 
   return {
     gc,
@@ -72,9 +72,9 @@ describe("historical lock", () => {
 
   it("rejects creating availability on a locked date", async () => {
     const { token } = await signUp("lock-avail@example.com");
-    await request(app).post("/companies").set(authed(token)).send({ name: "Lock Co", companyType: "gc" });
+    await request(server).post("/companies").set(authed(token)).send({ name: "Lock Co", companyType: "gc" });
 
-    const res = await request(app)
+    const res = await request(server)
       .post("/availability")
       .set(authed(token))
       .send({ date: lockedDate(), startTime: "08:00", endTime: "12:00", allProjects: true });
@@ -85,9 +85,9 @@ describe("historical lock", () => {
 
   it("still accepts availability on an unlocked date", async () => {
     const { token } = await signUp("unlock-avail@example.com");
-    await request(app).post("/companies").set(authed(token)).send({ name: "Open Co", companyType: "gc" });
+    await request(server).post("/companies").set(authed(token)).send({ name: "Open Co", companyType: "gc" });
 
-    const res = await request(app)
+    const res = await request(server)
       .post("/availability")
       .set(authed(token))
       .send({ date: futureDate(), startTime: "08:00", endTime: "12:00", allProjects: true });
@@ -97,9 +97,9 @@ describe("historical lock", () => {
 
   it("rejects deleting availability on a locked date", async () => {
     const { token } = await signUp("lock-del@example.com");
-    await request(app).post("/companies").set(authed(token)).send({ name: "Delete Co", companyType: "gc" });
+    await request(server).post("/companies").set(authed(token)).send({ name: "Delete Co", companyType: "gc" });
 
-    const created = await request(app)
+    const created = await request(server)
       .post("/availability")
       .set(authed(token))
       .send({ date: futureDate(), startTime: "08:00", endTime: "12:00", allProjects: true });
@@ -109,7 +109,7 @@ describe("historical lock", () => {
     const { database } = await import("../src/db.js");
     await database.run("UPDATE availability SET date = ? WHERE id = ?", [lockedDate(), created.body.id]);
 
-    const res = await request(app).delete(`/availability/${created.body.id}`).set(authed(token));
+    const res = await request(server).delete(`/availability/${created.body.id}`).set(authed(token));
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/locked/i);
   });
@@ -117,7 +117,7 @@ describe("historical lock", () => {
   it("rejects creating a schedule request on a locked date", async () => {
     const { gc, project, subCompany, subEmployeeId } = await connectedGcAndSub();
 
-    const res = await request(app)
+    const res = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({
@@ -136,7 +136,7 @@ describe("historical lock", () => {
   it("rejects responding to a schedule request whose date is locked", async () => {
     const { gc, sub, project, subCompany, subEmployeeId } = await connectedGcAndSub();
 
-    const created = await request(app)
+    const created = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({
@@ -152,7 +152,7 @@ describe("historical lock", () => {
     const { database } = await import("../src/db.js");
     await database.run("UPDATE schedule_requests SET date = ? WHERE id = ?", [lockedDate(), created.body.id]);
 
-    const res = await request(app)
+    const res = await request(server)
       .patch(`/schedule-requests/${created.body.id}`)
       .set(authed(sub.token))
       .send({ status: "confirmed" });
@@ -165,9 +165,9 @@ describe("historical lock", () => {
 describe("capabilities", () => {
   it("returns server-resolved capabilities instead of leaving clients to guess", async () => {
     const { token } = await signUp("caps@example.com");
-    await request(app).post("/companies").set(authed(token)).send({ name: "Caps Co", companyType: "gc" });
+    await request(server).post("/companies").set(authed(token)).send({ name: "Caps Co", companyType: "gc" });
 
-    const res = await request(app).get("/rbac/me").set(authed(token));
+    const res = await request(server).get("/rbac/me").set(authed(token));
     expect(res.status).toBe(200);
     expect(res.body.capabilities).toEqual({
       // Company creator is the account holder.
@@ -184,7 +184,7 @@ describe("capabilities", () => {
 
   it("reports read-only scheduling for a company with no role yet", async () => {
     const { token } = await signUp("caps-nocompany@example.com");
-    const res = await request(app).get("/rbac/me").set(authed(token));
+    const res = await request(server).get("/rbac/me").set(authed(token));
     expect(res.status).toBe(200);
     expect(res.body.company).toBeNull();
     expect(res.body.capabilities.canApproveJoinRequests).toBe(false);

@@ -6,12 +6,12 @@
  */
 import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { createApp } from "../src/app.js";
+import { startTestServer } from "./helpers/server.js";
 
-const { app } = await createApp();
+const server = await startTestServer();
 
 async function signUp(email: string) {
-  const res = await request(app).post("/auth/signup").send({ email, password: "hunter22", fullName: "Test User" });
+  const res = await request(server).post("/auth/signup").send({ email, password: "hunter22", fullName: "Test User" });
   return { token: res.body.token as string, id: res.body.user.id as string };
 }
 
@@ -20,13 +20,13 @@ function authed(token: string) {
 }
 
 function query(token: string) {
-  return (body: Record<string, unknown>) => request(app).post("/query").set(authed(token)).send(body);
+  return (body: Record<string, unknown>) => request(server).post("/query").set(authed(token)).send(body);
 }
 
 async function projectAndToken(label: string) {
   const { token } = await signUp(`sort-${label}-${Date.now()}@example.com`);
-  await request(app).post("/companies").set(authed(token)).send({ name: `Sort ${label}`, companyType: "gc" });
-  const res = await request(app).post("/projects").set(authed(token)).send({ name: `Sort ${label} Project` });
+  await request(server).post("/companies").set(authed(token)).send({ name: `Sort ${label}`, companyType: "gc" });
+  const res = await request(server).post("/projects").set(authed(token)).send({ name: `Sort ${label} Project` });
   return { token, projectId: res.body.id as string };
 }
 
@@ -70,7 +70,7 @@ describe("tasks sort_order", () => {
     await insertTask(token, projectId, "First");
     await insertTask(token, projectId, "Second");
 
-    const other = await request(app).post("/projects").set(authed(token)).send({ name: "Second Project" });
+    const other = await request(server).post("/projects").set(authed(token)).send({ name: "Second Project" });
     const row = await insertTask(token, other.body.id as string, "Other");
     expect(row.sort_order).toBe(0);
   });

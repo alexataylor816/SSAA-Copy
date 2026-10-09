@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
-import { createApp } from "../src/app.js";
+import { startTestServer } from "./helpers/server.js";
 
-const { app } = await createApp();
+const server = await startTestServer();
 
 async function signUp(email: string, fullName = "Test User") {
-  const res = await request(app).post("/auth/signup").send({ email, password: "hunter22", fullName });
+  const res = await request(server).post("/auth/signup").send({ email, password: "hunter22", fullName });
   return { token: res.body.token as string, user: res.body.user as { id: string; email: string } };
 }
 
@@ -14,7 +14,7 @@ function authed(token: string) {
 }
 
 async function makeCompany(token: string, name: string, companyType: "gc" | "sub" = "gc") {
-  const res = await request(app).post("/companies").set(authed(token)).send({ name, companyType });
+  const res = await request(server).post("/companies").set(authed(token)).send({ name, companyType });
   return res.body as { company: { id: string }; role: { permissionLevel: string } };
 }
 
@@ -27,13 +27,13 @@ function farFutureDate(daysAhead: number): string {
 async function connectedGcAndSub() {
   const gc = await signUp(`gc-${Date.now()}-${Math.random()}@example.com`, "GC Holder");
   const gcCompany = await makeCompany(gc.token, "GC Co", "gc");
-  const project = await request(app).post("/projects").set(authed(gc.token)).send({ name: "Tower" });
+  const project = await request(server).post("/projects").set(authed(gc.token)).send({ name: "Tower" });
 
   const sub = await signUp(`sub-${Date.now()}-${Math.random()}@example.com`, "Sub Holder");
   const subCompany = await makeCompany(sub.token, "Sub Co", "sub");
-  await request(app).post("/projects/connect").set(authed(sub.token)).send({ code: project.body.connectionCode });
+  await request(server).post("/projects/connect").set(authed(sub.token)).send({ code: project.body.connectionCode });
 
-  const subEmployees = await request(app).get(`/companies/${subCompany.company.id}/employees`).set(authed(sub.token));
+  const subEmployees = await request(server).get(`/companies/${subCompany.company.id}/employees`).set(authed(sub.token));
 
   return { gc, gcCompany, sub, subCompany, project: project.body, subEmployeeId: subEmployees.body.employees[0].id };
 }
@@ -43,7 +43,7 @@ describe("schedule requests", () => {
     const { gc, sub, project, subCompany, subEmployeeId } = await connectedGcAndSub();
     const date = farFutureDate(10);
 
-    const created = await request(app)
+    const created = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({
@@ -56,11 +56,11 @@ describe("schedule requests", () => {
       });
     expect(created.status).toBe(201);
     expect(created.body.status).toBe("pending");
-    const subEmployees = await request(app).get(`/companies/${subCompany.company.id}/employees`).set(authed(sub.token));
+    const subEmployees = await request(server).get(`/companies/${subCompany.company.id}/employees`).set(authed(sub.token));
     const expectedName = subEmployees.body.employees.find((e: { id: string }) => e.id === subEmployeeId)?.name;
     expect(created.body.employeeNames).toEqual([expectedName]);
 
-    const confirm = await request(app)
+    const confirm = await request(server)
       .patch(`/schedule-requests/${created.body.id}`)
       .set(authed(sub.token))
       .send({ status: "confirmed" });
@@ -72,12 +72,12 @@ describe("schedule requests", () => {
     const { gc, project, subCompany, subEmployeeId } = await connectedGcAndSub();
     const date = farFutureDate(10);
 
-    const created = await request(app)
+    const created = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({ projectId: project.id, subCompanyId: subCompany.company.id, employeeIds: [subEmployeeId], date });
 
-    const res = await request(app)
+    const res = await request(server)
       .patch(`/schedule-requests/${created.body.id}`)
       .set(authed(gc.token))
       .send({ status: "confirmed" });
@@ -88,19 +88,19 @@ describe("schedule requests", () => {
     const { sub, gc, project, subCompany, subEmployeeId } = await connectedGcAndSub();
     const date = farFutureDate(10);
 
-    const created = await request(app)
+    const created = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({ projectId: project.id, subCompanyId: subCompany.company.id, employeeIds: [subEmployeeId], date });
 
-    const rejected = await request(app)
+    const rejected = await request(server)
       .patch(`/schedule-requests/${created.body.id}`)
       .set(authed(sub.token))
       .send({ status: "rejected" });
     expect(rejected.status).toBe(200);
     expect(rejected.body.status).toBe("rejected");
 
-    const again = await request(app)
+    const again = await request(server)
       .patch(`/schedule-requests/${created.body.id}`)
       .set(authed(sub.token))
       .send({ status: "confirmed" });
@@ -111,12 +111,12 @@ describe("schedule requests", () => {
     const { gc, project, subCompany, subEmployeeId } = await connectedGcAndSub();
     const date = farFutureDate(10);
 
-    const created = await request(app)
+    const created = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({ projectId: project.id, subCompanyId: subCompany.company.id, employeeIds: [subEmployeeId], date });
 
-    const cancelled = await request(app)
+    const cancelled = await request(server)
       .patch(`/schedule-requests/${created.body.id}`)
       .set(authed(gc.token))
       .send({ status: "cancelled" });
@@ -128,11 +128,11 @@ describe("schedule requests", () => {
     const { gc, project, subCompany } = await connectedGcAndSub();
     const outsider = await signUp(`outsider-${Date.now()}@example.com`, "Outsider");
     const outsiderCompany = await makeCompany(outsider.token, "Outsider Co", "sub");
-    const outsiderEmployees = await request(app)
+    const outsiderEmployees = await request(server)
       .get(`/companies/${outsiderCompany.company.id}/employees`)
       .set(authed(outsider.token));
 
-    const res = await request(app)
+    const res = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({
@@ -149,7 +149,7 @@ describe("schedule requests", () => {
     const unconnectedSub = await signUp(`unconnected-${Date.now()}@example.com`, "Unconnected");
     const unconnectedCompany = await makeCompany(unconnectedSub.token, "Unconnected Co", "sub");
 
-    const res = await request(app)
+    const res = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({
@@ -171,15 +171,15 @@ describe("schedule requests", () => {
     // from within their own company context (self-scheduling requires
     // partial+ too).
     const member = await signUp(`basicmember-${Date.now()}@example.com`, "Basic Member");
-    const joinRes = await request(app)
+    const joinRes = await request(server)
       .post(`/companies/${subCompany.company.id}/join-requests`)
       .set(authed(member.token));
-    await request(app)
+    await request(server)
       .post(`/companies/${subCompany.company.id}/join-requests/${joinRes.body.id}/approve`)
       .set(authed(sub.token))
       .send({ permissionLevel: "basic" });
 
-    const res = await request(app)
+    const res = await request(server)
       .post("/schedule-requests")
       .set(authed(member.token))
       .send({
@@ -194,13 +194,13 @@ describe("schedule requests", () => {
   it("lists requests visible to both the requesting and sub company", async () => {
     const { gc, sub, project, subCompany, subEmployeeId } = await connectedGcAndSub();
     const date = farFutureDate(12);
-    await request(app)
+    await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({ projectId: project.id, subCompanyId: subCompany.company.id, employeeIds: [subEmployeeId], date });
 
-    const fromGc = await request(app).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(gc.token));
-    const fromSub = await request(app).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(sub.token));
+    const fromGc = await request(server).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(gc.token));
+    const fromSub = await request(server).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(sub.token));
     expect(fromGc.body.requests).toHaveLength(1);
     expect(fromSub.body.requests).toHaveLength(1);
   });
@@ -215,11 +215,11 @@ describe("schedule request photos", () => {
   );
 
   async function uploadPhoto(token: string, filename = "site.png", contentType = "image/png", body: Buffer = png) {
-    return request(app).post("/uploads").set(authed(token)).attach("photo", body, { filename, contentType });
+    return request(server).post("/uploads").set(authed(token)).attach("photo", body, { filename, contentType });
   }
 
   it("refuses anonymous uploads", async () => {
-    const res = await request(app).post("/uploads").attach("photo", png, {
+    const res = await request(server).post("/uploads").attach("photo", png, {
       filename: "site.png",
       contentType: "image/png",
     });
@@ -228,7 +228,7 @@ describe("schedule request photos", () => {
 
   it("refuses non-images with a 400, not a 500", async () => {
     const { gc } = await connectedGcAndSub();
-    const res = await request(app)
+    const res = await request(server)
       .post("/uploads")
       .set(authed(gc.token))
       .attach("photo", Buffer.from("definitely not an image"), {
@@ -245,7 +245,7 @@ describe("schedule request photos", () => {
     expect(uploaded.status).toBe(201);
     expect(uploaded.body.url).toMatch(/^\/uploads\/schedule-requests\/[A-Za-z0-9._-]+\.png$/);
 
-    const served = await request(app).get(uploaded.body.url);
+    const served = await request(server).get(uploaded.body.url);
     expect(served.status).toBe(200);
     expect(served.headers["content-type"]).toMatch(/image\/png/);
   });
@@ -256,7 +256,7 @@ describe("schedule request photos", () => {
     const url = uploaded.body.url as string;
     const date = farFutureDate(13);
 
-    const created = await request(app)
+    const created = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({
@@ -269,10 +269,10 @@ describe("schedule request photos", () => {
     expect(created.status).toBe(201);
     expect(created.body.imageUrls).toEqual([url]);
 
-    const listed = await request(app).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(sub.token));
+    const listed = await request(server).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(sub.token));
     expect(listed.body.requests[0].imageUrls).toEqual([url]);
 
-    const remote = await request(app)
+    const remote = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({
@@ -284,7 +284,7 @@ describe("schedule request photos", () => {
       });
     expect(remote.status).toBe(400);
 
-    const tooMany = await request(app)
+    const tooMany = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({
@@ -301,7 +301,7 @@ describe("schedule request photos", () => {
     const { gc, sub, project, subCompany, subEmployeeId } = await connectedGcAndSub();
     const date = farFutureDate(14);
 
-    const created = await request(app)
+    const created = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({ projectId: project.id, subCompanyId: subCompany.company.id, employeeIds: [subEmployeeId], date });
@@ -310,21 +310,21 @@ describe("schedule request photos", () => {
     expect(created.body.requestingCompanyName).toBeTruthy();
     expect(created.body.subCompanyName).toBeTruthy();
 
-    const rejected = await request(app)
+    const rejected = await request(server)
       .patch(`/schedule-requests/${created.body.id}`)
       .set(authed(sub.token))
       .send({ status: "rejected", statusReason: "Crew is on another job that day." });
     expect(rejected.status).toBe(200);
     expect(rejected.body.statusReason).toBe("Crew is on another job that day.");
 
-    const listed = await request(app).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(gc.token));
+    const listed = await request(server).get(`/schedule-requests?start=${date}&end=${date}`).set(authed(gc.token));
     expect(listed.body.requests[0].statusReason).toBe("Crew is on another job that day.");
 
-    const created2 = await request(app)
+    const created2 = await request(server)
       .post("/schedule-requests")
       .set(authed(gc.token))
       .send({ projectId: project.id, subCompanyId: subCompany.company.id, employeeIds: [subEmployeeId], date });
-    const tooLong = await request(app)
+    const tooLong = await request(server)
       .patch(`/schedule-requests/${created2.body.id}`)
       .set(authed(sub.token))
       .send({ status: "rejected", statusReason: "x".repeat(501) });
