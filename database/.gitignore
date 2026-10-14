@@ -1,0 +1,2 @@
+# Exports of a real database contain password hashes; never commit them.
+exports/

@@ -76,10 +76,20 @@ On macOS/Linux, `bash scripts/start-dev.sh` starts both.
    idle). Restart it from github.com/codespaces; run `bash scripts/start-dev.sh`
    if the app isn't already running.
 
-The codespace starts with an **empty database**, so sign up fresh there. Setup
-writes `backend/.env` with random secrets and turns off on-screen reset codes,
-because a public link would let anyone use them; add `SMTP_USER`/`SMTP_PASS` to
-that file to make password resets work by email.
+The codespace starts with the **demo data** from `database/` (e.g. sign in as
+`gina.torres@example.com` / `Demo1234!`; full list in
+[database/README.md](database/README.md)). Anyone with a public link can use those
+logins, so keep real data out of a shared codespace. Setup writes `backend/.env`
+with random secrets and turns off on-screen reset codes, because a public link
+would let anyone use them; add `SMTP_USER`/`SMTP_PASS` to that file to make
+password resets work by email.
+
+## MySQL
+
+The backend runs on SQLite by default or MySQL with `DB_CLIENT=mysql`
+(`npm run dev:mysql` / `npm run test:mysql`). `database/` has a demo-data MySQL
+dump, an export tool for moving an existing database onto MySQL, and setup steps — see
+[database/README.md](database/README.md).
 
 ## Checks
 

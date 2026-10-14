@@ -41,7 +41,8 @@ export default function ForgotPassword() {
               </p>
               {devCode && (
                 <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                  No mail provider is configured, so here is the code: <span className="font-mono">{devCode}</span>
+                  Development only: the email couldn&apos;t be sent, so here is the code:{" "}
+                  <span className="font-mono">{devCode}</span>
                 </p>
               )}
               <Button asChild variant="outline" className="w-full">

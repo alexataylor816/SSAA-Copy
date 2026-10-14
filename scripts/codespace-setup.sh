@@ -19,4 +19,9 @@ if [ ! -f backend/.env ]; then
   echo "Created backend/.env with fresh secrets."
 fi
 
+# Start with demo data instead of an empty database (password: Demo1234!).
+if [ ! -f backend/ssaa.db ]; then
+  (cd backend && npx tsx scripts/seed-demo.ts --out ssaa.db)
+fi
+
 echo "Setup done. Start the app with: bash scripts/start-dev.sh"

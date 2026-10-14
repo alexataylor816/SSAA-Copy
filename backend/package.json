@@ -9,7 +9,10 @@
     "dev:mysql": "cross-env DB_CLIENT=mysql tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "test": "vitest run",
-    "test:mysql": "cross-env DB_CLIENT=mysql MYSQL_DATABASE=ssaa_test vitest run"
+    "test:mysql": "cross-env DB_CLIENT=mysql MYSQL_DATABASE=ssaa_test vitest run",
+    "db:seed-demo": "tsx scripts/seed-demo.ts --out demo.db",
+    "db:export-mysql": "tsx scripts/export-mysql.ts --db ssaa.db --out ../database/exports/ssaa.sql",
+    "db:refresh-demo-dump": "tsx scripts/seed-demo.ts --out demo.db && tsx scripts/export-mysql.ts --db demo.db --out ../database/mysql/ssaa_demo.sql"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
