@@ -7,7 +7,8 @@
  * The dump recreates every table from schema.sql, then inserts the rows exactly
  * as SQLite stores them: the schema keeps timestamps as text on purpose, because
  * the app compares them as strings. Rows whose parent row no longer exists
- * (SQLite here never enforced foreign keys; MySQL does) are left out and listed.
+ * (SQLite here never enforced foreign keys; MySQL does), and rows with no id,
+ * are left out and listed.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -115,15 +116,20 @@ let rowTotal = 0;
 const skipped: string[] = [];
 for (const table of sqliteTables) {
   const types = mysqlTables.get(table)!;
-  const cols = (db.prepare(`PRAGMA table_info(${q(table)})`).all() as { name: string }[]).map((c) => c.name);
+  const info = db.prepare(`PRAGMA table_info(${q(table)})`).all() as { name: string; pk: number }[];
+  const cols = info.map((c) => c.name);
+  const pkCols = info.filter((c) => c.pk > 0).map((c) => c.name);
   const unknown = cols.filter((c) => !types.has(c));
   if (unknown.length) throw new Error(`schema.sql's ${table} is missing column(s): ${unknown.join(", ")}.`);
 
   const bad = keepOrphans ? new Set<number>() : (orphans.get(table) ?? new Set<number>());
-  const rows = (db.prepare(`SELECT rowid AS __rowid, * FROM ${q(table)} ORDER BY rowid`).all() as Record<string, unknown>[]).filter(
-    (r) => !bad.has(Number(r.__rowid)),
-  );
-  if (bad.size) skipped.push(`${table}: ${bad.size}`);
+  const all = db.prepare(`SELECT rowid AS __rowid, * FROM ${q(table)} ORDER BY rowid`).all() as Record<string, unknown>[];
+  // SQLite lets a TEXT primary key be NULL (an early bug wrote some); the app can't
+  // address those rows and MySQL refuses them, so they're left out too.
+  const noKey = all.filter((r) => pkCols.some((c) => r[c] === null || r[c] === undefined));
+  const rows = all.filter((r) => !bad.has(Number(r.__rowid)) && !noKey.includes(r));
+  if (bad.size) skipped.push(`${table}: ${bad.size} with a missing parent`);
+  if (noKey.length) skipped.push(`${table}: ${noKey.length} with no id`);
   if (!rows.length) continue;
 
   out.push(`-- ${table}: ${rows.length} row${rows.length === 1 ? "" : "s"}`);
@@ -143,4 +149,6 @@ out.push("SET FOREIGN_KEY_CHECKS = 1;", "");
 fs.mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
 fs.writeFileSync(outPath, out.join("\n"));
 console.log(`Wrote ${outPath}: ${sqliteTables.length} tables, ${rowTotal} rows.`);
-if (skipped.length) console.log(`Left out rows whose parent row is gone (use --keep-orphans to keep them): ${skipped.join(", ")}`);
+if (skipped.length) {
+  console.log(`Left out rows MySQL would reject (--keep-orphans keeps the missing-parent ones): ${skipped.join("; ")}`);
+}
