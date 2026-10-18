@@ -137,6 +137,50 @@ export async function findCompanyById(id: string): Promise<Company | undefined> 
   return row ? mapCompanyRow(row) : undefined;
 }
 
+/** What a stranger may learn about a company: enough to recognise it, nothing more (no address). */
+export interface CompanySummary {
+  id: string;
+  name: string;
+  companyType: CompanyType;
+  trade: string | null;
+}
+
+export const COMPANY_SEARCH_MIN_LENGTH = 3;
+const COMPANY_SEARCH_LIMIT = 8;
+
+/**
+ * Name search for people looking for a company to join or connect with. Only
+ * ever a handful of matches for a typed name, so nobody can page through the
+ * whole directory.
+ */
+export async function searchCompanies(
+  query: string,
+  options: { companyType?: CompanyType; excludeCompanyId?: string | null } = {},
+): Promise<CompanySummary[]> {
+  // `!` escapes LIKE wildcards the user types. Not a backslash: MySQL and SQLite read that differently.
+  const pattern = `%${query.toLowerCase().replace(/[!%_]/g, "!$&")}%`;
+  const where = ["LOWER(name) LIKE ? ESCAPE '!'"];
+  const params: unknown[] = [pattern];
+  if (options.companyType) {
+    where.push("company_type = ?");
+    params.push(options.companyType);
+  }
+  if (options.excludeCompanyId) {
+    where.push("id <> ?");
+    params.push(options.excludeCompanyId);
+  }
+  const rows = await database.all<CompanyRow>(
+    `SELECT * FROM companies WHERE ${where.join(" AND ")} ORDER BY name LIMIT ${COMPANY_SEARCH_LIMIT}`,
+    params,
+  );
+  return rows.map(toCompanySummary);
+}
+
+export function toCompanySummary(company: Pick<CompanyRow, "id" | "name" | "company_type" | "trade">): CompanySummary {
+  return { id: company.id, name: company.name, companyType: company.company_type, trade: company.trade };
+}
+
+/** Every company, in full. Admin screens only; never expose this to ordinary users. */
 export async function listCompanies(companyType?: CompanyType): Promise<Company[]> {
   const rows = companyType
     ? await database.all<CompanyRow>("SELECT * FROM companies WHERE company_type = ? ORDER BY name", [companyType])

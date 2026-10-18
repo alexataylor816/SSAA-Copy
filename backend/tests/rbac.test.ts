@@ -408,10 +408,8 @@ describe("rbac", () => {
       expect(created.status).toBe(201);
       expect(created.body.company.trade).toBe("Plumbing");
 
-      const listed = await request(server).get("/companies").set(authed(holder.token));
-      expect(listed.body.companies.find((c: { id: string; trade: string }) => c.id === created.body.company.id)?.trade).toBe(
-        "Plumbing",
-      );
+      const summary = await request(server).get(`/companies/${created.body.company.id}/summary`).set(authed(holder.token));
+      expect(summary.body.company.trade).toBe("Plumbing");
 
       const holder2 = await signUp(`trade2-${Date.now()}@example.com`);
       const tooLong = await request(server)

@@ -4,7 +4,7 @@ import { emit } from "../realtime/index.js";
 import { EVENT, ROOM } from "../realtime/events.js";
 import { notifyJoinRequestCreated, notifyJoinRequestResolved } from "../notifications/service.js";
 import { HttpError } from "./errors.js";
-import { listCompanies } from "./models.js";
+import { COMPANY_SEARCH_MIN_LENGTH, findCompanyById, searchCompanies, toCompanySummary } from "./models.js";
 import {
   approveJoinRequest,
   assignPermissionLevel,
@@ -54,7 +54,29 @@ rbacRouter.get(
       res.status(400).json({ error: "type must be 'gc' or 'sub'." });
       return;
     }
-    res.json({ companies: await listCompanies(type) });
+    // Search only: a few name matches, never the whole directory.
+    const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (query.length < COMPANY_SEARCH_MIN_LENGTH) {
+      res.status(400).json({ error: `Type at least ${COMPANY_SEARCH_MIN_LENGTH} letters of the company name.` });
+      return;
+    }
+    const { company } = await getUserContext(req.userId!);
+    res.json({ companies: await searchCompanies(query, { companyType: type, excludeCompanyId: company?.id }) });
+  }),
+);
+
+// For invite links, which carry the company id: shows who invited you, nothing else.
+rbacRouter.get(
+  "/companies/:companyId/summary",
+  route(async (req, res) => {
+    const company = await findCompanyById(req.params.companyId);
+    if (!company) {
+      res.status(404).json({ error: "That invite link points to a company that no longer exists." });
+      return;
+    }
+    res.json({
+      company: toCompanySummary({ id: company.id, name: company.name, company_type: company.companyType, trade: company.trade }),
+    });
   }),
 );
 

@@ -113,6 +113,62 @@ export async function listVisibleProjects(userId: string): Promise<Project[]> {
   return [...owned, ...connected];
 }
 
+/** What someone holding a project's code (typed or from an invite link) is about to join. */
+export interface ProjectPreview {
+  project: { id: string; name: string; address: string | null };
+  gcCompanyName: string;
+  /** Your own company's name, for "Connect <it> to this project"; null if you have none. */
+  yourCompanyName: string | null;
+  /** "own": your company's project; "connected": already joined; "available": can join now. */
+  status: "own" | "connected" | "available";
+  /** Whether you yourself may connect your company (a subcontractor's owner or manager). */
+  canConnect: boolean;
+  /** Why not, in words the join page can show as-is. */
+  reason: string | null;
+}
+
+/**
+ * Who may connect their company to a GC's project: GCs own projects and bring
+ * subcontractors onto them, so the joining company must be a sub, and the
+ * person doing it must be able to commit that company's crews (Partial or
+ * higher). Crew members (Level 1 / Basic) see the project but ask their owner.
+ */
+async function connectBlocker(user: User): Promise<string | null> {
+  const company = user.companyId ? await findCompanyById(user.companyId) : undefined;
+  if (!company) return "Set up or join your company first.";
+  if (company.companyType !== "sub" && !user.isAdmin) {
+    return "Only subcontractor companies join a GC's project. To work with another GC, use Connected companies.";
+  }
+  if (!(await actorHasPartialOrHigher(user))) {
+    return "Ask your company's owner or office manager to connect the company to this project.";
+  }
+  return null;
+}
+
+export async function previewProjectByCode(userId: string, code: string): Promise<ProjectPreview> {
+  const user = await findUserById(userId);
+  if (!user) throw new NotFoundError("User not found.");
+  const project = await findProjectByConnectionCode(code.trim());
+  if (!project) throw new NotFoundError("No project found for that code. Check it with the general contractor.");
+  const gc = await findCompanyById(project.companyId);
+  const yours = user.companyId ? await findCompanyById(user.companyId) : undefined;
+  const status =
+    project.companyId === user.companyId
+      ? "own"
+      : user.companyId && (await findProjectConnection(project.id, user.companyId))
+        ? "connected"
+        : "available";
+  const reason = status === "available" ? await connectBlocker(user) : null;
+  return {
+    project: { id: project.id, name: project.name, address: project.address },
+    gcCompanyName: gc?.name ?? "A general contractor",
+    yourCompanyName: yours?.name ?? null,
+    status,
+    canConnect: status === "available" && reason === null,
+    reason,
+  };
+}
+
 export async function connectProjectByCode(userId: string, code: string): Promise<Project> {
   const user = await requireUserWithCompany(userId);
   const project = await findProjectByConnectionCode(code.trim());
@@ -125,6 +181,8 @@ export async function connectProjectByCode(userId: string, code: string): Promis
   if (await findProjectConnection(project.id, user.companyId!)) {
     throw new ConflictError("Already connected to that project.");
   }
+  const blocker = await connectBlocker(user);
+  if (blocker) throw new ForbiddenError(blocker);
 
   await createProjectConnection(project.id, user.companyId!);
   return project;

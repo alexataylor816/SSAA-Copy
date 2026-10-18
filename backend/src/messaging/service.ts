@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import { database } from "../db.js";
 import { findUserById, type User } from "../models/users.js";
 import { findUserRole } from "../rbac/models.js";
+import { hasPartialOrHigher } from "../rbac/permissions.js";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../rbac/errors.js";
 
 const MAX_BODY = 4000;
@@ -476,16 +477,31 @@ export async function createGroup(
   return { conversationId: id, ...announced };
 }
 
-export async function listParticipants(userId: string, conversationId: string): Promise<Contact[]> {
+export interface ChatMember extends Contact {
+  permissionLevel: string | null;
+}
+
+/**
+ * Who is in a chat. Managers only (Partial access or higher, or an admin):
+ * crew members can talk in a chat without being shown its whole roster.
+ */
+export async function listParticipants(userId: string, conversationId: string): Promise<ChatMember[]> {
   const user = await requireUser(userId);
   await requireConversation(conversationId, user);
-  const rows = await database.all<{ id: string; full_name: string; email: string; company: string | null }>(
-    `SELECT u.id, u.full_name, u.email, co.name AS company FROM conversation_participants cp
-       JOIN users u ON u.id = cp.user_id LEFT JOIN companies co ON co.id = u.company_id
-      WHERE cp.conversation_id = ? ORDER BY u.full_name`,
+  const level = user.companyId ? (await findUserRole(user.id, user.companyId))?.permissionLevel ?? null : null;
+  if (!hasPartialOrHigher({ isAdmin: user.isAdmin, permissionLevel: level })) {
+    throw new ForbiddenError("Only managers can see who is in this chat.");
+  }
+  const rows = await database.all<{ id: string; full_name: string; email: string; company: string | null; level: string | null }>(
+    `SELECT u.id, u.full_name, u.email, co.name AS company, ur.permission_level AS level
+       FROM conversation_participants cp
+       JOIN users u ON u.id = cp.user_id
+       LEFT JOIN companies co ON co.id = u.company_id
+       LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.company_id = u.company_id
+      WHERE cp.conversation_id = ? ORDER BY co.name, u.full_name`,
     [conversationId],
   );
-  return rows.map((r) => ({ userId: r.id, fullName: r.full_name, email: r.email, companyName: r.company }));
+  return rows.map((r) => ({ userId: r.id, fullName: r.full_name, email: r.email, companyName: r.company, permissionLevel: r.level }));
 }
 
 /** GroupAddParticipantModal: any member can add one of their contacts to a group. */

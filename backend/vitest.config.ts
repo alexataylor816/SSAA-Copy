@@ -10,6 +10,9 @@ export default defineConfig({
     // share one database, so they must run one at a time.
     fileParallelism: !onMysql,
     env: {
+      // backend/.env may say DB_CLIENT=mysql for running the app; tests use
+      // SQLite unless asked otherwise (npm run test:mysql sets it explicitly).
+      DB_CLIENT: process.env.DB_CLIENT ?? "sqlite",
       DATABASE_PATH: ":memory:",
       // Force the devCode fallback path — tests shouldn't depend on a real
       // mail provider or network access, or send real mail to example.com.
