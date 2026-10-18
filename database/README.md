@@ -56,6 +56,15 @@ Password for every account: `Demo1234!` (dates are relative to when the dump was
 Two projects, a week of availability (with a two-stop day), confirmed / pending /
 declined schedule requests, tasks, a project chat, a DM and a group chat.
 
+## Live-demo data (your own database)
+
+`npm run db:seed-showcase -- --wipe` (from `backend/`) empties the database the app is
+configured for (MySQL with `DB_CLIENT=mysql`) and loads a small demo built through the API:
+GC **Terrapin Builders** (bnguye26@umd.edu), plumbing sub **Bao Plumbing** (baotn.it@gmail.com),
+**Capitol Drywall** and **Volt Electric**, plus @example.com crews. Password `Test1234!` for all.
+Back up first (`mysqldump ... ssaa > database/exports/backup.sql`). Without `--wipe` it refuses
+to touch a database that already has users.
+
 ## Regenerate / export
 
 From `backend/`:

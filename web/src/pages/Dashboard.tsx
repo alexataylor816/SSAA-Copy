@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import CalendarPanel from "@/components/dashboard/CalendarPanel";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
+import MobileTabBar from "@/components/dashboard/MobileTabBar";
 import CreateTaskModal from "@/components/dashboard/CreateTaskModal";
 import EditTaskModal from "@/components/dashboard/EditTaskModal";
 import ScheduleDayDialog from "@/components/dashboard/ScheduleDayDialog";
@@ -482,6 +483,14 @@ const handleReorderTasks = useCallback(
     setSearchParams({}, { replace: true });
   }, [dayParam, company, setSearchParams]);
 
+  // A joined-project link lands on /dashboard?project=<id>: show that project.
+  const projectParam = searchParams.get("project");
+  useEffect(() => {
+    if (!projectParam || !projects.some((p) => p.id === projectParam)) return;
+    setSelectedProjectId(projectParam);
+    setSearchParams({}, { replace: true });
+  }, [projectParam, projects, setSearchParams]);
+
   const dayStatuses = useMemo(() => {
     const byDate = new Map<string, { confirmed: number; pending: number; rejected: number; total: number }>();
     for (const entry of scheduleRequests) {
@@ -509,7 +518,7 @@ const handleReorderTasks = useCallback(
   }, [scheduleRequests]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <DashboardHeader pendingJoinCount={pendingRequests.length} />
 
       <main className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
@@ -562,10 +571,13 @@ const handleReorderTasks = useCallback(
           </div>
         ) : (
           <>
-            {/* Lovable's layout: Tasks | Calendar | Projects, side by side from lg up.
-                The calendar is flex-1 rather than the original's fixed 1100px so
-                it fills the space instead of forcing sideways scrolling. */}
-            <div className="flex min-h-0 w-full flex-col gap-4 lg:h-full lg:mx-auto lg:max-w-[1600px] lg:flex-row lg:gap-6">
+            {/* Phones: calendar first, then projects/requests, then tasks.
+                1024-1399px: calendar beside the projects column, tasks under the calendar.
+                1400px up: Lovable's Tasks | Calendar | Projects, each column scrolling on its own.
+                (The panels copied from Lovable switch to their column widths at 1400px, so the
+                three-column row must not start any earlier or the calendar gets squeezed.) */}
+            <div className="flex w-full flex-col gap-4 lg:mx-auto lg:grid lg:max-w-[1600px] lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start lg:gap-6 min-[1400px]:h-full min-[1400px]:min-h-0 min-[1400px]:grid-cols-[18rem_minmax(0,1fr)_16rem] min-[1400px]:grid-rows-[minmax(0,1fr)] min-[1400px]:items-stretch">
+              <div className="order-3 min-w-0 lg:order-none lg:col-start-1 lg:row-start-2 min-[1400px]:row-start-1 min-[1400px]:h-full min-[1400px]:min-h-0">
               <LeftPanel
                 viewMode={viewMode}
                 tasks={calendarTasks}
@@ -581,7 +593,9 @@ const handleReorderTasks = useCallback(
                 selectedProject={selectedProjectId ?? "master"}
                 projects={rightPanelProjects}
               />
+              </div>
 
+              <div className="order-1 flex min-w-0 flex-col lg:order-none lg:col-start-1 lg:row-start-1 min-[1400px]:col-start-2 min-[1400px]:h-full min-[1400px]:min-h-0">
               <CalendarPanel
                 currentDate={currentDate}
                 setCurrentDate={setCurrentDate}
@@ -598,10 +612,11 @@ const handleReorderTasks = useCallback(
                 dayStatuses={dayStatuses}
                 viewMode={viewMode}
               />
+              </div>
 
               {/* Right column: Lovable's Projects panel, then compact cards for what
                   Lovable keeps elsewhere (new project, join requests, upcoming requests). */}
-              <div className="order-1 flex w-full flex-col gap-4 lg:order-none lg:h-full lg:w-64 lg:flex-shrink-0 lg:overflow-y-auto lg:pb-1">
+              <div className="order-2 flex w-full min-w-0 flex-col gap-4 lg:order-none lg:col-start-2 lg:row-span-2 lg:row-start-1 min-[1400px]:col-start-3 min-[1400px]:row-span-1 min-[1400px]:h-full min-[1400px]:min-h-0 min-[1400px]:overflow-y-auto min-[1400px]:pb-1">
                 <RightPanel
                   viewMode={viewMode}
                   projects={rightPanelProjects}
@@ -661,16 +676,22 @@ const handleReorderTasks = useCallback(
                         <CardTitle className="text-lg">Join Requests</CardTitle>
                       </CardHeader>
                       <CardContent>
+                        <p className="mb-2 text-xs text-muted-foreground">
+                          {pendingRequests.length === 1 ? "This person wants" : "These people want"} to join your
+                          company. Approving gives them access at the lowest level; you can raise it under All Team
+                          Members.
+                        </p>
                         <ul className="divide-y">
                           {pendingRequests.map((request) => (
-                            <li key={request.id} className="flex items-center justify-between gap-2 py-2.5">
+                            <li key={request.id} className="space-y-2 py-3">
+                              {/* Name and email get the full width; the narrow column used to cut both off. */}
                               <div className="min-w-0">
-                                <p className="truncate text-sm font-medium">
-                                  {request.userName ?? request.userEmail}
-                                </p>
-                                <p className="truncate text-xs text-muted-foreground">{request.userEmail}</p>
+                                <p className="break-words text-sm font-medium">{request.userName ?? request.userEmail}</p>
+                                {request.userName && (
+                                  <p className="break-all text-xs text-muted-foreground">{request.userEmail}</p>
+                                )}
                               </div>
-                              <div className="flex shrink-0 gap-1.5">
+                              <div className="grid grid-cols-2 gap-2">
                                 <Button size="sm" disabled={busy} onClick={() => void respondToJoinRequest(request.id, true)}>
                                   Approve
                                 </Button>
@@ -776,6 +797,7 @@ const handleReorderTasks = useCallback(
           </>
         )}
       </main>
+      <MobileTabBar pendingJoinCount={pendingRequests.length} />
     </div>
   );
 }

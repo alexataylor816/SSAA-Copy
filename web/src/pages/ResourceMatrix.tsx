@@ -40,6 +40,8 @@ import {
 import { Toaster } from "@/components/ui/toaster";
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
+import MobileTabBar from "@/components/dashboard/MobileTabBar";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface Employee {
   id: string;
@@ -130,12 +132,21 @@ function DraggableChip({ employee, disabled }: { employee: Employee; disabled?: 
   );
 }
 
-function ConnectedDayCell({ entries, bookings }: { entries: Availability[]; bookings: Booking[] }) {
+function ConnectedDayCell({
+  entries,
+  bookings,
+  compact = false,
+}: {
+  entries: Availability[];
+  bookings: Booking[];
+  compact?: boolean;
+}) {
+  const height = compact ? "min-h-10" : "min-h-24";
   if (entries.length === 0 && bookings.length === 0) {
-    return <div className="min-h-24 rounded-md border bg-muted/30 p-1.5" />;
+    return <div className={`${height} rounded-md border bg-muted/30 p-1.5`} />;
   }
   return (
-    <div className="min-h-24 space-y-1 rounded-md border bg-muted/30 p-1.5">
+    <div className={`${height} space-y-1 rounded-md border bg-muted/30 p-1.5`}>
       {entries.map((entry) => (
         <div
           key={entry.id}
@@ -173,6 +184,7 @@ function DayCell({
   onAdd,
   canAdd,
   isToday,
+  compact = false,
 }: {
   date: string;
   entries: Availability[];
@@ -182,13 +194,14 @@ function DayCell({
   onAdd: () => void;
   canAdd: boolean;
   isToday: boolean;
+  compact?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day:${date}` });
 
   return (
     <div
       ref={setNodeRef}
-      className={`group/cell min-h-24 space-y-1 rounded-md border p-1.5 transition-colors ${
+      className={`group/cell ${compact ? "min-h-10" : "min-h-24"} space-y-1 rounded-md border p-1.5 transition-colors ${
         isOver ? "border-primary bg-primary/5" : isToday ? "border-primary/50 bg-primary/[0.03]" : "bg-card"
       }`}
     >
@@ -210,7 +223,7 @@ function DayCell({
             <button
               type="button"
               onClick={() => onDelete(entry.id)}
-              className="text-yellow-800 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+              className="text-yellow-800 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 max-md:opacity-100"
               aria-label="Remove availability"
             >
               <Trash2 className="h-3 w-3" />
@@ -232,7 +245,7 @@ function DayCell({
         <button
           type="button"
           onClick={onAdd}
-          className="flex w-full items-center justify-center rounded px-2 py-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/cell:opacity-100"
+          className="flex w-full items-center justify-center rounded px-2 py-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/cell:opacity-100 max-md:opacity-100"
           aria-label={`Add availability on ${date}`}
         >
           <Plus className="h-3 w-3" />
@@ -280,6 +293,12 @@ export default function ResourceMatrix() {
   }, [weekStart]);
 
   const todayIso = useMemo(() => iso(new Date()), []);
+
+  // Phones show one day at a time instead of a seven-column grid that has to be
+  // swiped sideways. Defaults to today when this week is in view.
+  const isPhone = useIsMobile();
+  const [phoneDay, setPhoneDay] = useState<string | null>(null);
+  const shownDay = days.find((day) => day.iso === phoneDay) ?? days.find((day) => day.iso === todayIso) ?? days[0];
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -612,7 +631,9 @@ export default function ResourceMatrix() {
 
       <main className="mx-auto w-full max-w-7xl flex-1 p-4">
         <p className="mb-3 text-sm text-muted-foreground">
-          {canEditOthers
+          {isPhone && myEmployeeId
+            ? "Pick a day, then tap + to add hours."
+            : canEditOthers
             ? "Drag any name onto a day to publish that person's hours."
             : myEmployeeId
               ? "Drag your own name onto a day to add your availability."
@@ -629,7 +650,7 @@ export default function ResourceMatrix() {
           </span>
         </div>
 
-        {canEditOthers && (
+        {canEditOthers && !isPhone && (
           <form onSubmit={handleQuickAdd} className="mb-3 flex max-w-md items-end gap-2">
             <div className="flex-1 space-y-1">
               <Label htmlFor="quickAddName">Add to roster</Label>
@@ -656,6 +677,66 @@ export default function ResourceMatrix() {
           onDragEnd={(event) => void handleDragEnd(event)}
           onDragCancel={() => setActiveEmployee(null)}
         >
+          {isPhone ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-7 gap-1" role="tablist" aria-label="Day of the week">
+                {days.map((day) => {
+                  const active = day.iso === shownDay.iso;
+                  return (
+                    <button
+                      key={day.iso}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setPhoneDay(day.iso)}
+                      className={`flex flex-col items-center rounded-md border py-1.5 text-xs transition-colors ${
+                        active
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : day.iso === todayIso
+                            ? "border-primary/50 bg-card text-primary"
+                            : "bg-card text-muted-foreground"
+                      }`}
+                    >
+                      <span>{day.date.toLocaleDateString(undefined, { weekday: "short" })}</span>
+                      <span className="text-sm font-semibold">{day.date.getDate()}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {employees.map((employee) => (
+                <div key={employee.id} className="flex items-start gap-2 rounded-md border bg-card p-2">
+                  <div className="w-28 shrink-0 pt-1">
+                    <EmployeeLabel employee={employee} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                  <DayCell
+                    compact
+                    date={shownDay.iso}
+                    entries={entriesFor(employee.id, shownDay.iso)}
+                    bookings={bookingsFor(employee.id, shownDay.iso)}
+                    canDelete={canEdit(employee.id)}
+                    onDelete={deleteEntry}
+                    canAdd={canEdit(employee.id)}
+                    isToday={shownDay.iso === todayIso}
+                    onAdd={() => {
+                      setAddStart("08:00");
+                      setAddEnd("16:00");
+                      setAddTarget({ employee, date: shownDay.iso });
+                    }}
+                  />
+                  </div>
+                </div>
+              ))}
+              {employees.length === 0 && (
+                <div className="p-6 text-center">
+                  <p className="text-sm text-muted-foreground">No employees yet.</p>
+                  <Button variant="outline" size="sm" className="mt-3" asChild>
+                    <Link to="/settings/company">Add your crew in company settings</Link>
+                  </Button>
+                </div>
+              )}
+            </div>
+          ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[48rem] table-fixed border-separate border-spacing-1">
               <thead>
@@ -714,6 +795,7 @@ export default function ResourceMatrix() {
               </tbody>
             </table>
           </div>
+          )}
 
           <DragOverlay>
             {activeEmployee ? (
@@ -736,7 +818,28 @@ export default function ResourceMatrix() {
               </div>
               {connectedCrews.map((crew) => (
                 <div key={crew.companyId} className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">{crew.companyName}</p>
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {crew.companyName}
+                    {isPhone && ` · ${shownDay.date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}`}
+                  </p>
+                  {isPhone ? (
+                    <div className="space-y-2">
+                      {crew.employees.map((employee) => (
+                        <div key={employee.id} className="flex items-start gap-2 rounded-md border bg-card p-2">
+                          <div className="w-28 shrink-0 pt-1">
+                            <EmployeeLabel employee={employee} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                          <ConnectedDayCell
+                            entries={connectedEntriesFor(employee.id, shownDay.iso)}
+                            bookings={bookingsFor(employee.id, shownDay.iso)}
+                            compact
+                          />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
                   <div className="overflow-x-auto">
                     {/* Same fixed columns and day headings as the main grid, so the days line up. */}
                     <table className="w-full min-w-[48rem] table-fixed border-separate border-spacing-1">
@@ -777,6 +880,7 @@ export default function ResourceMatrix() {
                       </tbody>
                     </table>
                   </div>
+                  )}
                 </div>
               ))}
             </CardContent>
@@ -835,6 +939,7 @@ export default function ResourceMatrix() {
           Signed in as {user?.email} <Badge variant="outline">week view</Badge>
         </p>
       </main>
+      <MobileTabBar />
       <Toaster />
     </div>
   );

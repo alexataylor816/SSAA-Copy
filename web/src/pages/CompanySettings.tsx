@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, authApi } from "@/lib/api";
-import { getToken, supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,8 +29,11 @@ import {
 import { Toaster } from "@/components/ui/toaster";
 import TeamProfilesDialog from "@/components/TeamProfilesDialog";
 import ConnectedCompaniesCard from "@/components/ConnectedCompaniesCard";
+import MobileTabBar from "@/components/dashboard/MobileTabBar";
 import TimesheetDownloadCard from "@/components/TimesheetDownloadCard";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, RefreshCw, UserPlus } from "lucide-react";
+import InviteShare from "@/components/InviteShare";
+import { companyJoinUrl } from "@/lib/share";
 
 const PERMISSION_LEVELS = ["basic", "standard", "level_1", "partial", "full", "account_holder"] as const;
 
@@ -71,8 +73,7 @@ interface Employee {
 }
 
 export default function CompanySettings() {
-  const { user, isAccountHolder, permissionLevel, isMOA, refreshProfile } = useAuth();
-  const { language } = useLanguage();
+  const { user, isAccountHolder, permissionLevel, isMOA } = useAuth();
   const { toast } = useToast();
   const companyId = user?.companyId ?? null;
 
@@ -81,9 +82,6 @@ export default function CompanySettings() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [newEmployeeName, setNewEmployeeName] = useState("");
   const [newEmployeeEmail, setNewEmployeeEmail] = useState("");
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -93,10 +91,6 @@ export default function CompanySettings() {
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
   const canManageProjects = isMOA || permissionLevel === "full" || permissionLevel === "account_holder";
-  const [profileName, setProfileName] = useState("");
-  const [profilePhone, setProfilePhone] = useState("");
-  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
-  const [profileLoaded, setProfileLoaded] = useState(false);
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -137,78 +131,6 @@ export default function CompanySettings() {
     void load();
   }, [load]);
 
-  // Seed the profile form from the session once (and when switching accounts).
-  useEffect(() => {
-    if (user && !profileLoaded) {
-      setProfileName(user.fullName ?? "");
-      setProfilePhone(user.phone ?? "");
-      setProfilePhoto(user.profilePictureUrl ?? null);
-      setProfileLoaded(true);
-    }
-    if (!user && profileLoaded) setProfileLoaded(false);
-  }, [user, profileLoaded]);
-
-  async function saveProfile(event: React.FormEvent) {
-    event.preventDefault();
-    if (!profileName.trim()) {
-      toast({ title: "Name must not be empty.", variant: "destructive" });
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await authApi.updateProfile({
-        fullName: profileName.trim(),
-        phone: profilePhone.trim() || null,
-        language,
-        profilePictureUrl: profilePhoto,
-      });
-      setProfileName(res.user.fullName ?? "");
-      setProfilePhone(res.user.phone ?? "");
-      setProfilePhoto(res.user.profilePictureUrl ?? null);
-      await refreshProfile();
-      toast({ title: "Profile updated" });
-    } catch (err) {
-      toast({
-        title: "Could not update profile",
-        description: err instanceof Error ? err.message : undefined,
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function uploadAvatar(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setBusy(true);
-    try {
-      const form = new FormData();
-      form.append("photo", file);
-      form.append("folder", "avatars");
-      const token = getToken();
-      const res = await fetch("/api/uploads", {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: form,
-      });
-      const payload = (await res.json()) as { url?: string; error?: string };
-      if (!res.ok) throw new Error(payload.error ?? `Upload failed with ${res.status}.`);
-      if (!payload.url) throw new Error("Upload did not return a URL.");
-      setProfilePhoto(payload.url);
-      toast({ title: "Photo uploaded — save to apply it" });
-    } catch (err) {
-      toast({
-        title: "Could not upload that photo",
-        description: err instanceof Error ? err.message : undefined,
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function updateMember(userId: string, permissionLevel: string) {
     setBusy(true);
     try {
@@ -246,34 +168,6 @@ export default function CompanySettings() {
     } catch (err) {
       toast({
         title: "Could not add that employee",
-        description: err instanceof Error ? err.message : undefined,
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function changePassword(event: React.FormEvent) {
-    event.preventDefault();
-    if (newPassword.length < 6) {
-      toast({ title: "New password must be at least 6 characters.", variant: "destructive" });
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      toast({ title: "New passwords do not match.", variant: "destructive" });
-      return;
-    }
-    setBusy(true);
-    try {
-      await authApi.changePassword({ currentPassword, newPassword });
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      toast({ title: "Password changed" });
-    } catch (err) {
-      toast({
-        title: "Could not change that password",
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
@@ -366,7 +260,7 @@ export default function CompanySettings() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background">
       <header className="border-b">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 p-4">
           <div className="flex items-center gap-3">
@@ -385,7 +279,7 @@ export default function CompanySettings() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-6 p-4">
+      <main className="mx-auto w-full max-w-5xl space-y-6 p-4">
         {!companyId ? (
           <Card>
             <CardContent className="p-6 text-sm text-muted-foreground">
@@ -445,7 +339,7 @@ export default function CompanySettings() {
                             )}
                           </div>
                           <div className="flex flex-wrap items-end gap-2">
-                            <div className="min-w-40 flex-1 space-y-1">
+                            <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-1">
                               <Label htmlFor={`alias-name-${project.id}`}>Display name (optional)</Label>
                               <Input
                                 id={`alias-name-${project.id}`}
@@ -459,7 +353,7 @@ export default function CompanySettings() {
                                 placeholder={project.name}
                               />
                             </div>
-                            <div className="min-w-40 flex-1 space-y-1">
+                            <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-1">
                               <Label htmlFor={`alias-address-${project.id}`}>Display address (optional)</Label>
                               <Input
                                 id={`alias-address-${project.id}`}
@@ -484,7 +378,7 @@ export default function CompanySettings() {
                 )}
 
                 <form onSubmit={joinByCode} className="flex flex-wrap items-end gap-2 border-t pt-4">
-                  <div className="min-w-40 flex-1 space-y-2">
+                  <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
                     <Label htmlFor="joinCode">Connect to a project with its code</Label>
                     <Input
                       id="joinCode"
@@ -501,6 +395,24 @@ export default function CompanySettings() {
             </Card>
 
             {companyId && <ConnectedCompaniesCard companyId={companyId} />}
+
+            {/* Same rule the server applies to approving join requests. */}
+            {companyId && (isAccountHolder || isMOA || (company?.companyType === "sub" && permissionLevel === "full")) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <UserPlus className="h-5 w-5 text-primary" />
+                    Invite your team
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <InviteShare
+                    url={companyJoinUrl(companyId)}
+                    caption={`Send new ${company?.companyType === "gc" ? "staff" : "crew members"} this link so they can ask to join ${company?.name ?? "your company"}. You approve each one and choose what they can do.`}
+                  />
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -577,7 +489,7 @@ export default function CompanySettings() {
 
                 {isAccountHolder && (
                   <form onSubmit={addEmployee} className="flex flex-wrap items-end gap-2 border-t pt-4">
-                    <div className="min-w-40 flex-1 space-y-2">
+                    <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
                       <Label htmlFor="employeeName">Name</Label>
                       <Input
                         id="employeeName"
@@ -586,7 +498,7 @@ export default function CompanySettings() {
                         required
                       />
                     </div>
-                    <div className="min-w-40 flex-1 space-y-2">
+                    <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
                       <Label htmlFor="employeeEmail">Email</Label>
                       <Input
                         id="employeeEmail"
@@ -610,115 +522,7 @@ export default function CompanySettings() {
           <TimesheetDownloadCard employees={employees.map((e) => ({ id: e.id, name: e.name, employeeNumber: e.employeeNumber }))} />
         )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Profile</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={saveProfile} className="flex flex-wrap items-end gap-2">
-              {profilePhoto ? (
-                <img
-                  src={profilePhoto}
-                  alt="Profile"
-                  className="h-16 w-16 rounded-full border object-cover"
-                />
-              ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-full border bg-muted text-lg font-medium text-muted-foreground">
-                  {(profileName || user?.email || "?").slice(0, 1).toUpperCase()}
-                </div>
-              )}
-              <div className="min-w-40 flex-1 space-y-2">
-                <Label htmlFor="profileName">Full name</Label>
-                <Input
-                  id="profileName"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="min-w-40 flex-1 space-y-2">
-                <Label htmlFor="profilePhone">Phone (optional)</Label>
-                <Input
-                  id="profilePhone"
-                  type="tel"
-                  value={profilePhone}
-                  onChange={(e) => setProfilePhone(e.target.value)}
-                  placeholder="301-555-0100"
-                />
-              </div>
-              <div className="min-w-40 flex-1 space-y-2">
-                <Label htmlFor="profilePhoto">Photo</Label>
-                <div className="flex items-center gap-2">
-                  <Input id="profilePhoto" type="file" accept="image/*" onChange={uploadAvatar} disabled={busy} />
-                  {profilePhoto && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => setProfilePhoto(null)}
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </div>
-              </div>
-              <Button type="submit" disabled={busy}>
-                Save profile
-              </Button>
-            </form>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Signed in as {user?.email}. Name, phone, and photo save to your account.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Password</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={changePassword} className="flex flex-wrap items-end gap-2">
-              <div className="min-w-40 flex-1 space-y-2">
-                <Label htmlFor="currentPassword">Current password</Label>
-                <Input
-                  id="currentPassword"
-                  type="password"
-                  autoComplete="current-password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="min-w-40 flex-1 space-y-2">
-                <Label htmlFor="newPassword">New password</Label>
-                <Input
-                  id="newPassword"
-                  type="password"
-                  autoComplete="new-password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="min-w-40 flex-1 space-y-2">
-                <Label htmlFor="confirmPassword">Confirm new password</Label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <Button type="submit" disabled={busy}>
-                Change password
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
+        {/* Your own name, phone, photo and password live in Manage My Profile, not on the company page. */}
       </main>
       <AlertDialog open={deleteTarget !== null} onOpenChange={(isOpen) => !isOpen && setDeleteTarget(null)}>
         <AlertDialogContent>
@@ -752,6 +556,8 @@ export default function CompanySettings() {
           onChanged={() => void load()}
         />
       )}
+      <div className="flex-1" />
+      <MobileTabBar />
       <Toaster />
     </div>
   );

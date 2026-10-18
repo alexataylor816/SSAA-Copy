@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format, formatDistanceToNow } from "date-fns";
-import { ArrowLeft, ChevronDown, Plus, Search, Send, UserPlus } from "lucide-react";
+import { ArrowLeft, ChevronDown, Plus, Search, Send, UserPlus, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   messagingApi,
@@ -12,6 +12,7 @@ import {
   type ConversationSummary,
 } from "@/hooks/useMessaging";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
+import MobileTabBar from "@/components/dashboard/MobileTabBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -86,16 +87,92 @@ function ConversationRow({
   );
 }
 
+const LEVEL_LABEL: Record<string, string> = {
+  account_holder: "Owner",
+  full: "Full access",
+  partial: "Manager",
+  level_1: "Foreman",
+  basic: "Crew",
+};
+
+/** Who is in a group or project chat, grouped by company. Managers only (server-enforced). */
+function MembersDialog({ conversationId, onClose }: { conversationId: string | null; onClose: () => void }) {
+  const [members, setMembers] = useState<Contact[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    let cancelled = false;
+    setMembers(null);
+    setError(null);
+    messagingApi
+      .participants(conversationId)
+      .then((res) => !cancelled && setMembers(res.participants))
+      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Could not load the members."));
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
+
+  const byCompany = new Map<string, Contact[]>();
+  for (const m of members ?? []) {
+    const key = m.companyName ?? "No company";
+    byCompany.set(key, [...(byCompany.get(key) ?? []), m]);
+  }
+
+  return (
+    <Dialog open={conversationId !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Who&apos;s in this chat{members ? ` (${members.length})` : ""}</DialogTitle>
+          <DialogDescription>Only managers can see this list.</DialogDescription>
+        </DialogHeader>
+        {error ? (
+          <p className="text-sm text-destructive">{error}</p>
+        ) : !members ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : (
+          <div className="max-h-[60vh] space-y-4 overflow-y-auto">
+            {[...byCompany.entries()].map(([companyName, people]) => (
+              <div key={companyName} className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{companyName}</p>
+                <ul className="divide-y rounded-md border">
+                  {people.map((p) => (
+                    <li key={p.userId} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{p.fullName || p.email}</p>
+                        <p className="truncate text-xs text-muted-foreground">{p.email}</p>
+                      </div>
+                      {p.permissionLevel && (
+                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                          {LEVEL_LABEL[p.permissionLevel] ?? p.permissionLevel}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function Thread({
   conv,
   messages,
   onSend,
   onAddPeople,
+  onShowMembers,
 }: {
   conv: ConversationSummary;
   messages: ChatMessage[];
   onSend: (body: string) => Promise<void>;
   onAddPeople?: () => void;
+  /** Set only for managers; group and project chats only. */
+  onShowMembers?: () => void;
 }) {
   const { user } = useAuth();
   const [body, setBody] = useState("");
@@ -131,11 +208,18 @@ function Thread({
           <h2 className="truncate font-semibold">{label}</h2>
           {conv.type !== "project" && conv.subtitle && <p className="truncate text-xs text-muted-foreground">{conv.subtitle}</p>}
         </div>
-        {conv.type === "group" && onAddPeople && (
-          <Button size="sm" variant="ghost" onClick={onAddPeople}>
-            <UserPlus className="mr-1 h-4 w-4" /> Add
-          </Button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {conv.type !== "dm" && onShowMembers && (
+            <Button size="sm" variant="ghost" onClick={onShowMembers}>
+              <Users className="mr-1 h-4 w-4" /> Members
+            </Button>
+          )}
+          {conv.type === "group" && onAddPeople && (
+            <Button size="sm" variant="ghost" onClick={onAddPeople}>
+              <UserPlus className="mr-1 h-4 w-4" /> Add
+            </Button>
+          )}
+        </div>
       </div>
 
       <ScrollArea className="flex-1">
@@ -317,11 +401,14 @@ function PeoplePicker({
 
 export default function Messages() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPartialOrHigher, isMOA } = useAuth();
+  // Managers see who is in a chat; the server enforces the same rule.
+  const canSeeMembers = hasPartialOrHigher || isMOA;
   const [tab, setTab] = useState<Tab>("projects");
   const [search, setSearch] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [membersOf, setMembersOf] = useState<string | null>(null);
   const [picker, setPicker] = useState<PickerMode | null>(null);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -404,7 +491,8 @@ export default function Messages() {
 
   const openAddPeople = useCallback(async () => {
     if (!activeId) return;
-    const res = await messagingApi.participants(activeId);
+    // Crew can't read the member list; the server still refuses duplicates.
+    const res = await messagingApi.participants(activeId).catch(() => ({ participants: [] as Contact[] }));
     setMemberIds(res.participants.map((p) => p.userId));
     setPicker("add");
   }, [activeId]);
@@ -450,12 +538,12 @@ export default function Messages() {
   const showRail = !activeId;
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <DashboardHeader />
       <div className="flex min-h-0 flex-1">
         <aside className={`${showRail ? "flex" : "hidden"} w-full flex-col border-r bg-card md:flex md:w-80`}>
           <div className="flex items-center gap-2 border-b p-3">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} className="h-8 w-8" aria-label="Back to dashboard">
+            <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} className="hidden h-8 w-8 lg:inline-flex" aria-label="Back to dashboard">
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <DropdownMenu>
@@ -577,7 +665,13 @@ export default function Messages() {
                 </Button>
                 <span className="truncate text-sm font-medium">Back to conversations</span>
               </div>
-              <Thread conv={active} messages={messages} onSend={handleSend} onAddPeople={() => void openAddPeople()} />
+              <Thread
+                conv={active}
+                messages={messages}
+                onSend={handleSend}
+                onAddPeople={() => void openAddPeople()}
+                onShowMembers={canSeeMembers ? () => setMembersOf(active.id) : undefined}
+              />
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-muted-foreground">
@@ -586,6 +680,10 @@ export default function Messages() {
           )}
         </main>
       </div>
+      {/* Hidden while a chat is open on a phone, like other messengers, so the reply box sits at the bottom. */}
+      {showRail && <MobileTabBar />}
+
+      <MembersDialog conversationId={membersOf} onClose={() => setMembersOf(null)} />
 
       <PeoplePicker
         mode={picker}

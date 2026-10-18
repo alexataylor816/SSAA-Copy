@@ -647,7 +647,7 @@ const CalendarPanel = ({
                 onMouseEnter={isMobile ? undefined : () => handleMouseEnter(day)}
                 onMouseUp={isMobile ? undefined : () => handleMouseUp(day)}
                 onTouchStart={isMobile ? (e) => handleTouchStart(day, e) : undefined}
-                style={isMobile ? { minHeight: `${Math.max(mobileMinHeight ?? 0, 96)}px` } : undefined}
+                style={isMobile ? { minHeight: `${Math.max(mobileMinHeight ?? 0, 56)}px` } : undefined}
                 className={`
                   ${isMobile
                     ? 'p-1'

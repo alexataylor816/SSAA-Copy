@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+
+/** False when no client ID is set; pages then leave the Google option out entirely. */
+export const googleSignInEnabled = Boolean(CLIENT_ID);
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 
 interface GoogleId {

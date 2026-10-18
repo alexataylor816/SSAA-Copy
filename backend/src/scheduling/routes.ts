@@ -7,6 +7,7 @@ import { notifyScheduleRequestCreated, notifyScheduleRequestUpdated } from "../n
 import { findUserById } from "../models/users.js";
 import {
   connectProjectByCode,
+  previewProjectByCode,
   createProject,
   createScheduleRequest,
   deleteAvailability,
@@ -57,6 +58,19 @@ schedulingRouter.post(
     const project = await createProject(req.userId!, { name, address });
     emit(EVENT.projectConnectionChanged, { projectId: project.id, action: "created" }, ROOM.project_connections, project.id);
     res.status(201).json(project);
+  }),
+);
+
+// Read-only: lets the join page show what you're about to join first.
+schedulingRouter.get(
+  "/projects/preview",
+  route(async (req, res) => {
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    if (!code.trim()) {
+      res.status(400).json({ error: "code is required." });
+      return;
+    }
+    res.json(await previewProjectByCode(req.userId!, code));
   }),
 );
 

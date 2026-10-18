@@ -261,3 +261,30 @@ describe("messaging: direct messages", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("messaging: who is in a chat", () => {
+  it("shows managers the members with their roles, and keeps it from crew", async () => {
+    const { gc, sub, subCompanyId, projectId } = await connectedPair();
+    // A basic crew member on the sub's side.
+    const crew = await signUp("crew", "Cal Crew");
+    await request(server).post(`/companies/${subCompanyId}/join-requests`).set(authed(crew.token));
+    const pending = await request(server).get(`/companies/${subCompanyId}/join-requests`).set(authed(sub.token));
+    await request(server)
+      .post(`/companies/${subCompanyId}/join-requests/${pending.body.requests[0].id}/approve`)
+      .set(authed(sub.token))
+      .send({ permissionLevel: "basic" });
+
+    const channel = await projectConversation(gc.token, projectId);
+    const forGc = await request(server).get(`/conversations/${channel!.id}/participants`).set(authed(gc.token));
+    expect(forGc.status).toBe(200);
+    const names = forGc.body.participants.map((p: { fullName: string }) => p.fullName);
+    expect(names).toEqual(expect.arrayContaining(["Gina GC", "Sam Sub", "Cal Crew"]));
+    expect(forGc.body.participants.find((p: { fullName: string }) => p.fullName === "Cal Crew").permissionLevel).toBe("basic");
+
+    const forSubOwner = await request(server).get(`/conversations/${channel!.id}/participants`).set(authed(sub.token));
+    expect(forSubOwner.status).toBe(200);
+
+    const forCrew = await request(server).get(`/conversations/${channel!.id}/participants`).set(authed(crew.token));
+    expect(forCrew.status).toBe(403);
+  });
+});

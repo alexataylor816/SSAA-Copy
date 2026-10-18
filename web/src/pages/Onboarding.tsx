@@ -22,10 +22,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AuthLayout from "@/components/AuthLayout";
+import { peekNext } from "@/lib/share";
 import { TRADES } from "@/lib/trades";
 import { Building2, Users, Loader2, ArrowLeft, CheckCircle } from "lucide-react";
 
 type CompanyType = "gc" | "sub";
+
+const SEARCH_MIN = 3;
 
 interface Company {
   id: string;
@@ -49,7 +52,10 @@ export default function Onboarding() {
   const { user, refreshProfile } = useAuth();
   const navigate = useNavigate();
 
-  const [companyType, setCompanyType] = useState<CompanyType | null>(null);
+  // Came from a project invite link: that's a subcontractor setting up.
+  const [companyType, setCompanyType] = useState<CompanyType | null>(() =>
+    peekNext()?.startsWith("/join/project/") ? "sub" : null,
+  );
   const [mode, setMode] = useState<"create" | "join" | null>(inviteCompanyId ? "join" : null);
   const [companyName, setCompanyName] = useState("");
   const [companyAddress, setCompanyAddress] = useState("");
@@ -58,6 +64,8 @@ export default function Onboarding() {
   const [showOtherTradeDialog, setShowOtherTradeDialog] = useState(false);
   const [otherTradeDraft, setOtherTradeDraft] = useState("");
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [invitedCompany, setInvitedCompany] = useState<Company | null>(null);
+  const [searching, setSearching] = useState(false);
   const [search, setSearch] = useState("");
   const [joinTarget, setJoinTarget] = useState<string | null>(inviteCompanyId);
   const [joinSent, setJoinSent] = useState(false);
@@ -66,28 +74,55 @@ export default function Onboarding() {
 
   // Already set up (or signed in with a company attached): nothing to do here.
   useEffect(() => {
-    if (user?.companyId) navigate("/dashboard", { replace: true });
+    if (user?.companyId) navigate(peekNext() ?? "/dashboard", { replace: true });
   }, [user, navigate]);
 
+  // Joining is by name search only: the server answers a few matches for 3+
+  // typed letters and never lists every company.
+  const query = search.trim();
+  const searchReady = query.length >= SEARCH_MIN;
   useEffect(() => {
-    if (mode !== "join" || companies.length > 0) return;
+    if (mode !== "join" || !searchReady) {
+      setCompanies([]);
+      return;
+    }
     let cancelled = false;
-    setBusy(true);
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      api
+        .get<{ companies: Company[] }>(`/companies?q=${encodeURIComponent(query)}`)
+        .then((res) => {
+          if (!cancelled) setCompanies(res.companies);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : "Could not search companies.");
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [mode, query, searchReady]);
+
+  // An invite link names the company by id; look up just that one.
+  useEffect(() => {
+    if (!inviteCompanyId) return;
+    let cancelled = false;
     api
-      .get<{ companies: Company[] }>("/companies")
+      .get<{ company: Company }>(`/companies/${encodeURIComponent(inviteCompanyId)}/summary`)
       .then((res) => {
-        if (!cancelled) setCompanies(res.companies);
+        if (!cancelled) setInvitedCompany(res.company);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load companies.");
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not find the company that invited you.");
       });
     return () => {
       cancelled = true;
     };
-  }, [mode, companies.length]);
+  }, [inviteCompanyId]);
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
@@ -105,7 +140,7 @@ export default function Onboarding() {
         trade: trade || undefined,
       });
       await refreshProfile();
-      navigate("/dashboard");
+      navigate(peekNext() ?? "/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create that company.");
     } finally {
@@ -127,8 +162,8 @@ export default function Onboarding() {
     }
   }
 
-  const filtered = companies.filter((c) => c.name.toLowerCase().includes(search.trim().toLowerCase()));
-  const joinCompany = companies.find((c) => c.id === joinTarget) ?? null;
+  const joinCompany =
+    companies.find((c) => c.id === joinTarget) ?? (invitedCompany?.id === joinTarget ? invitedCompany : null);
 
   return (
     <AuthLayout>
@@ -303,16 +338,24 @@ export default function Onboarding() {
                       id="companySearch"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Start typing a company name"
+                      placeholder="Type your company's name"
+                      autoComplete="off"
                     />
                   </div>
-                  {busy && companies.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Loading companies...</p>
-                  ) : filtered.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No companies match that search.</p>
+                  {!searchReady ? (
+                    <p className="text-sm text-muted-foreground">
+                      Type at least {SEARCH_MIN} letters of the company&apos;s name. The account holder approves every
+                      request, or can send you an invite link.
+                    </p>
+                  ) : searching && companies.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Searching...</p>
+                  ) : companies.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No company by that name. Check the spelling, or ask the account holder for an invite link.
+                    </p>
                   ) : (
                     <ul className="max-h-64 divide-y overflow-y-auto rounded-md border">
-                      {filtered.map((company) => (
+                      {companies.map((company) => (
                         <li key={company.id} className="flex items-center justify-between gap-2 p-3">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{company.name}</p>
