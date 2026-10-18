@@ -33,6 +33,8 @@ export interface Contact {
   fullName: string;
   email: string;
   companyName: string | null;
+  /** Only on a chat's member list (managers only). */
+  permissionLevel?: string | null;
 }
 
 // The header badge and the Messages page each hold their own list; a read in

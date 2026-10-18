@@ -235,7 +235,7 @@ export default function Admin() {
                   }}
                   className="flex flex-wrap items-end gap-2 border-t pt-4"
                 >
-                  <div className="min-w-40 flex-1 space-y-2">
+                  <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
                     <Label htmlFor="opEmail">Grant operator access by email</Label>
                     <Input
                       id="opEmail"

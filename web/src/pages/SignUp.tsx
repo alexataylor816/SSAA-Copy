@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import AuthLayout from "@/components/AuthLayout";
-import GoogleSignInButton from "@/components/GoogleSignInButton";
+import { peekNext } from "@/lib/share";
+import GoogleSignInButton, { googleSignInEnabled } from "@/components/GoogleSignInButton";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 export default function SignUp() {
@@ -42,7 +43,7 @@ export default function SignUp() {
         await api.post(`/companies/${inviteCompanyId}/join-requests`);
         navigate("/dashboard", { state: { pendingJoinRequest: true } });
       } else {
-        navigate("/onboarding");
+        navigate(peekNext() ?? "/onboarding");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create that account.");
@@ -64,7 +65,7 @@ export default function SignUp() {
         await api.post(`/companies/${inviteCompanyId}/join-requests`);
         navigate("/dashboard", { state: { pendingJoinRequest: true } });
       } else {
-        navigate("/onboarding");
+        navigate(peekNext() ?? "/onboarding");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not continue with Google.");
@@ -109,7 +110,6 @@ export default function SignUp() {
                   autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
                   required
                   className="pr-10"
                 />
@@ -135,18 +135,22 @@ export default function SignUp() {
               Create account
             </Button>
 
-            <div className="relative my-2">
-              <Separator />
-              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-3 text-xs text-muted-foreground">
-                or
-              </span>
-            </div>
+            {googleSignInEnabled && (
+              <>
+                <div className="relative my-2">
+                  <Separator />
+                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-3 text-xs text-muted-foreground">
+                    or
+                  </span>
+                </div>
 
-            <GoogleSignInButton
-              onCredential={(credential) => void handleGoogleCredential(credential)}
-              onError={(message) => setError(message)}
-              disabled={submitting}
-            />
+                <GoogleSignInButton
+                  onCredential={(credential) => void handleGoogleCredential(credential)}
+                  onError={(message) => setError(message)}
+                  disabled={submitting}
+                />
+              </>
+            )}
           </form>
 
           <div className="mt-6 text-center">

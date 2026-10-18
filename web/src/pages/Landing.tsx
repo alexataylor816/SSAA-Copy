@@ -12,19 +12,20 @@ const features = [
 
 export default function Landing() {
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row">
-      <div className="lg:w-1/2 bg-primary relative flex items-center justify-center p-8 lg:p-16">
+    <div className="min-h-dvh flex flex-col lg:flex-row">
+      {/* Phones get a slim banner (name + tagline) so the form fits on one screen. */}
+      <div className="lg:w-1/2 bg-primary relative flex items-center justify-center px-6 py-5 lg:p-16">
         <div className="absolute inset-0 bg-cover bg-center opacity-20" style={{ backgroundImage: `url(${heroImage})` }} />
         <div className="relative z-10 text-center lg:text-left max-w-xl">
-          <h1 className="text-4xl lg:text-6xl font-bold text-primary-foreground mb-4">SSAA</h1>
-          <p className="text-2xl lg:text-3xl font-medium text-primary-foreground/90 mb-6 whitespace-pre-line">
+          <h1 className="text-3xl lg:text-6xl font-bold text-primary-foreground mb-1 lg:mb-4">SSAA</h1>
+          <p className="text-base lg:text-3xl font-medium text-primary-foreground/90 lg:mb-6 lg:whitespace-pre-line">
             {"Schedule Someone,\nAnytime, Anywhere"}
           </p>
-          <p className="text-lg text-primary-foreground/80 mb-8">
+          <p className="hidden lg:block text-lg text-primary-foreground/80 mb-8">
             The complete construction scheduling platform for General Contractors and Subcontractors.
           </p>
 
-          <div className="flex flex-wrap gap-4 justify-center lg:justify-start">
+          <div className="hidden lg:flex flex-wrap gap-4 justify-start">
             {features.map(({ icon: Icon, label }) => (
               <div key={label} className="flex items-center gap-2 bg-primary-foreground/10 px-4 py-2 rounded-lg">
                 <Icon className="h-5 w-5 text-primary-foreground" />
@@ -35,7 +36,7 @@ export default function Landing() {
         </div>
       </div>
 
-      <div className="lg:w-1/2 flex items-center justify-center p-8 bg-background">
+      <div className="lg:w-1/2 flex flex-1 items-start justify-center px-4 py-5 sm:p-8 lg:items-center bg-background">
         <Card className="w-full max-w-md border-primary/20 shadow-lg">
           <CardHeader className="text-center pb-2">
             <CardTitle className="text-2xl font-bold text-foreground">Get started</CardTitle>

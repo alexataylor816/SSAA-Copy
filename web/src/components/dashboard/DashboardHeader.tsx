@@ -1,20 +1,12 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Calendar as CalendarIcon, Check, LogOut, MessageSquare, MoreVertical, Settings, ShieldCheck, User } from "lucide-react";
+import { LogOut, MessageSquare, Settings, ShieldCheck, User } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useConversations } from "@/hooks/useMessaging";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import ManageProfileDialog from "@/components/dashboard/ManageProfileDialog";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
 /**
  * The GC/sub branch of Lovable's DashboardHeader. Operator (MOA) tabs and
@@ -68,7 +60,7 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
   );
 
   return (
-    <header className="shrink-0 overflow-hidden bg-primary text-primary-foreground shadow-md">
+    <header className="shrink-0 overflow-hidden bg-primary pt-[env(safe-area-inset-top)] text-primary-foreground shadow-md">
       <div className="px-4 py-3 lg:px-6">
         <div className="flex items-center justify-between gap-3">
           <button type="button" onClick={() => navigate("/dashboard")} className="text-xl font-bold lg:text-2xl">
@@ -92,42 +84,7 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               </Button>
             )}
 
-            {/* Small screens: the view toggle and company settings move into this menu, as in Lovable. */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="relative text-primary-foreground hover:bg-primary-foreground/10 lg:hidden"
-                  aria-label="More"
-                >
-                  <MoreVertical className="h-5 w-5" />
-                  {showJoinDot && <NotificationDot />}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuLabel>Calendar view</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => navigate("/dashboard")}>
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  Monthly {path.startsWith("/dashboard") && <Check className="ml-auto h-4 w-4" />}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate("/matrix")}>
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  Weekly {path.startsWith("/matrix") && <Check className="ml-auto h-4 w-4" />}
-                </DropdownMenuItem>
-                {canManageCompany && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => navigate("/settings/company")}>
-                      <Settings className="mr-2 h-4 w-4" />
-                      {t("header.manageCompanyAccount")}
-                      {showJoinDot && <span className="ml-auto h-2 w-2 rounded-full bg-destructive" />}
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-
+            {/* Below lg only the bell stays up here; everything else is in MobileTabBar at the bottom. */}
             <NotificationBell />
 
             <Button
@@ -135,7 +92,7 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               variant="ghost"
               size="sm"
               onClick={() => navigate("/messages")}
-              className="relative text-primary-foreground hover:bg-primary-foreground/10"
+              className="relative hidden text-primary-foreground hover:bg-primary-foreground/10 lg:flex"
             >
               <MessageSquare className="h-4 w-4 lg:mr-2" />
               <span className="hidden lg:inline">{t("header.messages") || "Messages"}</span>
@@ -150,7 +107,7 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               variant="ghost"
               size="sm"
               onClick={() => setProfileOpen(true)}
-              className="text-primary-foreground hover:bg-primary-foreground/10"
+              className="hidden text-primary-foreground hover:bg-primary-foreground/10 lg:flex"
               aria-label={t("header.manageMyProfile")}
             >
               <User className="h-4 w-4 lg:mr-2" />
@@ -162,7 +119,7 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
                 variant="ghost"
                 size="sm"
                 onClick={() => navigate("/admin")}
-                className="text-primary-foreground hover:bg-primary-foreground/10"
+                className="hidden text-primary-foreground hover:bg-primary-foreground/10 lg:flex"
                 aria-label="Administration"
               >
                 <ShieldCheck className="h-4 w-4 lg:mr-2" />
@@ -175,7 +132,7 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               size="icon"
               onClick={() => void signOut()}
               aria-label="Sign out"
-              className="text-primary-foreground hover:bg-primary-foreground/10"
+              className="hidden text-primary-foreground hover:bg-primary-foreground/10 lg:flex"
             >
               <LogOut className="h-5 w-5" />
             </Button>

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/toaster";
 import MessageAlerts from "@/components/MessageAlerts";
+import { peekNext } from "@/lib/share";
 
 // Route-level code splitting: each page (and its heavy deps like the matrix
 // drag-and-drop kit) loads on demand instead of bloating the initial bundle.
@@ -20,6 +21,8 @@ const CompanySettings = lazy(() => import("@/pages/CompanySettings"));
 const Messages = lazy(() => import("@/pages/Messages"));
 const Admin = lazy(() => import("@/pages/Admin"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
+const JoinProject = lazy(() => import("@/pages/JoinProject"));
+const JoinCompany = lazy(() => import("@/pages/JoinCompany"));
 const PrivacyPolicy = lazy(() => import("@/pages/PrivacyPolicy"));
 const TermsOfService = lazy(() => import("@/pages/TermsOfService"));
 import { Loader2 } from "lucide-react";
@@ -36,7 +39,7 @@ function FullPageSpinner() {
 function PublicOnly({ children }: { children: React.ReactNode }) {
   const { user, initializing } = useAuth();
   if (initializing) return <FullPageSpinner />;
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) return <Navigate to={peekNext() ?? "/dashboard"} replace />;
   return <>{children}</>;
 }
 
@@ -152,6 +155,9 @@ export default function App() {
           }
         />
 
+        {/* Invite links: open signed in or out; the pages walk people through what's missing. */}
+        <Route path="/join/project/:code" element={<JoinProject />} />
+        <Route path="/join/company/:companyId" element={<JoinCompany />} />
         <Route path="/terms" element={<TermsOfService />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="*" element={<NotFound />} />

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -7,7 +8,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Link2, Users, Copy, Mail, Loader2, Trash2, UserPlus } from 'lucide-react';
+import { Link2, Users, Copy, Mail, Loader2, Trash2, UserPlus, Share2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase';
@@ -17,6 +18,8 @@ import MatrixEmployeeCard from './MatrixEmployeeCard';
 import InviteGCWizard from './InviteGCWizard';
 import AnchoredFirstClickTip from '@/components/onboarding/AnchoredFirstClickTip';
 import { TOUR_COPY } from '@/components/onboarding/tourSteps';
+import InviteShare from '@/components/InviteShare';
+import { projectJoinUrl } from '@/lib/share';
 
 interface Project {
   id: string;
@@ -130,7 +133,10 @@ const RightPanel = ({
   const [addingMembers, setAddingMembers] = useState(false);
   const [freshAssignedIds, setFreshAssignedIds] = useState<Set<string> | null>(null);
   const { toast } = useToast();
-  const { profile } = useAuth();
+  const { profile, hasPartialOrHigher } = useAuth();
+  const navigate = useNavigate();
+  // GC: which project the Invite Subcontractor dialog is for.
+  const [inviteProjectId, setInviteProjectId] = useState<string>('');
 
   useEffect(() => {
     if (!addTeamMemberOpen || selectedProject === 'master') {
@@ -351,86 +357,107 @@ const RightPanel = ({
             </div>
           </AnchoredFirstClickTip>
 
-          {(isGCView || isSubView) && (
-            <>
-              {(!isSubView || selectedProject === 'master') && (
+          {/* GC: invite subcontractors to a project with its code or invite link. */}
+          {isGCView && projects.length > 0 && (
+            <Dialog
+              open={connectOpen}
+              onOpenChange={(open) => {
+                setConnectOpen(open);
+                if (open) setInviteProjectId(selectedProject !== 'master' ? selectedProject : projects[0].id);
+              }}
+            >
               <AnchoredFirstClickTip tipKey="connect_gc_sub" copy={TOUR_COPY.connect_gc_sub.copy} as="div" className="block">
-              <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
                 <DialogTrigger asChild>
-                  <Button variant="outline" className="w-full text-sm py-3 h-auto flex flex-col items-center gap-1 leading-tight">
-                    {isSubView ? (
-                      <span className="flex items-center gap-1">
-                        <Link2 className="h-4 w-4 flex-shrink-0" />
-                        Connect to Project
-                      </span>
-                    ) : (
-                      <>
-                        <span>Connect Subcontractor</span>
-                        <span className="flex items-center gap-1">
-                          <Link2 className="h-4 w-4 flex-shrink-0" />
-                          To Project
-                        </span>
-                      </>
-                    )}
+                  <Button variant="outline" className="w-full">
+                    <UserPlus className="mr-2 h-4 w-4" />
+                    Invite Subcontractor
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Connect Subcontractor To Project</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4 pt-4">
-                    <div className="space-y-2">
-                      <Label>Connection Code</Label>
-                      <Input
-                        value={connectionCode}
-                        onChange={(e) => setConnectionCode(e.target.value)}
-                        placeholder="Enter 8-character code"
-                      />
-                    </div>
-                    <Button 
-                      className="w-full"
-                      onClick={() => {
-                        onConnectProject(connectionCode);
-                        setConnectionCode('');
-                        setConnectOpen(false);
-                      }}
-                      disabled={!connectionCode}
-                    >
-                      Connect
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
               </AnchoredFirstClickTip>
-              )}
-
-              {/* Delete Project button removed - now in Manage My Company Account */}
-            </>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Invite a subcontractor</DialogTitle>
+                </DialogHeader>
+                {projects.length > 1 && (
+                  <Select value={inviteProjectId} onValueChange={setInviteProjectId}>
+                    <SelectTrigger aria-label="Project">
+                      <SelectValue placeholder="Choose a project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {projects.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {(() => {
+                  const project = projects.find((p) => p.id === inviteProjectId);
+                  return project?.connection_code ? (
+                    <InviteShare
+                      url={projectJoinUrl(project.connection_code)}
+                      code={project.connection_code}
+                      caption={`Send the subcontractor this link, or give them the code to enter under Connect to Project, to join ${project.name}.`}
+                    />
+                  ) : null;
+                })()}
+              </DialogContent>
+            </Dialog>
           )}
 
-
-          {isSubView && (
-            <>
-              {selectedProject === 'master' && (companyId || profile?.company_id) && (
-                <>
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => setSubInviteDialogOpen(true)}
-                  >
-                    <Mail className="h-4 w-4 mr-2" />
-                    Invite GC to SSAA
+          {/* Sub owners and managers: join a GC's project by code (or open the GC's invite link). */}
+          {isSubView && hasPartialOrHigher && selectedProject === 'master' && (
+            <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
+              <AnchoredFirstClickTip tipKey="connect_gc_sub" copy={TOUR_COPY.connect_gc_sub.copy} as="div" className="block">
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="w-full">
+                    <Link2 className="mr-2 h-4 w-4" />
+                    Connect to Project
                   </Button>
-                  <InviteGCWizard
-                    open={subInviteDialogOpen}
-                    onOpenChange={setSubInviteDialogOpen}
-                    subCompanyId={(companyId || profile?.company_id)!}
-                    subCompanyName={profile?.full_name || 'Your subcontractor'}
-                  />
-                </>
-              )}
-            </>
+                </DialogTrigger>
+              </AnchoredFirstClickTip>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Connect to a project</DialogTitle>
+                </DialogHeader>
+                <form
+                  className="space-y-4"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const code = connectionCode.trim();
+                    if (!code) return;
+                    setConnectionCode('');
+                    setConnectOpen(false);
+                    navigate(`/join/project/${encodeURIComponent(code)}`);
+                  }}
+                >
+                  <div className="space-y-2">
+                    <Label htmlFor="connectCode">Project code from the general contractor</Label>
+                    <Input
+                      id="connectCode"
+                      value={connectionCode}
+                      onChange={(e) => setConnectionCode(e.target.value)}
+                      placeholder="e.g. 0454f7e2"
+                      autoComplete="off"
+                      className="font-mono tracking-widest"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Got an invite link instead? Just open it.
+                  </p>
+                  <Button type="submit" className="w-full" disabled={!connectionCode.trim()}>
+                    Continue
+                  </Button>
+                </form>
+              </DialogContent>
+            </Dialog>
           )}
+
+          {/* Delete Project lives in Manage My Company Account. */}
+
+
+          {/* Inviting a GC by email needs an email service the backend doesn't have yet; removed rather than left failing. */}
         </CardContent>
       </Card>
 
@@ -467,7 +494,7 @@ const RightPanel = ({
 
       {/* Share/Connect */}
       {/* Share Project — for GC, Guest GC, and Sub when a project is selected */}
-      {currentProject && selectedProject !== 'master' && (
+      {isGCView && currentProject && selectedProject !== 'master' && (
         <Card className="border-primary/20">
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
@@ -486,69 +513,20 @@ const RightPanel = ({
                 <Copy className="h-4 w-4" />
               </Button>
             </div>
-            <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
-              <AnchoredFirstClickTip
-                tipKey="send_invite_first_click"
-                copy="Click 'Send Invite' to email subcontractors. They will receive a unique connection code to instantly sync their team with your project schedule."
-              >
-                <Button variant="outline" className="w-full" onClick={() => setInviteDialogOpen(true)}>
-                  <Mail className="h-4 w-4 mr-2" />
-                  Send Invite
-                </Button>
-              </AnchoredFirstClickTip>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Send Project Invite</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 pt-4">
-                  <div className="space-y-2">
-                    <Label>{isSubView ? 'GC Email(s)' : 'Subcontractor Email(s)'}</Label>
-                    <Textarea
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      placeholder={isSubView
-                        ? 'gc1@company.com, gc2@company.com'
-                        : 'contractor1@company.com, contractor2@company.com'}
-                      rows={3}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Enter one or more emails separated by commas, spaces, or new lines.
-                    </p>
-                  </div>
-                  {isSubView && (
-                    <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-xs">
-                      <div className="font-medium text-foreground mb-1">Inviting another contractor?</div>
-                      <p className="text-muted-foreground">
-                        This form invites <strong>General Contractors</strong>. To connect with another
-                        subcontractor and share their team on this project, open{' '}
-                        <span className="font-medium text-foreground">Manage My Company Account → Connected Contractors</span>.
-                      </p>
-                    </div>
-                  )}
-                  <p className="text-sm text-muted-foreground">
-                    Each recipient will receive an email with the connection code and instructions to join <strong>{currentProject?.name}</strong>.
-                  </p>
-
-                  <Button
-                    className="w-full"
-                    onClick={handleSendInvite}
-                    disabled={!inviteEmail.trim() || sendingInvite}
-                  >
-                    {sendingInvite ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Sending...
-                      </>
-                    ) : (
-                      <>
-                        <Mail className="h-4 w-4 mr-2" />
-                        Send Invite
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setInviteProjectId(currentProject.id);
+                setConnectOpen(true);
+              }}
+            >
+              <Share2 className="mr-2 h-4 w-4" />
+              Share invite link
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Subcontractors enter this code under Connect to Project, or open the invite link you send them.
+            </p>
           </CardContent>
         </Card>
       )}

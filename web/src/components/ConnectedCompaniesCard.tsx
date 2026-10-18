@@ -24,6 +24,8 @@ interface Connection {
   direction: "outgoing" | "incoming" | "active";
 }
 
+const SEARCH_MIN = 3;
+
 interface Company {
   id: string;
   name: string;
@@ -56,19 +58,18 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
   const [projects, setProjects] = useState<Project[]>([]);
   const [links, setLinks] = useState<Record<string, Link[]>>({});
   const [search, setSearch] = useState("");
+  const [searching, setSearching] = useState(false);
   const [proposedRole, setProposedRole] = useState<"main" | "sub">("sub");
   const [linkProject, setLinkProject] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [conns, allCompanies, allProjects] = await Promise.all([
+      const [conns, allProjects] = await Promise.all([
         api.get<{ connections: Connection[] }>("/contractor-connections"),
-        api.get<{ companies: Company[] }>("/companies"),
         api.get<{ projects: Project[] }>("/projects"),
       ]);
       setConnections(conns.connections);
-      setCompanies(allCompanies.companies.filter((c) => c.id !== companyId));
       setProjects(allProjects.projects);
       const linkEntries = await Promise.all(
         conns.connections
@@ -90,7 +91,7 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
         variant: "destructive",
       });
     }
-  }, [companyId, toast]);
+  }, [toast]);
 
   useEffect(() => {
     void load();
@@ -113,11 +114,36 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
     }
   }
 
+  // The server answers a few name matches for 3+ letters; it never lists every company.
+  const query = search.trim();
+  useEffect(() => {
+    if (query.length < SEARCH_MIN) {
+      setCompanies([]);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      api
+        .get<{ companies: Company[] }>(`/companies?q=${encodeURIComponent(query)}`)
+        .then((res) => {
+          if (!cancelled) setCompanies(res.companies);
+        })
+        .catch(() => {
+          if (!cancelled) setCompanies([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
   const connectedIds = new Set(connections.map((c) => c.otherCompanyId));
-  const candidates = companies
-    .filter((c) => !connectedIds.has(c.id))
-    .filter((c) => c.name.toLowerCase().includes(search.trim().toLowerCase()))
-    .slice(0, 8);
+  const candidates = companies.filter((c) => !connectedIds.has(c.id));
   const ownProjects = projects.filter((p) => p.companyId === companyId);
   const projectNames = new Map(projects.map((p) => [p.id, p.name]));
 
@@ -235,7 +261,7 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                       )}
                       {iAmMain && ownProjects.length > 0 && (
                         <div className="flex flex-wrap items-end gap-2">
-                          <div className="min-w-40 flex-1 space-y-1">
+                          <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-1">
                             <Label htmlFor={`link-${conn.id}`}>Share a project</Label>
                             <select
                               id={`link-${conn.id}`}
@@ -293,7 +319,7 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
 
         <div className="space-y-2 border-t pt-4">
           <div className="flex flex-wrap items-end gap-2">
-            <div className="min-w-40 flex-1 space-y-2">
+            <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
               <Label htmlFor="connectSearch">Connect with another company</Label>
               <Input
                 id="connectSearch"
@@ -315,10 +341,15 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
               </select>
             </div>
           </div>
-          {search.trim() && (
+          {query.length > 0 && query.length < SEARCH_MIN && (
+            <p className="text-xs text-muted-foreground">Type at least {SEARCH_MIN} letters of the name.</p>
+          )}
+          {query.length >= SEARCH_MIN && (
             <ul className="divide-y rounded-md border">
               {candidates.length === 0 ? (
-                <li className="p-3 text-sm text-muted-foreground">No matching companies.</li>
+                <li className="p-3 text-sm text-muted-foreground">
+                  {searching ? "Searching..." : "No company by that name."}
+                </li>
               ) : (
                 candidates.map((c) => (
                   <li key={c.id} className="flex items-center justify-between gap-2 p-3">
