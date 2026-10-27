@@ -78,3 +78,9 @@ export function formatDate(d: Date, options: Intl.DateTimeFormatOptions): string
 export function formatTime(d: Date): string {
   return d.toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit" });
 }
+
+/** "AM"/"PM" in English, "a.m."/"p.m." in Spanish (Mexico). */
+export function dayPeriod(p: "am" | "pm"): string {
+  if (current === "es") return p === "am" ? "a.m." : "p.m.";
+  return p === "am" ? "AM" : "PM";
+}

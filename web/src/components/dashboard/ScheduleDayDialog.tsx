@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDate, tr } from "@/i18n/runtime";
+import { formatDate, tr, dayPeriod } from "@/i18n/runtime";
 import { jobTitleLabel, statusLabel, tradeLabel } from "@/i18n/labels";
 
 /**
@@ -92,7 +92,7 @@ const isoDate = (d: Date) =>
 function fmtTime(value: string | null | undefined): string {
   if (!value) return "";
   const [h, m] = value.split(":").map(Number);
-  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? dayPeriod("am") : dayPeriod("pm")}`;
 }
 
 /** Same rule as the backend's historicalLock: anything before this week's Monday. */

@@ -1,3 +1,4 @@
+import { dayPeriod } from "@/i18n/runtime";
 /**
  * Free time = posted availability minus what's already requested or booked.
  * Times are "HH:MM" strings, which compare correctly as text. A request with
@@ -44,5 +45,5 @@ export function freeWindows(base: TimeWindow, taken: TimeWindow[]): TimeWindow[]
 export function fmtTime(value: string | null | undefined): string {
   if (!value) return "";
   const [h, m] = value.split(":").map(Number);
-  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 || h === 24 ? "AM" : "PM"}`;
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 || h === 24 ? dayPeriod("am") : dayPeriod("pm")}`;
 }

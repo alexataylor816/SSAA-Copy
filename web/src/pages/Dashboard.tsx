@@ -37,7 +37,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { CalendarDays, Plus } from "lucide-react";
-import { dateLocale, tr } from "@/i18n/runtime";
+import { dateLocale, tr, dayPeriod } from "@/i18n/runtime";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Project {
@@ -100,7 +100,7 @@ const formatDay = (value: string) =>
 const formatTime = (value: string | null) => {
   if (!value) return "";
   const [h, m] = value.split(":").map(Number);
-  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? dayPeriod("am") : dayPeriod("pm")}`;
 };
 
 const UPCOMING_SHOWN = 5;
