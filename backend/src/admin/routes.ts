@@ -13,6 +13,7 @@ import { listCorrespondence, sendTemplatedEmail } from "../notifications/corresp
 import { emailTransportName } from "../services/email.js";
 import { signToken } from "../services/tokens.js";
 import { OPERATOR_LEVELS, audit, listAudit, ownerExists, requireOperator } from "./operators.js";
+import { asLang } from "../i18n/index.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
@@ -294,7 +295,7 @@ adminRouter.post(
     const user = await findUserById(req.params.id);
     if (!user) throw new NotFoundError("User not found.");
     const code = await createResetCode(user.id);
-    const status = await sendTemplatedEmail({ eventType: "password_reset", to: user.email, vars: { code, email: user.email }, recipientUserId: user.id, actorUserId: me.id });
+    const status = await sendTemplatedEmail({ eventType: "password_reset", to: user.email, vars: { code, email: user.email }, recipientUserId: user.id, actorUserId: me.id, lang: asLang(user.language) });
     await audit(me.id, "password_reset", `Sent a password reset code to ${nameOf(user)} (${status === "sent" ? "emailed" : "given to operator"})`, { type: "user", id: user.id });
     res.json({ emailed: status === "sent", code: status === "sent" ? undefined : code, expiresInMinutes: 15 });
   }),

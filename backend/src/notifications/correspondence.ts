@@ -7,7 +7,8 @@
 import crypto from "node:crypto";
 import { database } from "../db.js";
 import { emailTransportName, sendEmail, styledHtml } from "../services/email.js";
-import { fillPlaceholders, findTemplate } from "./templates.js";
+import { fillPlaceholders, findTemplate, SPANISH_TEMPLATES } from "./templates.js";
+import { say, type Lang } from "../i18n/index.js";
 
 export type Channel = "email" | "push" | "chat";
 /** sent; failed (the provider refused it); skipped (no email set up); off (template switched off). */
@@ -74,9 +75,20 @@ export async function logCorrespondence(entry: LogEntry): Promise<void> {
 
 type Vars = Record<string, string | number | null | undefined>;
 
-/** The push (bell / chat) text for an event, from its template; `fallback` when it has none. */
-export async function renderPush(eventType: string, vars: Vars, fallback: { title: string; body: string }) {
+/**
+ * The push (bell / chat) text for an event, from its template; `fallback` when it has none. Spanish
+ * recipients get the Spanish wording; the on/off switch is the operator's either way.
+ */
+export async function renderPush(eventType: string, vars: Vars, fallback: { title: string; body: string }, lang: Lang = "en") {
   const t = await findTemplate(eventType);
+  const es = lang === "es" ? SPANISH_TEMPLATES[eventType]?.push : undefined;
+  if (es) {
+    return {
+      title: fillPlaceholders(es.title, vars).trim(),
+      body: fillPlaceholders(es.body, vars).replace(/\s+/g, " ").trim(),
+      active: t ? t.pushActive : true,
+    };
+  }
   if (!t || t.pushTitle == null) return { ...fallback, active: true };
   return {
     title: fillPlaceholders(t.pushTitle, vars).trim() || fallback.title,
@@ -85,10 +97,13 @@ export async function renderPush(eventType: string, vars: Vars, fallback: { titl
   };
 }
 
-export async function renderEmail(eventType: string, vars: Vars) {
+export async function renderEmail(eventType: string, vars: Vars, lang: Lang = "en") {
   const t = await findTemplate(eventType);
   if (!t) return undefined;
-  return { subject: fillPlaceholders(t.subject, vars), html: fillPlaceholders(t.bodyHtml, vars, true), active: t.isActive };
+  const es = lang === "es" ? SPANISH_TEMPLATES[eventType] : undefined;
+  const subject = es?.subject ?? t.subject;
+  const body = es?.bodyHtml ?? t.bodyHtml;
+  return { subject: fillPlaceholders(subject, vars), html: fillPlaceholders(body, vars, true), active: t.isActive };
 }
 
 const htmlToText = (html: string) =>
@@ -117,11 +132,14 @@ export async function sendTemplatedEmail(params: {
   actorUserId?: string | null;
   /** Used only if the template row is missing (it is seeded at startup, so normally never). */
   fallback?: { subject: string; text: string };
+  /** The recipient's language (users.language). English when unknown. */
+  lang?: Lang;
 }): Promise<DeliveryStatus> {
-  const rendered = await renderEmail(params.eventType, params.vars);
+  const lang = params.lang ?? "en";
+  const rendered = await renderEmail(params.eventType, params.vars, lang);
   const subject = rendered?.subject ?? params.fallback?.subject ?? params.eventType;
-  const html = rendered ? styledHtml(rendered.html) : styledHtml(escapeText(params.fallback?.text ?? ""));
-  const text = `${htmlToText(rendered?.html ?? params.fallback?.text ?? "")}\n\n— The SSAA Team`;
+  const html = rendered ? styledHtml(rendered.html, lang) : styledHtml(escapeText(params.fallback?.text ?? ""), lang);
+  const text = `${htmlToText(rendered?.html ?? params.fallback?.text ?? "")}\n\n${say("— The SSAA Team", undefined, lang)}`;
   const base = {
     eventType: params.eventType,
     channel: "email" as const,

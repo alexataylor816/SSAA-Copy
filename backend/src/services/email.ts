@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import { config } from "../config.js";
+import { say, type Lang } from "../i18n/index.js";
 
 interface Mail {
   to: string;
@@ -16,12 +17,12 @@ const escapeHtml = (value: string) =>
  * The original app's wrapper (supabase/functions/request-password-reset): the template's HTML, then a
  * grey "— The SSAA Team" footer under a rule.
  */
-export function styledHtml(innerHtml: string): string {
+export function styledHtml(innerHtml: string, lang: Lang = "en"): string {
   return `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1a1a1a; line-height: 1.5;">
         ${innerHtml}
         <p style="font-size: 12px; color: #aaa; margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee;">
-          — The SSAA Team
+          ${say("— The SSAA Team", undefined, lang)}
         </p>
       </div>
     `;

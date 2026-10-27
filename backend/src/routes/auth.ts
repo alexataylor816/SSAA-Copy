@@ -14,6 +14,7 @@ import {
 import { sendTemplatedEmail } from "../notifications/correspondence.js";
 import { hashPassword, verifyPassword } from "../services/passwords.js";
 import { signToken, verifyToken } from "../services/tokens.js";
+import { asLang } from "../i18n/index.js";
 
 export const authRouter = Router();
 
@@ -90,7 +91,7 @@ authRouter.post("/auth/request-password-reset", handle(async (req, res) => {
     const code = await createResetCode(user.id);
     try {
       const sent =
-        (await sendTemplatedEmail({ eventType: "password_reset", to: user.email, vars: { code, email: user.email }, recipientUserId: user.id })) === "sent";
+        (await sendTemplatedEmail({ eventType: "password_reset", to: user.email, vars: { code, email: user.email }, recipientUserId: user.id, lang: asLang(user.language) })) === "sent";
       if (!sent) {
         devCode = code;
         console.log(`[dev] password reset code for ${user.email}: ${code}`);
@@ -151,6 +152,7 @@ authRouter.post("/auth/request-username-reminder", handle(async (req, res) => {
           to: user.email,
           vars: { user_name: user.fullName, email: user.email },
           recipientUserId: user.id,
+          lang: asLang(user.language),
         })) === "sent";
     } catch (err) {
       console.error(`Failed to send username reminder to ${user.email}:`, err);

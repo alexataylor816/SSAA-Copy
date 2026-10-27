@@ -32,6 +32,7 @@ import {
   updateScheduleRequestStatusRow,
 } from "./models.js";
 import type { Availability, Project, ScheduleRequest, ScheduleRequestStatus } from "./types.js";
+import { clockLabel, say } from "../i18n/index.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -137,12 +138,12 @@ export interface ProjectPreview {
  */
 async function connectBlocker(user: User): Promise<string | null> {
   const company = user.companyId ? await findCompanyById(user.companyId) : undefined;
-  if (!company) return "Set up or join your company first.";
+  if (!company) return say("Set up or join your company first.");
   if (company.companyType !== "sub" && !user.isAdmin) {
-    return "Only subcontractor companies join a GC's project. To work with another GC, use Connected companies.";
+    return say("Only subcontractor companies join a GC's project. To work with another GC, use Connected companies.");
   }
   if (!(await actorHasPartialOrHigher(user))) {
-    return "Ask your company's owner or office manager to connect the company to this project.";
+    return say("Ask your company's owner or office manager to connect the company to this project.");
   }
   return null;
 }
@@ -439,10 +440,8 @@ export async function listScheduleRequests(userId: string, startDate: string, en
   return await listScheduleRequestsForCompany(user.companyId!, startDate, endDate);
 }
 
-export const toLabel = (t: string) => {
-  const [h, m] = t.split(":").map(Number);
-  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
-};
+/** "07:00" → "7:00 AM" (or "7:00 a.m." for a Spanish request). */
+export const toLabel = (t: string) => clockLabel(t);
 
 /**
  * Someone can't be in two places at once: a request clashes with any other
@@ -462,11 +461,11 @@ async function bookingConflict(
     if (!(start < otherEnd && otherStart < end)) continue;
     const clash = params.employeeIds.find((id) => other.employeeIds.includes(id));
     if (!clash) continue;
-    const name = other.employeeNames[other.employeeIds.indexOf(clash)] ?? "That person";
-    const when = other.startTime && other.endTime ? `${toLabel(other.startTime)}–${toLabel(other.endTime)}` : "all day";
-    const project = (await findProjectById(other.projectId))?.name ?? "another project";
-    const verb = other.status === "confirmed" ? "booked" : "already requested";
-    return `${name} is ${verb} ${when} that day (${project}). Pick a time outside it.`;
+    const name = other.employeeNames[other.employeeIds.indexOf(clash)] ?? say("That person");
+    const when = other.startTime && other.endTime ? `${toLabel(other.startTime)}–${toLabel(other.endTime)}` : say("all day");
+    const project = (await findProjectById(other.projectId))?.name ?? say("another project");
+    const verb = say(other.status === "confirmed" ? "booked" : "already requested");
+    return say("{name} is {verb} {when} that day ({project}). Pick a time outside it.", { name, verb, when, project });
   }
   return null;
 }

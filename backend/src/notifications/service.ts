@@ -12,6 +12,7 @@ import { findUserById } from "../models/users.js";
 import { findCompanyById, findEmployeeById, findJoinRequestById } from "../rbac/models.js";
 import { logCorrespondence, renderPush, sendTemplatedEmail } from "./correspondence.js";
 import type { ScheduleRequest } from "../scheduling/types.js";
+import { asLang, clockLabel, dayLabel, say, type Lang } from "../i18n/index.js";
 
 export async function ensureNotificationTables(): Promise<void> {
   await database.exec(`
@@ -87,22 +88,36 @@ export async function markNotificationsRead(userId: string, ids?: unknown): Prom
 }
 
 type Vars = Record<string, string | number | null | undefined>;
+/** Placeholder values in a given language (dates, counts and fallback words differ). */
+type VarsFor = (lang: Lang) => Vars;
+
+/** Each recipient's language, looked up once per send. */
+async function languageOf(userId: string | null | undefined, cache?: Map<string, Lang>): Promise<Lang> {
+  if (!userId) return "en";
+  if (cache?.has(userId)) return cache.get(userId)!;
+  const lang = asLang((await findUserById(userId))?.language);
+  cache?.set(userId, lang);
+  return lang;
+}
 
 /**
- * Bell notifications from the event's push template (`fallback` if it has none). Returns false when the
- * template's push is switched off, so nothing went out.
+ * Bell notifications from the event's push template (`fallback` if it has none), each in the
+ * recipient's language. Returns false when the template's push is switched off, so nothing went out.
  */
 async function notify(
   userIds: Iterable<string>,
-  message: { eventType: string; vars: Vars; fallback: { title: string; body: string }; projectId?: string | null; link?: string | null; actorUserId?: string | null },
+  message: { eventType: string; vars: VarsFor; fallback: { title: string; body: string }; projectId?: string | null; link?: string | null; actorUserId?: string | null },
 ): Promise<boolean> {
   // Runs after the real action has succeeded; a failure here must not turn
   // that success into an error response.
   const recipients = [...new Set(userIds)];
   if (recipients.length === 0) return false;
   try {
-    const push = await renderPush(message.eventType, message.vars, message.fallback);
+    let active = true;
     for (const userId of recipients) {
+      const lang = await languageOf(userId);
+      const push = await renderPush(message.eventType, message.vars(lang), message.fallback, lang);
+      active = push.active;
       if (!push.active) {
         await logCorrespondence({ eventType: message.eventType, channel: "push", recipientUserId: userId, subject: push.title, body: push.body, status: "off", errorMessage: "Template is switched off.", actorUserId: message.actorUserId });
         continue;
@@ -116,27 +131,29 @@ async function notify(
       emit(EVENT.notificationCreated, { id }, ROOM.notifications, userId);
       await logCorrespondence({ eventType: message.eventType, channel: "push", recipientUserId: userId, subject: push.title, body: push.body, status: "sent", actorUserId: message.actorUserId });
     }
-    return push.active;
+    return active;
   } catch (err) {
     console.error(`Failed to record "${message.eventType}" notification:`, err);
     return false;
   }
 }
 
-/** The same event by email to each of these users. True when at least one went out. */
-async function emailUsers(userIds: Iterable<string>, eventType: string, vars: Vars, actorUserId?: string | null): Promise<boolean> {
+/** The same event by email to each of these users, in each one's language. True when at least one went out. */
+async function emailUsers(userIds: Iterable<string>, eventType: string, vars: VarsFor, actorUserId?: string | null): Promise<boolean> {
   let any = false;
   try {
     for (const id of new Set(userIds)) {
       const user = await findUserById(id);
       if (!user?.email) continue;
+      const lang = asLang(user.language);
       const status = await sendTemplatedEmail({
         eventType,
         to: user.email,
-        vars: { user_name: user.fullName, ...vars },
+        vars: { user_name: user.fullName, ...vars(lang) },
         recipientUserId: user.id,
         recipientCompanyId: user.companyId,
         actorUserId,
+        lang,
       });
       if (status === "sent") any = true;
     }
@@ -187,47 +204,46 @@ async function approvers(companyId: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-/** "07:00" -> "7:00 AM" */
-const clock = (t: string) => {
-  const [h, m] = t.split(":").map(Number);
-  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
-};
+/** "07:00" -> "7:00 AM" / "7:00 a.m." */
+const clock = (t: string, lang: Lang) => clockLabel(t, lang);
 
-const dayLabel = (iso: string) => {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-};
+/** "3 people" / "3 personas" */
+const people = (n: number, lang: Lang) => say(n === 1 ? "1 person" : "{count} people", { count: n }, lang);
+/** "2 changes" / "2 cambios" */
+const changes = (n: number, lang: Lang) => say(n === 1 ? "1 change" : "{count} changes", { count: n }, lang);
 
-/** The placeholders every schedule template can use. */
-async function requestVars(request: ScheduleRequest) {
+/** The placeholders every schedule template can use, in either language. */
+async function requestVars(request: ScheduleRequest): Promise<VarsFor> {
   const project = await database.get<{ name: string; address: string | null }>("SELECT name, address FROM projects WHERE id = ?", [request.projectId]);
   const names: string[] = [];
   for (const id of request.employeeIds) {
     const emp = await findEmployeeById(id);
     if (emp) names.push(emp.name);
   }
-  const crew = request.employeeIds.length;
-  return {
-    project_name: project?.name ?? "a project",
+  const requesting = (await findCompanyById(request.requestingCompanyId))?.name;
+  const sub = (await findCompanyById(request.subCompanyId))?.name;
+  return (lang) => ({
+    project_name: project?.name ?? say("a project", undefined, lang),
     project_address: project?.address ?? "",
-    requesting_company: (await findCompanyById(request.requestingCompanyId))?.name ?? "The GC",
-    sub_company: (await findCompanyById(request.subCompanyId))?.name ?? "The subcontractor",
-    scheduled_date: dayLabel(request.date),
-    start_time: request.startTime ? clock(request.startTime) : "",
-    end_time: request.endTime ? clock(request.endTime) : "",
-    crew_count: `${crew} ${crew === 1 ? "person" : "people"}`,
+    requesting_company: requesting ?? say("The GC", undefined, lang),
+    sub_company: sub ?? say("The subcontractor", undefined, lang),
+    scheduled_date: dayLabel(request.date, lang),
+    start_time: request.startTime ? clock(request.startTime, lang) : "",
+    end_time: request.endTime ? clock(request.endTime, lang) : "",
+    crew_count: people(request.employeeIds.length, lang),
     crew_names: names.join(", "),
-    reason: request.statusReason ? `Reason: ${request.statusReason}` : "",
-  };
+    reason: request.statusReason ? say("Reason: {reason}", { reason: request.statusReason }, lang) : "",
+  });
 }
 
 export async function notifyScheduleRequestCreated(actorUserId: string, request: ScheduleRequest) {
   const v = await requestVars(request);
+  const en = v("en");
   const recipients = await projectRecipients(request.subCompanyId, [request.projectId], actorUserId);
   await notify(recipients, {
     eventType: "schedule_created",
     vars: v,
-    fallback: { title: "New schedule request", body: `${v.requesting_company} requested ${v.crew_count} for ${v.scheduled_date} on ${v.project_name}.` },
+    fallback: { title: "New schedule request", body: `${en.requesting_company} requested ${en.crew_count} for ${en.scheduled_date} on ${en.project_name}.` },
     projectId: request.projectId,
     link: `/dashboard?day=${request.date}`,
     actorUserId,
@@ -237,6 +253,7 @@ export async function notifyScheduleRequestCreated(actorUserId: string, request:
 
 export async function notifyScheduleRequestUpdated(actorUserId: string, request: ScheduleRequest) {
   const v = await requestVars(request);
+  const en = v("en");
   const link = `/dashboard?day=${request.date}`;
   if (request.status === "confirmed" || request.status === "rejected") {
     const eventType = request.status === "confirmed" ? "schedule_confirmed" : "schedule_rejected";
@@ -246,7 +263,7 @@ export async function notifyScheduleRequestUpdated(actorUserId: string, request:
       vars: v,
       fallback: {
         title: request.status === "confirmed" ? "Request confirmed" : "Request declined",
-        body: `${v.sub_company} ${request.status === "confirmed" ? "confirmed" : "declined"} ${v.scheduled_date} on ${v.project_name}. ${v.reason}`.trim(),
+        body: `${en.sub_company} ${request.status === "confirmed" ? "confirmed" : "declined"} ${en.scheduled_date} on ${en.project_name}. ${en.reason}`.trim(),
       },
       projectId: request.projectId,
       link,
@@ -257,12 +274,16 @@ export async function notifyScheduleRequestUpdated(actorUserId: string, request:
     // Whoever didn't cancel it needs to know.
     const actorCompany = (await findUserById(actorUserId))?.companyId;
     const other = actorCompany === request.subCompanyId ? request.requestingCompanyId : request.subCompanyId;
-    const vars = { ...v, cancelling_company: actorCompany === request.subCompanyId ? v.sub_company : v.requesting_company };
+    const vars: VarsFor = (lang) => {
+      const base = v(lang);
+      return { ...base, cancelling_company: actorCompany === request.subCompanyId ? base.sub_company : base.requesting_company };
+    };
+    const enVars = vars("en");
     const recipients = await projectRecipients(other, [request.projectId], actorUserId);
     await notify(recipients, {
       eventType: "schedule_cancelled",
       vars,
-      fallback: { title: "Request cancelled", body: `${vars.cancelling_company} cancelled ${v.scheduled_date} on ${v.project_name}. ${v.reason}`.trim() },
+      fallback: { title: "Request cancelled", body: `${enVars.cancelling_company} cancelled ${en.scheduled_date} on ${en.project_name}. ${en.reason}`.trim() },
       projectId: request.projectId,
       link,
       actorUserId,
@@ -288,14 +309,15 @@ export async function notifyMatrixPublish(
   const sent = { email: false, push: false };
   if (requests.length === 0) return sent;
   const actor = await findCompanyById(actorCompanyId);
-  const actorName = actor?.name ?? "A contractor";
+  const actorName = (lang: Lang) => actor?.name ?? say("A contractor", undefined, lang);
   const actorIsSub = actor?.companyType === "sub";
-  const projectName = new Map<string, string>();
+  const projectName = new Map<string, string | undefined>();
   for (const r of requests) {
     if (!projectName.has(r.projectId)) {
-      projectName.set(r.projectId, (await database.get<{ name: string }>("SELECT name FROM projects WHERE id = ?", [r.projectId]))?.name ?? "a project");
+      projectName.set(r.projectId, (await database.get<{ name: string }>("SELECT name FROM projects WHERE id = ?", [r.projectId]))?.name);
     }
   }
+  const nameOf = (projectId: string, lang: Lang) => projectName.get(projectId) ?? say("a project", undefined, lang);
 
   const byCompany = new Map<string, ScheduleRequest[]>();
   for (const r of requests) {
@@ -309,15 +331,16 @@ export async function notifyMatrixPublish(
     const projectIds = [...new Set(reqs.map((r) => r.projectId))];
     const n = reqs.length;
     const eventType = actorIsSub ? "schedule_edited" : "schedule_batch_sent";
-    const vars = {
-      company_name: actorName,
-      change_count: `${n} change${n === 1 ? "" : "s"}`,
-      project_names: projectIds.map((id) => projectName.get(id)).join(", "),
-      dates: [...new Set(reqs.map((r) => r.date))].sort().map(dayLabel).join(", "),
-    };
+    const vars: VarsFor = (lang) => ({
+      company_name: actorName(lang),
+      change_count: changes(n, lang),
+      project_names: projectIds.map((id) => nameOf(id, lang)).join(", "),
+      dates: [...new Set(reqs.map((r) => r.date))].sort().map((d) => dayLabel(d, lang)).join(", "),
+    });
+    const en = vars("en");
     const fallback = {
       title: actorIsSub ? "Schedule edited" : "New schedule requests",
-      body: `${actorName} ${actorIsSub ? "updated the schedule" : "sent schedule requests"}: ${vars.change_count} on ${vars.project_names} (${vars.dates}).`,
+      body: `${en.company_name} ${actorIsSub ? "updated the schedule" : "sent schedule requests"}: ${en.change_count} on ${en.project_names} (${en.dates}).`,
     };
 
     const recipients = await projectRecipients(companyId, projectIds, actorUserId);
@@ -335,26 +358,29 @@ export async function notifyMatrixPublish(
     const { getOrCreateDm, sendMessage } = await import("../messaging/service.js");
     for (const r of requests.filter((r) => r.status === "pending" || r.status === "confirmed")) {
       const address = (await database.get<{ address: string | null }>("SELECT address FROM projects WHERE id = ?", [r.projectId]))?.address;
-      const base = {
-        company_name: actorName,
-        project_name: projectName.get(r.projectId),
+      const base: VarsFor = (lang) => ({
+        company_name: actorName(lang),
+        project_name: nameOf(r.projectId, lang),
         project_address: address ? ` (${address})` : "",
-        scheduled_date: dayLabel(r.date),
-        time_range: r.startTime && r.endTime ? `, ${clock(r.startTime)}–${clock(r.endTime)}` : "",
-      };
+        scheduled_date: dayLabel(r.date, lang),
+        time_range: r.startTime && r.endTime ? `, ${clock(r.startTime, lang)}–${clock(r.endTime, lang)}` : "",
+      });
       for (const employeeId of r.employeeIds) {
         const emp = await findEmployeeById(employeeId);
         if (!emp) continue;
-        const vars = { ...base, employee_name: emp.name.split(" ")[0] };
+        // Crew without an account get English; anyone signed up gets their own language.
+        const lang = await languageOf(emp.linkedUserId);
+        const vars: VarsFor = (l) => ({ ...base(l), employee_name: emp.name.split(" ")[0] });
+        const en = vars("en");
         const fallback = {
           title: "You're on the schedule",
-          body: `Hi ${vars.employee_name}, you're scheduled at ${base.project_name}${base.project_address} on ${base.scheduled_date}${base.time_range}.`,
+          body: `Hi ${en.employee_name}, you're scheduled at ${en.project_name}${en.project_address} on ${en.scheduled_date}${en.time_range}.`,
         };
         if (choice.toPersonnelPush && emp.linkedUserId) {
           const delivered = await notify([emp.linkedUserId], { eventType: "schedule_assigned", vars, fallback, projectId: r.projectId, link: `/dashboard?day=${r.date}`, actorUserId });
           if (delivered && emp.linkedUserId !== actorUserId) {
             // Lovable's push channel: the same text as a message in the person's People chat.
-            const push = await renderPush("schedule_assigned", vars, fallback);
+            const push = await renderPush("schedule_assigned", vars(lang), fallback, lang);
             try {
               const dm = await getOrCreateDm(actorUserId, emp.linkedUserId);
               const { message, recipientIds } = await sendMessage(actorUserId, dm, push.body);
@@ -377,7 +403,7 @@ export async function notifyMatrixPublish(
         }
         const email = emp.email ?? (emp.linkedUserId ? (await findUserById(emp.linkedUserId))?.email : null);
         if (choice.toPersonnelEmail && email) {
-          const status = await sendTemplatedEmail({ eventType: "schedule_assigned", to: email, vars, recipientUserId: emp.linkedUserId, recipientCompanyId: emp.companyId, actorUserId });
+          const status = await sendTemplatedEmail({ eventType: "schedule_assigned", to: email, vars: vars(lang), recipientUserId: emp.linkedUserId, recipientCompanyId: emp.companyId, actorUserId, lang });
           if (status === "sent") sent.email = true;
         }
       }
@@ -389,16 +415,17 @@ export async function notifyMatrixPublish(
 export async function notifyJoinRequestCreated(requesterUserId: string, companyId: string) {
   const requester = await findUserById(requesterUserId);
   const company = await findCompanyById(companyId);
-  const vars = {
-    requester_name: requester?.fullName || requester?.email || "Someone",
+  const vars: VarsFor = (lang) => ({
+    requester_name: requester?.fullName || requester?.email || say("Someone", undefined, lang),
     requester_email: requester?.email ?? "",
-    company_name: company?.name ?? "your company",
-  };
+    company_name: company?.name ?? say("your company", undefined, lang),
+  });
+  const en = vars("en");
   const recipients = await approvers(companyId);
   await notify(recipients, {
     eventType: "join_request",
     vars,
-    fallback: { title: "New join request", body: `${vars.requester_name} asked to join ${vars.company_name}.` },
+    fallback: { title: "New join request", body: `${en.requester_name} asked to join ${en.company_name}.` },
     link: "/dashboard",
     actorUserId: requesterUserId,
   });
@@ -410,13 +437,14 @@ export async function notifyJoinRequestResolved(requestId: string, approved: boo
   if (!joinRequest) return;
   const company = await findCompanyById(joinRequest.companyId);
   const eventType = approved ? "join_approved" : "join_rejected";
-  const vars = { company_name: company?.name ?? "The company" };
+  const vars: VarsFor = (lang) => ({ company_name: company?.name ?? say("The company", undefined, lang) });
+  const en = vars("en");
   await notify([joinRequest.userId], {
     eventType,
     vars,
     fallback: {
       title: approved ? "You're in" : "Join request declined",
-      body: approved ? `${vars.company_name} approved your request. You can start scheduling now.` : `${vars.company_name} declined your request to join.`,
+      body: approved ? `${en.company_name} approved your request. You can start scheduling now.` : `${en.company_name} declined your request to join.`,
     },
     link: "/dashboard",
   });

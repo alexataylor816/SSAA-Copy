@@ -22,7 +22,7 @@ export const TRADES: Trade[] = [
     trade: "Demolition",
     color: "#78716c",
     aliases: ["demo", "demolition", "abatement"],
-    phrases: ["demolition", "selective demo", "abatement", "haul off", "gut"],
+    phrases: ["demolition", "selective demo", "abatement", "haul off", "gut", "demolicion", "demolicion selectiva", "retiro de escombro", "acarreo de escombro"],
   },
   {
     trade: "Drywall",
@@ -46,6 +46,18 @@ export const TRADES: Trade[] = [
       "ceiling grid",
       "act ceiling",
       "soffit",
+      // Spanish (accents are ignored when matching)
+      "tablaroca",
+      "colocacion de tablaroca",
+      "acabado de tablaroca",
+      "encintado",
+      "bastidores",
+      "perfil metalico",
+      "plafon",
+      "plafon reticular",
+      "muros de tablaroca",
+      "cierre de muros",
+      "durock",
     ],
   },
   {
@@ -64,6 +76,18 @@ export const TRADES: Trade[] = [
       "storm drain",
       "gas piping",
       "underground plumbing",
+      // Spanish (accents are ignored when matching)
+      "plomeria",
+      "plomeria en obra negra",
+      "instalacion hidraulica",
+      "instalacion sanitaria",
+      "hidrosanitaria",
+      "muebles de bano",
+      "calentador de agua",
+      "drenaje",
+      "drenaje pluvial",
+      "tuberia de gas",
+      "agua potable",
     ],
   },
   {
@@ -87,6 +111,15 @@ export const TRADES: Trade[] = [
       "split system",
       "mechanical rough-in",
       "test and balance",
+      // Spanish (accents are ignored when matching)
+      "aire acondicionado",
+      "ductos",
+      "instalacion de ductos",
+      "manejadora",
+      "minisplit",
+      "climatizacion",
+      "calefaccion",
+      "equipo de azotea",
     ],
   },
   {
@@ -109,37 +142,47 @@ export const TRADES: Trade[] = [
       "low voltage",
       "fire alarm",
       "data cabling",
+      // Spanish (accents are ignored when matching)
+      "electricidad",
+      "instalacion electrica",
+      "cableado",
+      "luminarias",
+      "contactos",
+      "tableros electricos",
+      "canalizacion",
+      "alumbrado",
+      "voz y datos",
     ],
   },
   {
     trade: "Fire Protection",
     color: "#dc2626",
     aliases: ["fire protection", "sprinkler", "fire sprinkler"],
-    phrases: ["sprinkler", "sprinkler install", "sprinkler rough-in", "fire protection", "standpipe", "sprinkler heads"],
+    phrases: ["sprinkler", "sprinkler install", "sprinkler rough-in", "fire protection", "standpipe", "sprinkler heads", "proteccion contra incendio", "rociadores", "sistema contra incendio", "alarma contra incendio", "red contra incendio"],
   },
   {
     trade: "Painting",
     color: "#9333ea",
     aliases: ["painting", "paint", "painter", "wallcovering"],
-    phrases: ["paint", "painting", "prime", "primer", "wallcovering", "final coat"],
+    phrases: ["paint", "painting", "prime", "primer", "wallcovering", "final coat", "pintura", "pintar", "sellador"],
   },
   {
     trade: "Concrete",
     color: "#475569",
     aliases: ["concrete", "masonry", "flatwork"],
-    phrases: ["concrete", "slab", "pour", "footing", "footings", "foundation", "rebar", "formwork", "sidewalk", "masonry", "cmu"],
+    phrases: ["concrete", "slab", "pour", "footing", "footings", "foundation", "rebar", "formwork", "sidewalk", "masonry", "cmu", "concreto", "colado", "colado de losa", "cimbra", "firme de concreto", "cimentacion", "zapatas"],
   },
   {
     trade: "Flooring",
     color: "#db2777",
     aliases: ["flooring", "tile", "carpet"],
-    phrases: ["flooring", "floor tile", "tile", "carpet", "lvt", "vct", "floor prep", "epoxy floor"],
+    phrases: ["flooring", "floor tile", "tile", "carpet", "lvt", "vct", "floor prep", "epoxy floor", "pisos", "loseta", "azulejo", "porcelanato", "piso epoxico", "alfombra"],
   },
   {
     trade: "Carpentry",
     color: "#a16207",
     aliases: ["carpentry", "millwork", "finish carpentry", "casework"],
-    phrases: ["millwork", "casework", "trim out", "doors and hardware", "door install", "cabinets", "finish carpentry", "blocking"],
+    phrases: ["millwork", "casework", "trim out", "doors and hardware", "door install", "cabinets", "finish carpentry", "blocking", "carpinteria", "puertas", "herrajes", "molduras", "closets"],
   },
 ];
 
@@ -162,6 +205,8 @@ const AMBIGUOUS: Record<string, string[]> = {
 
 const norm = (s: string) =>
   s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // "plomería" → "plomeria", so Spanish task names match
     .toLowerCase()
     .replace(/[^a-z0-9 -]/g, " ")
     .replace(/\s+/g, " ")

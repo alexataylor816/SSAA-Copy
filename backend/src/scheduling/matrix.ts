@@ -36,6 +36,7 @@ import {
 } from "./models.js";
 import { canSeeProject, requireUserWithCompany, toLabel } from "./service.js";
 import type { Project, ScheduleRequest } from "./types.js";
+import { dayLabel as localDayLabel, say } from "../i18n/index.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -79,10 +80,8 @@ export function addDays(iso: string, n: number): string {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
-export const dayLabel = (iso: string) => {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-};
+/** "Fri, Oct 23" (or "vie, 23 oct" for a Spanish request). */
+export const dayLabel = (iso: string) => localDayLabel(iso);
 
 const firstName = (name: string) => name.split(" ")[0] || name;
 
@@ -429,15 +428,18 @@ export async function applyBatch(userId: string, body: BatchBody): Promise<{ res
       if (!overlaps(span, otherSpan)) continue;
       const hit = employeeIds.find((id) => other.employeeIds.includes(id));
       if (!hit) continue;
-      const name = firstName(other.employeeNames[other.employeeIds.indexOf(hit)] ?? "That person");
-      const when = other.startTime && other.endTime ? `${toLabel(otherSpan.start)}–${toLabel(otherSpan.end)}` : "all day";
-      const where = (await viewerSees(other.projectId)) ? `on ${(await project(other.projectId))?.name ?? "another project"}` : "with another contractor";
-      return `${name} is already ${other.status === "confirmed" ? "booked" : "requested"} ${when} ${where} on ${dayLabel(date)}.`;
+      const name = firstName(other.employeeNames[other.employeeIds.indexOf(hit)] ?? say("That person"));
+      const when = other.startTime && other.endTime ? `${toLabel(otherSpan.start)}–${toLabel(otherSpan.end)}` : say("all day");
+      const where = (await viewerSees(other.projectId))
+        ? say("on {project}", { project: (await project(other.projectId))?.name ?? say("another project") })
+        : say("with another contractor");
+      const status = say(other.status === "confirmed" ? "booked" : "requested");
+      return say("{name} is already {status} {when} {where} on {day}.", { name, status, when, where, day: dayLabel(date) });
     }
     for (const t of taken) {
       if (t.date === date && employeeIds.includes(t.employeeId) && overlaps(span, t.span)) {
-        const name = firstName((await employee(t.employeeId))?.name ?? "That person");
-        return `${name} is placed twice at the same time on ${dayLabel(date)} in this change.`;
+        const name = firstName((await employee(t.employeeId))?.name ?? say("That person"));
+        return say("{name} is placed twice at the same time on {day} in this change.", { name, day: dayLabel(date) });
       }
     }
     return null;
@@ -447,9 +449,14 @@ export async function applyBatch(userId: string, body: BatchBody): Promise<{ res
     const usable = (await listAvailabilityForEmployeeOn(emp.id, date)).filter(
       (a) => a.allProjects || a.projectId === null || a.projectId === projectId,
     );
-    if (usable.length === 0) return `${firstName(emp.name)} has no hours posted on ${dayLabel(date)}.`;
+    if (usable.length === 0) return say("{name} has no hours posted on {day}.", { name: firstName(emp.name), day: dayLabel(date) });
     if (timed && !usable.some((a) => contains(spanOf(a.startTime, a.endTime), span))) {
-      return `${firstName(emp.name)}'s posted hours on ${dayLabel(date)} don't cover ${toLabel(span.start)}–${toLabel(span.end)}.`;
+      return say("{name}'s posted hours on {day} don't cover {start}–{end}.", {
+        name: firstName(emp.name),
+        day: dayLabel(date),
+        start: toLabel(span.start),
+        end: toLabel(span.end),
+      });
     }
     return null;
   }
@@ -460,14 +467,19 @@ export async function applyBatch(userId: string, body: BatchBody): Promise<{ res
     const misses: Employee[] = [];
     for (const emp of people) if (!(await assignedTo(emp.id)).has(projectId)) misses.push(emp);
     if (misses.length === 0) return;
-    const projectName = (await project(projectId))?.name ?? "Project";
+    const projectName = (await project(projectId))?.name ?? say("Project");
     for (const emp of misses) {
       if (!result.unassigned.some((u) => u.employeeId === emp.id && u.projectId === projectId)) {
         result.unassigned.push({ employeeId: emp.id, employeeName: emp.name, jobTitle: emp.jobTitle, projectId, projectName, date });
       }
     }
     if (!dryRun && !body.allowUnassigned) {
-      throw new Skip(`${misses.map((e) => e.name).join(", ")} ${misses.length === 1 ? "is" : "are"} not assigned to ${projectName}.`);
+      throw new Skip(
+        say(misses.length === 1 ? "{names} is not assigned to {project}." : "{names} are not assigned to {project}.", {
+          names: misses.map((e) => e.name).join(", "),
+          project: projectName,
+        }),
+      );
     }
   }
 
@@ -476,7 +488,7 @@ export async function applyBatch(userId: string, body: BatchBody): Promise<{ res
     const out: Employee[] = [];
     for (const id of new Set(ids as string[])) {
       const emp = await employee(id);
-      if (!emp || emp.companyId !== companyId) throw new Skip("Someone in this change isn't on that company's crew.");
+      if (!emp || emp.companyId !== companyId) throw new Skip(say("Someone in this change isn't on that company's crew."));
       out.push(emp);
     }
     return out;
@@ -509,19 +521,19 @@ export async function applyBatch(userId: string, body: BatchBody): Promise<{ res
         if (u.date !== undefined && !DATE_RE.test(u.date)) throw new BadRequestError("date must be formatted YYYY-MM-DD.");
         const req = await findScheduleRequestById(u.requestId);
         if (!req || (req.status !== "pending" && req.status !== "confirmed")) {
-          throw new Skip("That booking was already changed or cancelled. Refresh and try again.");
+          throw new Skip(say("That booking was already changed or cancelled. Refresh and try again."));
         }
         const subSide = v.companyId === req.subCompanyId;
-        if (!subSide && v.companyId !== req.requestingCompanyId) throw new Skip("You can't change that booking.");
+        if (!subSide && v.companyId !== req.requestingCompanyId) throw new Skip(say("You can't change that booking."));
         const projectId = u.projectId ?? req.projectId;
         const date = u.date ?? req.date;
         const startTime = u.startTime !== undefined ? u.startTime : req.startTime;
         const endTime = u.endTime !== undefined ? u.endTime : req.endTime;
-        if (locked(v, req.date) || locked(v, date)) throw new Skip("That week is locked.");
+        if (locked(v, req.date) || locked(v, date)) throw new Skip(say("That week is locked."));
         const project_ = await project(projectId);
-        if (!project_ || !(await viewerSees(projectId))) throw new Skip("Project not found.");
+        if (!project_ || !(await viewerSees(projectId))) throw new Skip(say("Project not found."));
         if (projectId !== req.projectId && project_.companyId !== req.subCompanyId && !(await findProjectConnection(projectId, req.subCompanyId))) {
-          throw new Skip(`${req.subCompanyName ?? "That company"} isn't connected to ${project_.name}.`);
+          throw new Skip(say("{company} isn't connected to {project}.", { company: req.subCompanyName ?? say("That company"), project: project_.name }));
         }
 
         const people = await crewOf(u.employeeIds, req.subCompanyId);
@@ -582,13 +594,13 @@ export async function applyBatch(userId: string, body: BatchBody): Promise<{ res
         }
         if (typeof c.date !== "string" || !DATE_RE.test(c.date)) throw new BadRequestError("date must be formatted YYYY-MM-DD.");
         checkTimes(c.startTime, c.endTime);
-        if (locked(v, c.date)) throw new Skip("That week is locked.");
+        if (locked(v, c.date)) throw new Skip(say("That week is locked."));
         const project_ = await project(c.projectId);
-        if (!project_ || !(await viewerSees(c.projectId))) throw new Skip("Project not found.");
-        if (isSub && c.subCompanyId !== v.companyId) throw new Skip("You can only place your own crew.");
+        if (!project_ || !(await viewerSees(c.projectId))) throw new Skip(say("Project not found."));
+        if (isSub && c.subCompanyId !== v.companyId) throw new Skip(say("You can only place your own crew."));
         if (c.subCompanyId !== project_.companyId && !(await findProjectConnection(c.projectId, c.subCompanyId))) {
           const name = (await findCompanyById(c.subCompanyId))?.name ?? "That company";
-          throw new Skip(`${name} isn't connected to ${project_.name}.`);
+          throw new Skip(say("{company} isn't connected to {project}.", { company: name, project: project_.name }));
         }
 
         const people = await crewOf(c.employeeIds, c.subCompanyId);

@@ -343,3 +343,78 @@ export function fillPlaceholders(text: string, vars: Record<string, string | num
     return html ? escapeHtml(String(value)) : String(value);
   });
 }
+
+/**
+ * Spanish versions of the default templates, used when the recipient's language is Spanish. The on/off
+ * switches still come from the operator's template rows. (The Correspondence screen edits the English
+ * text only for now; these are the Spanish wording until it gets a Spanish tab.)
+ */
+export const SPANISH_TEMPLATES: Record<string, { subject: string; bodyHtml: string; push?: { title: string; body: string } }> = {
+  schedule_created: {
+    subject: "Nueva solicitud de programación: {project_name}",
+    bodyHtml:
+      "<h2>Nueva solicitud de programación</h2><p><strong>{requesting_company}</strong> solicitó <strong>{crew_count}</strong> para <strong>{project_name}</strong>.</p><p><strong>Fecha:</strong> {scheduled_date}<br/><strong>Horario:</strong> {start_time} – {end_time}<br/><strong>Cuadrilla:</strong> {crew_names}</p><p>Abra SSAA para confirmar o rechazar.</p>",
+    push: { title: "Nueva solicitud de programación", body: "{requesting_company} solicitó {crew_count} para el {scheduled_date} en {project_name}." },
+  },
+  schedule_confirmed: {
+    subject: "Programa confirmado: {project_name}",
+    bodyHtml:
+      "<h2>Programa confirmado</h2><p><strong>{sub_company}</strong> confirmó el programa de <strong>{project_name}</strong> para el <strong>{scheduled_date}</strong>.</p><p><strong>Horario:</strong> {start_time} – {end_time}</p>",
+    push: { title: "Solicitud confirmada", body: "{sub_company} confirmó el {scheduled_date} en {project_name}." },
+  },
+  schedule_rejected: {
+    subject: "Programa rechazado: {project_name}",
+    bodyHtml: "<h2>Programa rechazado</h2><p><strong>{sub_company}</strong> rechazó el <strong>{scheduled_date}</strong> en <strong>{project_name}</strong>.</p><p>{reason}</p>",
+    push: { title: "Solicitud rechazada", body: "{sub_company} rechazó el {scheduled_date} en {project_name}. {reason}" },
+  },
+  schedule_cancelled: {
+    subject: "Programa cancelado: {project_name}",
+    bodyHtml:
+      "<h2>Programa cancelado</h2><p><strong>{cancelling_company}</strong> canceló el programa de <strong>{project_name}</strong> para el <strong>{scheduled_date}</strong>.</p><p>{reason}</p>",
+    push: { title: "Solicitud cancelada", body: "{cancelling_company} canceló el {scheduled_date} en {project_name}. {reason}" },
+  },
+  schedule_edited: {
+    subject: "Programa actualizado: {project_names}",
+    bodyHtml:
+      "<h2>Programa actualizado</h2><p><strong>{company_name}</strong> actualizó el programa: {change_count} en <strong>{project_names}</strong> ({dates}).</p><p>Abra SSAA para revisar los cambios.</p>",
+    push: { title: "Programa modificado", body: "{company_name} actualizó el programa: {change_count} en {project_names} ({dates})." },
+  },
+  schedule_batch_sent: {
+    subject: "Nuevas solicitudes de programación: {project_names}",
+    bodyHtml:
+      "<h2>Nuevas solicitudes de programación</h2><p><strong>{company_name}</strong> envió solicitudes de programación: {change_count} en <strong>{project_names}</strong> ({dates}).</p><p>Abra SSAA para confirmar o rechazar.</p>",
+    push: { title: "Nuevas solicitudes de programación", body: "{company_name} envió solicitudes de programación: {change_count} en {project_names} ({dates})." },
+  },
+  schedule_assigned: {
+    subject: "Está programado en {project_name} el {scheduled_date}",
+    bodyHtml:
+      "<h2>Ya está en el programa</h2><p>Hola, {employee_name}:</p><p><strong>{company_name}</strong> lo programó en <strong>{project_name}</strong>{project_address} para el <strong>{scheduled_date}</strong>{time_range}.</p>",
+    push: { title: "Ya está en el programa", body: "Hola, {employee_name}: está programado en {project_name}{project_address} el {scheduled_date}{time_range}." },
+  },
+  join_request: {
+    subject: "Nueva solicitud para unirse a {company_name}",
+    bodyHtml:
+      "<h2>Nueva solicitud de ingreso</h2><p><strong>{requester_name}</strong> ({requester_email}) pidió unirse a <strong>{company_name}</strong> en SSAA.</p><p>Inicie sesión para aprobar o rechazar la solicitud.</p>",
+    push: { title: "Nueva solicitud de ingreso", body: "{requester_name} pidió unirse a {company_name}." },
+  },
+  join_approved: {
+    subject: "Ya forma parte de {company_name}",
+    bodyHtml: "<p>Hola, {user_name}:</p><p><strong>{company_name}</strong> aprobó su solicitud. Ya puede empezar a programar.</p>",
+    push: { title: "Ya forma parte del equipo", body: "{company_name} aprobó su solicitud. Ya puede empezar a programar." },
+  },
+  join_rejected: {
+    subject: "Solicitud de ingreso rechazada",
+    bodyHtml: "<p>Hola, {user_name}:</p><p><strong>{company_name}</strong> rechazó su solicitud para unirse.</p>",
+    push: { title: "Solicitud de ingreso rechazada", body: "{company_name} rechazó su solicitud para unirse." },
+  },
+  password_reset: {
+    subject: "Su código para restablecer la contraseña",
+    bodyHtml:
+      "<p>Hola:</p><p>Su código de verificación para restablecer la contraseña es: <strong style=\"font-size:20px;letter-spacing:2px\">{code}</strong></p><p>Este código vence en 15 minutos. Si usted no pidió restablecer su contraseña, ignore este correo.</p>",
+  },
+  username_reminder: {
+    subject: "Su usuario de SSAA",
+    bodyHtml:
+      "<p>Hola, {user_name}:</p><p>Su usuario de SSAA (el correo con el que inicia sesión) es: <strong>{email}</strong></p><p>Si usted no lo pidió, puede ignorar este correo.</p>",
+  },
+};

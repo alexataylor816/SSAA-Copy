@@ -19,6 +19,7 @@ import { addDays, dayLabel, spanOf, subtract, type Span } from "../scheduling/ma
 import { isDateLocked } from "../scheduling/historicalLock.js";
 import { TRADES, matchTaskToTrade, normaliseTaskName, tradeFromCompanyText } from "./trades.js";
 import { classifyTasks, claudeConfigured } from "./claude.js";
+import { say } from "../i18n/index.js";
 
 export async function ensureAiTables(): Promise<void> {
   await database.exec(`
@@ -158,11 +159,18 @@ export async function recommend(userId: string, params: { projectId?: unknown; w
   const unsure = new Map<string, { suggested: string | null; why: string }>();
   for (const name of [...new Set(tasks.map((t) => t.name))]) {
     const m = matchTaskToTrade(name, learned);
-    if (m.confidence === "learned") decided.set(name, { trade: m.trade!, reason: "You told us this trade before." });
-    else if (m.confidence === "lookup") decided.set(name, { trade: m.trade!, reason: `"${m.matched}" is ${m.trade} work.` });
+    if (m.confidence === "learned") decided.set(name, { trade: m.trade!, reason: say("You told us this trade before.") });
+    else if (m.confidence === "lookup") decided.set(name, { trade: m.trade!, reason: say('"{matched}" is {trade} work.', { matched: m.matched, trade: say(m.trade!) }) });
     else if (m.confidence === "ambiguous") {
       const onJob = m.alternatives.filter((t) => projectTrades.includes(t));
-      if (onJob.length === 1) decided.set(name, { trade: onJob[0], reason: `"${name}" can be ${m.alternatives.join(" or ")}; ${onJob[0]} is the one on this project.` });
+      if (onJob.length === 1) decided.set(name, {
+          trade: onJob[0],
+          reason: say('"{name}" can be {options}; {onJob} is the one on this project.', {
+            name,
+            options: m.alternatives.map((a) => say(a)).reduce((acc, a) => say("{a} or {b}", { a: acc, b: a })),
+            onJob: say(onJob[0]),
+          }),
+        });
       else unsure.set(name, { suggested: onJob[0] ?? m.trade, why: `"${name}" can be ${m.alternatives.join(" or ")} work.` });
     } else unsure.set(name, { suggested: null, why: `"${name}" isn't on the lookup list.` });
   }
@@ -174,7 +182,7 @@ export async function recommend(userId: string, params: { projectId?: unknown; w
       for (const [name, a] of answers) {
         if (!unsure.has(name)) continue;
         if (a.trade && a.confident) {
-          decided.set(name, { trade: a.trade, reason: `AI: ${a.reason}` });
+          decided.set(name, { trade: a.trade, reason: say("AI: {reason}", { reason: a.reason }) });
           unsure.delete(name);
         } else unsure.set(name, { suggested: a.trade ?? unsure.get(name)!.suggested, why: a.trade ? `AI thinks ${a.trade} but isn't sure: ${a.reason}` : `AI couldn't place it: ${a.reason}` });
       }
