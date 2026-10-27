@@ -29,6 +29,11 @@ const translations: Record<string, Record<Language, string>> = {
   'landing.canNowLogin': { en: 'You can now log in with your credentials.', es: 'Ahora puedes iniciar sesión con tus credenciales.' },
   'landing.accountLinked': { en: 'Account created & linked!', es: '¡Cuenta creada y vinculada!' },
 
+  // Auth errors raised in AuthContext
+  'auth.couldNotSignIn': { en: 'Could not sign in.', es: 'No se pudo iniciar sesión.' },
+  'auth.couldNotSignInGoogle': { en: 'Could not sign in with Google.', es: 'No se pudo iniciar sesión con Google.' },
+  'auth.couldNotCreateAccount': { en: 'Could not create that account.', es: 'No se pudo crear esa cuenta.' },
+
   // Language names
   'language.english': { en: 'English', es: 'Inglés' },
   'language.spanish': { en: 'Spanish', es: 'Español' },
@@ -826,13 +831,17 @@ const translations: Record<string, Record<Language, string>> = {
   'company.renewSuccessDesc': { en: 'Your cancellation request has been withdrawn. Your account will continue as normal.', es: 'Tu solicitud de cancelación ha sido retirada. Tu cuenta continuará con normalidad.' },
 };
 
-export function getTranslation(key: string, lang: Language, replacements?: Record<string, string>): string {
+export function getTranslation(
+  key: string,
+  lang: Language,
+  replacements?: Record<string, string | number | null | undefined>,
+): string {
   const entry = translations[key];
   if (!entry) return key;
   let text = entry[lang] || entry['en'] || key;
   if (replacements) {
     Object.entries(replacements).forEach(([k, v]) => {
-      text = text.split(`{${k}}`).join(v);
+      text = text.split(`{${k}}`).join(v == null ? "" : String(v));
     });
   }
   return text;

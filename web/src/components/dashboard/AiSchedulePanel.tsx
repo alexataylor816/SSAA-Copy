@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { dateLocale } from "@/i18n/runtime";
 
 /**
  * The GC's AI Schedule Recommender and Upload Schedule (docs/AI_SCHEDULE_RECOMMENDER.md).
@@ -76,7 +77,7 @@ const TRADE_COLORS: Record<string, string> = {
   Carpentry: "#a16207",
 };
 
-const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric" });
 
 export default function AiSchedulePanel({
   projects,

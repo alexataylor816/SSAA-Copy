@@ -1,6 +1,7 @@
 import { AlertTriangle, Ban, Building2, CalendarClock, CheckCircle2, ChevronRight, HardHat, Mail, PencilLine, Users, FolderKanban, UserX } from "lucide-react";
 import { when, type Overview } from "@/lib/operatorApi";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { dateLocale } from "@/i18n/runtime";
 
 /** The operator's first screen: how big the platform is, what needs attention, and what just happened. */
 
@@ -20,7 +21,7 @@ const REQUEST_STYLE: Record<string, string> = {
 
 const shortDay = (iso: string) => {
   const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return new Date(y, m - 1, d).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric" });
 };
 
 export default function OverviewTab({

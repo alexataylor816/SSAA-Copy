@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useReducer, useRef } from "react";
+import { getLanguage } from "@/i18n/runtime";
 
 /** The wire format accepted by `/query`. `is`/`not`/`in` are emitted by the
  * dedicated helpers below, so `.filter()` accepts only the comparison ops. */
@@ -109,6 +110,8 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      // The server answers errors in this language.
+      "Accept-Language": getLanguage(),
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     },
     body: JSON.stringify(body),

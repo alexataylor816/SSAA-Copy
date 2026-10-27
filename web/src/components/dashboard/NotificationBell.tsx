@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { dateFnsLocale } from "@/i18n/runtime";
 
 /** Port of Lovable's NotificationBell. Push-notification opt-in is not ported. */
 
@@ -100,7 +101,7 @@ export default function NotificationBell() {
                     <div className="line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">{item.body}</div>
                   )}
                   <div className="mt-1 text-[10px] text-muted-foreground">
-                    {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
+                    {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true, locale: dateFnsLocale() })}
                   </div>
                 </button>
               ))}

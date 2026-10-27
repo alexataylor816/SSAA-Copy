@@ -37,6 +37,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { CalendarDays, Plus } from "lucide-react";
+import { dateLocale } from "@/i18n/runtime";
 
 interface Project {
   id: string;
@@ -92,7 +93,7 @@ const parseDay = (value: string) => {
 
 /** "2026-10-08" -> "Thu, Oct 8" */
 const formatDay = (value: string) =>
-  parseDay(value).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  parseDay(value).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric" });
 
 /** "13:30" -> "1:30 PM" */
 const formatTime = (value: string | null) => {

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Building2, Calendar, Users } from "lucide-react";
 import heroImage from "@/assets/hero-construction.jpg";
+import LanguageToggle from "@/components/LanguageToggle";
 
 const features = [
   { icon: Calendar, label: "Smart Scheduling" },
@@ -16,7 +17,9 @@ const features = [
  */
 export default function AuthLayout({ children, inviteNote }: { children: ReactNode; inviteNote?: string }) {
   return (
-    <div className="min-h-dvh flex flex-col lg:flex-row">
+    <div className="relative min-h-dvh flex flex-col lg:flex-row">
+      <LanguageToggle tone="onPrimary" className="absolute right-3 top-3 z-20 lg:hidden" />
+      <LanguageToggle className="absolute right-4 top-4 z-20 hidden lg:flex" />
       {/* Phones get a slim banner (name + tagline) so the form fits on one screen. */}
       <div className="lg:w-1/2 bg-primary relative flex items-center justify-center px-6 py-5 lg:p-16">
         <div

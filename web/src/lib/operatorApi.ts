@@ -1,3 +1,4 @@
+import { dateLocale } from "@/i18n/runtime";
 /** Shapes returned by the operator API (backend/src/admin/routes.ts). */
 
 export type OperatorLevel = "owner" | "main_operator" | "view_only";
@@ -192,5 +193,5 @@ export const when = (iso: string) => {
   const d = new Date(iso.includes("T") ? iso : `${iso.replace(" ", "T")}Z`);
   return Number.isNaN(d.getTime())
     ? iso
-    : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+    : d.toLocaleString(dateLocale(), { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 };

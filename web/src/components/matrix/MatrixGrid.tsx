@@ -9,6 +9,7 @@ import EmployeeCard from "./EmployeeCard";
 import { DAY_COL, PROJECT_COL, cardDragId, densityFor } from "./helpers";
 import { isLockedDate } from "./canDrop";
 import { cellKey, type MatrixModel, type Placement } from "./useMatrixDrafts";
+import { dateLocale } from "@/i18n/runtime";
 
 /**
  * Projects down the side, days across the top (O5), from the desktop table in Luke's ResourceMatrix.
@@ -41,8 +42,8 @@ const weekdayOf = (date: string) => new Date(`${date}T00:00:00`).getDay();
 const headerParts = (date: string) => {
   const d = new Date(`${date}T00:00:00`);
   return {
-    weekday: d.toLocaleDateString("en-US", { weekday: "short" }),
-    day: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    weekday: d.toLocaleDateString(dateLocale(), { weekday: "short" }),
+    day: d.toLocaleDateString(dateLocale(), { month: "short", day: "numeric" }),
   };
 };
 const todayIso = () => {

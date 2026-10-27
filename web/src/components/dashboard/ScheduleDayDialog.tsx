@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { formatDate } from "@/i18n/runtime";
 
 /**
  * The core of Lovable's ScheduleModal, opened by clicking a calendar day.
@@ -1182,7 +1183,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                 ? t("schedule.viewAvailability")
                 : t("schedule.setAvailability")}
           </DialogTitle>
-          <DialogDescription>{date ? format(date, "EEEE, MMMM d, yyyy") : ""}</DialogDescription>
+          <DialogDescription>{date ? formatDate(date, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : ""}</DialogDescription>
         </DialogHeader>
 
         {locked && (

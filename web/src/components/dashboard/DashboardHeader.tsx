@@ -7,6 +7,7 @@ import NotificationBell from "@/components/dashboard/NotificationBell";
 import ManageProfileDialog from "@/components/dashboard/ManageProfileDialog";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Button } from "@/components/ui/button";
+import LanguageToggle from "@/components/LanguageToggle";
 
 /**
  * The GC/sub branch of Lovable's DashboardHeader. Operator (MOA) tabs and
@@ -84,7 +85,9 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               </Button>
             )}
 
-            {/* Below lg only the bell stays up here; everything else is in MobileTabBar at the bottom. */}
+            <LanguageToggle tone="onPrimary" />
+
+            {/* Below lg only the bell and language stay up here; everything else is in MobileTabBar at the bottom. */}
             <NotificationBell />
 
             <Button

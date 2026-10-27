@@ -19,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { formatDate, formatTime } from "@/i18n/runtime";
 
 /**
  * Messages: a Projects / People / Group Chats picker at the top of the list
@@ -92,16 +93,16 @@ function Avatar({
 /** Teams-style list time: 2:15 PM today, "Yesterday", weekday this week, else Oct 12. */
 function listTime(iso: string): string {
   const d = new Date(iso);
-  if (isToday(d)) return format(d, "h:mm a");
+  if (isToday(d)) return formatTime(d);
   if (isYesterday(d)) return "Yesterday";
-  if (differenceInCalendarDays(new Date(), d) < 7) return format(d, "EEE");
-  return format(d, "MMM d");
+  if (differenceInCalendarDays(new Date(), d) < 7) return formatDate(d, { weekday: "short" });
+  return formatDate(d, { month: "short", day: "numeric" });
 }
 
 function dayLabel(d: Date): string {
   if (isToday(d)) return "Today";
   if (isYesterday(d)) return "Yesterday";
-  return format(d, "EEEE, MMMM d");
+  return formatDate(d, { weekday: "long", month: "long", day: "numeric" });
 }
 
 const UnreadPill = ({ count }: { count: number }) =>
@@ -371,7 +372,7 @@ function Thread({
                   {separator}
                   <div className={`flex justify-end ${continued ? "mt-0.5" : "mt-3"}`}>
                     <div className="max-w-[80%] rounded-lg bg-primary/10 px-3 py-2 md:max-w-[70%]">
-                      {!continued && <div className="mb-0.5 text-right text-[11px] text-muted-foreground">{format(at, "h:mm a")}</div>}
+                      {!continued && <div className="mb-0.5 text-right text-[11px] text-muted-foreground">{formatTime(at)}</div>}
                       <div className="whitespace-pre-wrap break-words text-sm">{m.body}</div>
                     </div>
                   </div>
@@ -390,7 +391,7 @@ function Thread({
                         {conv.type !== "dm" && m.senderCompanyName && (
                           <span className="text-muted-foreground">{m.senderCompanyName}</span>
                         )}
-                        <span className="text-muted-foreground">{format(at, "h:mm a")}</span>
+                        <span className="text-muted-foreground">{formatTime(at)}</span>
                       </div>
                     )}
                     <div className="whitespace-pre-wrap break-words text-sm">{m.body}</div>

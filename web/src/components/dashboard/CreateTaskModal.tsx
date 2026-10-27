@@ -11,6 +11,7 @@ import { CalendarIcon, Plus, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { dateFnsLocale } from "@/i18n/runtime";
 
 interface TaskEntry {
   name: string;
@@ -206,7 +207,7 @@ const TaskEntryForm = ({ index, task, showLabel, showRemove, onUpdate, onRemove 
               )}
             >
               <CalendarIcon className="mr-2 h-4 w-4" />
-              {task.startDate ? format(task.startDate, "PPP") : <span>{t('task.pickStartDate')}</span>}
+              {task.startDate ? format(task.startDate, "PPP", { locale: dateFnsLocale() }) : <span>{t('task.pickStartDate')}</span>}
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
@@ -233,7 +234,7 @@ const TaskEntryForm = ({ index, task, showLabel, showRemove, onUpdate, onRemove 
               )}
             >
               <CalendarIcon className="mr-2 h-4 w-4" />
-              {task.endDate ? format(task.endDate, "PPP") : <span>{t('task.pickEndDate')}</span>}
+              {task.endDate ? format(task.endDate, "PPP", { locale: dateFnsLocale() }) : <span>{t('task.pickEndDate')}</span>}
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">

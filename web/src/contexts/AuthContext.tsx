@@ -10,7 +10,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import { authApi, type SessionUser } from "@/lib/api";
 import { getToken, onAuthChange, setToken, supabase } from "@/lib/supabase";
-import { clearViewAs } from "@/lib/viewAs";
+import { clearViewAs, isViewingAs } from "@/lib/viewAs";
+import { getLanguage, isLanguage, setLanguage as setAppLanguage, tr } from "@/i18n/runtime";
 
 export type PermissionLevel = "basic" | "standard" | "level_1" | "partial" | "full" | "account_holder";
 
@@ -76,6 +77,18 @@ function withMirrors(user: SessionUser | null): SessionUser | null {
   return { ...user, full_name: user.fullName, company_id: user.companyId };
 }
 
+/** A brand-new account starts in whatever language the person chose on the
+ *  sign-up screen, instead of the server default (English). */
+async function saveChosenLanguage(): Promise<void> {
+  const lang = getLanguage();
+  if (lang === "en") return;
+  try {
+    await authApi.updateProfile({ language: lang });
+  } catch {
+    /* not fatal: they can change it under Manage My Profile */
+  }
+}
+
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -111,6 +124,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
       const profileData = row ? toSessionUser(row as UserRow) : null;
       setUser(profileData);
+      // The language saved on the profile wins on sign-in, so a crew member
+      // who picked Spanish gets Spanish on any phone. Not while an operator is
+      // viewing as someone, so the operator's own screen doesn't flip.
+      if (profileData && isLanguage(profileData.language) && !isViewingAs()) {
+        setAppLanguage(profileData.language);
+      }
 
       let roleData: UserRole | null = null;
       if (profileData?.companyId) {
@@ -183,7 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await loadUserData(sessionUser.id);
       return { error: null };
     } catch (err) {
-      return { error: err instanceof Error ? err : new Error("Could not sign in.") };
+      return { error: err instanceof Error ? err : new Error(tr("auth.couldNotSignIn")) };
     }
   }, [loadUserData]);
 
@@ -191,12 +210,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (credential: string) => {
       try {
         const { user: sessionUser, created } = await authApi.google(credential);
+        if (created) await saveChosenLanguage();
         setUser(withMirrors(sessionUser));
         await loadUserData(sessionUser.id);
         return { error: null, created };
       } catch (err) {
         return {
-          error: err instanceof Error ? err : new Error("Could not sign in with Google."),
+          error: err instanceof Error ? err : new Error(tr("auth.couldNotSignInGoogle")),
           created: undefined,
         };
       }
@@ -212,11 +232,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           password,
           fullName: fullName ?? "",
         });
+        await saveChosenLanguage();
         setUser(withMirrors(sessionUser));
         await loadUserData(sessionUser.id);
         return { error: null };
       } catch (err) {
-        return { error: err instanceof Error ? err : new Error("Could not create that account.") };
+        return { error: err instanceof Error ? err : new Error(tr("auth.couldNotCreateAccount")) };
       }
     },
     [loadUserData],

@@ -47,6 +47,7 @@ import NotifyDialog from "@/components/matrix/NotifyDialog";
 import GCNotifyDialog from "@/components/matrix/GCNotifyDialog";
 import { applyDrop, applyRemove, dayLabel, isLockedDate, type DragSource, type DropTarget } from "@/components/matrix/canDrop";
 import { buildModel, cellKey, toBatch, useMatrixDrafts, type Placement } from "@/components/matrix/useMatrixDrafts";
+import { dateLocale } from "@/i18n/runtime";
 
 // Sliding range: start two weeks back, extend four weeks at a time at either end, at most about a year.
 const CHUNK_DAYS = 28;
@@ -494,7 +495,7 @@ export default function ResourceMatrix() {
       ? days.slice(visible.first, visible.last + 1)
       : days.slice(firstOfWeek(selectedDate), firstOfWeek(selectedDate) + 7);
   const fmtDay = (d: string, year = false) =>
-    new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(year ? { year: "numeric" } : {}) });
+    new Date(`${d}T00:00:00`).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", ...(year ? { year: "numeric" } : {}) });
   const weekLabel = shown.length ? `${fmtDay(shown[0])} – ${fmtDay(shown[shown.length - 1], true)}` : "";
 
   if (!companyId && !mock) {
@@ -635,9 +636,9 @@ export default function ResourceMatrix() {
                         } ${copied && !active ? "border-dashed border-primary" : ""}`}
                       >
                         <span className="text-[10px] font-semibold uppercase leading-none opacity-70">
-                          {showMonth ? date.toLocaleDateString("en-US", { month: "short" }) : "\u00a0"}
+                          {showMonth ? date.toLocaleDateString(dateLocale(), { month: "short" }) : "\u00a0"}
                         </span>
-                        <span>{date.toLocaleDateString("en-US", { weekday: "short" })}</span>
+                        <span>{date.toLocaleDateString(dateLocale(), { weekday: "short" })}</span>
                         <span className="text-base font-semibold leading-tight">{date.getDate()}</span>
                         <span className={`mt-0.5 h-1 w-1 rounded-full ${busy ? (active ? "bg-primary-foreground" : "bg-primary") : "bg-transparent"}`} />
                       </button>
