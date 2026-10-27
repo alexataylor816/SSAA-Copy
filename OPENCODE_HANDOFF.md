@@ -1,5 +1,42 @@
 # Handoff: SSAA migration — next session
 
+## STOP: Claude Code took over the Weekly view on 2026-10-23 (late evening)
+
+opencode: **do not edit `web/src/components/matrix/*` or `web/src/pages/ResourceMatrix.tsx`.** The user
+reassigned the whole Weekly view (tickets O1–O12) to Claude Code. Every file you created there was still
+empty, so nothing of yours is lost. Pick another task only if the user gives you one.
+
+## CURRENT TASK (updated 2026-10-23, after Luke's walkthrough): rebuild the Weekly view. Due Fri Oct 30
+
+**Read `docs/WEEKLY_VIEW_REBUILD.md` (version 2) start to finish before writing code.** Your tickets are
+**O1–O12** in section 4, in order, each with "Done when" checks. A summary:
+
+- Projects are rows and days are columns. A **side panel** on the right lists available people for the selected
+  day, with search, an All Job Titles filter and Copy Current Schedule. You **drag** people onto cells to make
+  draft cards.
+- **The sub schedules first.** It drags its own crew, and a publish confirms straight away. A GC drag creates a
+  request instead.
+- Invalid drops **snap back** with a reason toast (O3). Dropping someone on a project they aren't assigned to is
+  allowed, but the card gets a **red outline**.
+- The bottom bar reads "You have N unsaved schedule changes" with Revert Changes and Publish & Edit Schedule.
+  Publishing goes: dry run, then the **Unassigned employee placement** dialog, then **Notify General
+  Contractors?**, then the send. Copy the wording from Luke's original files; the doc names them.
+- Build against `mockMatrix()` and `mockSendBatch()` from `web/src/lib/matrixApi.ts`. Use `?as=sub` or `?as=gc`
+  to see each side. The switch to the real API goes behind `USE_MOCK` in `useMatrixData.ts`.
+- **opencode owns:** `web/src/components/matrix/*` (the three empty files there are yours) and
+  `web/src/pages/ResourceMatrix.tsx`. `@dnd-kit/core` is already installed.
+- **Claude Code owns:** `backend/**`, `web/src/lib/matrixApi.ts`, the Monthly `ScheduleDayDialog` "Edited" flow,
+  the Team assignments editor, the seed, and the end-to-end tests.
+- localhost is running (`:8000` API on MySQL, `:8082` web with hot reload). Don't restart it, don't commit, and
+  don't touch `frontend/` or the live database.
+- Don't edit the other agent's files; write asks under "Requests between agents" in that doc.
+- Since 2026-10-05, also changed (don't undo): MySQL is the live database; Teams-style Messages page;
+  double-booking guard on schedule requests (`backend/tests/bookingConflicts.test.ts`); invite links +
+  join pages (QR codes were removed on purpose); the Lovable AI recommender/upload cards were removed
+  because nothing was behind them (open question for Luke).
+
+The rest of this file is older context (2026-10-05). Verify before trusting it.
+
 Written by Claude Code, for opencode to pick up this migration cold. Verified against the actual repo state on 2026-10-05, not against anyone's self-report.
 
 ## Decision that is FINAL — stop re-deciding this

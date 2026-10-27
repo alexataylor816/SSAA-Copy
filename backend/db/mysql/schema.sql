@@ -385,7 +385,86 @@ SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEM
   'ALTER TABLE schedule_requests ADD COLUMN status_reason TEXT NULL', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- Weekly view (docs/WEEKLY_VIEW_REBUILD.md): sub self-assignment, the GC's "Edited" tag, one id per publish.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedule_requests' AND COLUMN_NAME = 'edited') = 0,
+  'ALTER TABLE schedule_requests ADD COLUMN edited TINYINT(1) NOT NULL DEFAULT 0', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedule_requests' AND COLUMN_NAME = 'last_edited_by_company_id') = 0,
+  'ALTER TABLE schedule_requests ADD COLUMN last_edited_by_company_id VARCHAR(36) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedule_requests' AND COLUMN_NAME = 'sub_assigned') = 0,
+  'ALTER TABLE schedule_requests ADD COLUMN sub_assigned TINYINT(1) NOT NULL DEFAULT 0', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedule_requests' AND COLUMN_NAME = 'silent_assignment') = 0,
+  'ALTER TABLE schedule_requests ADD COLUMN silent_assignment TINYINT(1) NOT NULL DEFAULT 0', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedule_requests' AND COLUMN_NAME = 'group_id') = 0,
+  'ALTER TABLE schedule_requests ADD COLUMN group_id VARCHAR(36) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedule_requests' AND COLUMN_NAME = 'edit_reason') = 0,
+  'ALTER TABLE schedule_requests ADD COLUMN edit_reason TEXT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- Existing rows are numbered in primary-key order; new ones in insert order.
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'seq') = 0,
   'ALTER TABLE messages ADD COLUMN seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- AI schedule recommender: a GC's answers to "which trade does this task?" (docs/AI_SCHEDULE_RECOMMENDER.md).
+CREATE TABLE IF NOT EXISTS ai_trade_answers (
+  id         VARCHAR(36)  NOT NULL PRIMARY KEY,
+  company_id VARCHAR(36)  NOT NULL,
+  task_name  VARCHAR(255) NOT NULL,
+  trade      VARCHAR(64)  NOT NULL,
+  created_by VARCHAR(36)  NULL,
+  created_at VARCHAR(32)  NOT NULL DEFAULT (DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%d %H:%i:%s')),
+  UNIQUE KEY uq_ai_trade_answers (company_id, task_name),
+  CONSTRAINT fk_ai_trade_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Operator dashboard (docs/OPERATOR_DASHBOARD_PLAN.md): operator levels, suspended accounts, the audit log.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'operator_level') = 0,
+  'ALTER TABLE users ADD COLUMN operator_level VARCHAR(20) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'suspended_at') = 0,
+  'ALTER TABLE users ADD COLUMN suspended_at VARCHAR(32) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+CREATE TABLE IF NOT EXISTS operator_audit_log (
+  id          VARCHAR(36)  NOT NULL PRIMARY KEY,
+  operator_id VARCHAR(36)  NOT NULL,
+  action      VARCHAR(64)  NOT NULL,
+  target_type VARCHAR(32)  NULL,
+  target_id   VARCHAR(36)  NULL,
+  summary     VARCHAR(500) NOT NULL,
+  created_at  VARCHAR(32)  NOT NULL,
+  INDEX idx_operator_audit_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Correspondence: each template's push version and name, and the log of everything sent.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'display_name') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN display_name VARCHAR(120) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'push_title') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN push_title VARCHAR(120) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'push_body') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN push_body TEXT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'push_active') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN push_active TINYINT NOT NULL DEFAULT 1', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+CREATE TABLE IF NOT EXISTS notification_log (
+  id                   VARCHAR(36)  NOT NULL PRIMARY KEY,
+  event_type           VARCHAR(100) NOT NULL,
+  channel              VARCHAR(20)  NOT NULL,
+  recipient_user_id    VARCHAR(36)  NULL,
+  recipient_email      VARCHAR(255) NULL,
+  recipient_company_id VARCHAR(36)  NULL,
+  subject              VARCHAR(300) NULL,
+  body                 TEXT         NULL,
+  status               VARCHAR(20)  NOT NULL,
+  error_message        TEXT         NULL,
+  actor_user_id        VARCHAR(36)  NULL,
+  created_at           VARCHAR(32)  NOT NULL,
+  INDEX idx_notification_log_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

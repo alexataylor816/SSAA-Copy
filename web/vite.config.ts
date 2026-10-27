@@ -11,14 +11,25 @@ const inCodespace = Boolean(process.env.CODESPACE_NAME);
 
 // Invite links must open on a phone, where "localhost" means the
 // phone itself. On a dev PC they use its Wi-Fi/LAN address instead.
-// Prefers 192.168.x (home/office Wi-Fi) over 10.x and 172.x, which on Windows
-// are often virtual adapters (WSL, Hyper-V) that a phone can't reach.
-const lanRank = (address: string) => (address.startsWith("192.168.") ? 0 : address.startsWith("10.") ? 1 : 2);
-const lanAddress = Object.values(os.networkInterfaces())
-  .flat()
-  .filter((net) => net && net.family === "IPv4" && !net.internal && !net.address.startsWith("169.254."))
-  .map((net) => net!.address)
-  .sort((a, b) => lanRank(a) - lanRank(b))[0];
+// Picks the adapter a phone on the same network can reach: a real Wi-Fi or
+// Ethernet adapter first. Windows' Mobile Hotspot (192.168.137.x, "Local Area
+// Connection*"), VirtualBox host-only (192.168.56.x) and WSL/Hyper-V
+// ("vEthernet", usually 172.x) only reach devices on those virtual networks.
+// LAN_ADDRESS=1.2.3.4 overrides the guess.
+const isVirtual = (name: string, address: string) =>
+  /^Local Area Connection\*|vEthernet|VirtualBox|VMware|Hyper-V|docker|br-|virbr|tailscale|zerotier/i.test(name) ||
+  address.startsWith("192.168.137.") ||
+  address.startsWith("192.168.56.");
+const lanRank = (name: string, address: string) =>
+  (isVirtual(name, address) ? 10 : 0) +
+  (/wi-?fi|wlan|ethernet|^en|^eth/i.test(name) ? 0 : 2) +
+  (address.startsWith("192.168.") ? 0 : address.startsWith("10.") ? 1 : 2);
+const lanAddress =
+  process.env.LAN_ADDRESS ||
+  Object.entries(os.networkInterfaces())
+    .flatMap(([name, nets]) => (nets ?? []).map((net) => ({ name, net })))
+    .filter(({ net }) => net.family === "IPv4" && !net.internal && !net.address.startsWith("169.254."))
+    .sort((a, b) => lanRank(a.name, a.net.address) - lanRank(b.name, b.net.address))[0]?.net.address;
 
 export default defineConfig({
   server: {

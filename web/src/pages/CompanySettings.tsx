@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
@@ -31,6 +31,7 @@ import TeamProfilesDialog from "@/components/TeamProfilesDialog";
 import ConnectedCompaniesCard from "@/components/ConnectedCompaniesCard";
 import MobileTabBar from "@/components/dashboard/MobileTabBar";
 import TimesheetDownloadCard from "@/components/TimesheetDownloadCard";
+import ProjectAssignmentsCard from "@/components/ProjectAssignmentsCard";
 import { ArrowLeft, RefreshCw, UserPlus } from "lucide-react";
 import InviteShare from "@/components/InviteShare";
 import { companyJoinUrl } from "@/lib/share";
@@ -73,7 +74,7 @@ interface Employee {
 }
 
 export default function CompanySettings() {
-  const { user, isAccountHolder, permissionLevel, isMOA } = useAuth();
+  const { user, isAccountHolder, permissionLevel, isMOA, hasPartialOrHigher } = useAuth();
   const { toast } = useToast();
   const companyId = user?.companyId ?? null;
 
@@ -86,11 +87,22 @@ export default function CompanySettings() {
   const [loading, setLoading] = useState(true);
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  // Other companies' projects we're connected to (a sub's view), with the GC's name.
+  const [joinedProjects, setJoinedProjects] = useState<(Project & { gcName: string })[]>([]);
   const [aliases, setAliases] = useState<Record<string, { name: string; address: string }>>({});
   const [joinCode, setJoinCode] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  // Which project's display-name form is open (closed by default: it made the page very long on phones).
+  const [editingAlias, setEditingAlias] = useState<string | null>(null);
 
   const canManageProjects = isMOA || permissionLevel === "full" || permissionLevel === "account_holder";
+  const assignmentProjects = useMemo(
+    () => [
+      ...projects.map((p) => ({ id: p.id, name: p.name, detail: p.address })),
+      ...joinedProjects.map((p) => ({ id: p.id, name: p.name, detail: p.gcName })),
+    ],
+    [projects, joinedProjects],
+  );
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -111,6 +123,19 @@ export default function CompanySettings() {
       setMembers(membersRes.members);
       setEmployees(employeesRes.employees);
       setProjects(projectsRes.projects.filter((p) => p.companyId === companyId));
+      const joined = projectsRes.projects.filter((p) => p.companyId !== companyId);
+      const gcNames = new Map<string, string>();
+      await Promise.all(
+        [...new Set(joined.map((p) => p.companyId))].map(async (gcId) => {
+          try {
+            const res = await api.get<{ company: { name: string } }>(`/companies/${gcId}/summary`);
+            gcNames.set(gcId, res.company.name);
+          } catch {
+            // Name is a nicety; the project still lists without it.
+          }
+        }),
+      );
+      setJoinedProjects(joined.map((p) => ({ ...p, gcName: gcNames.get(p.companyId) ?? "General contractor" })));
       const aliasMap: Record<string, { name: string; address: string }> = {};
       for (const a of (aliasesRes.data ?? []) as { project_id: string; name: string | null; address: string | null }[]) {
         aliasMap[a.project_id] = { name: a.name ?? "", address: a.address ?? "" };
@@ -262,19 +287,20 @@ export default function CompanySettings() {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <header className="border-b">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 p-4">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/dashboard">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Dashboard
+        {/* Phone: icon-only back and refresh so the title fits on one line. */}
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-2 py-3 sm:gap-4 sm:p-4">
+          <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+            <Button variant="ghost" size="sm" className="h-10 px-2 sm:px-3" asChild>
+              <Link to="/dashboard" aria-label="Back to dashboard">
+                <ArrowLeft className="h-5 w-5 sm:mr-2 sm:h-4 sm:w-4" />
+                <span className="hidden sm:inline">Dashboard</span>
               </Link>
             </Button>
-            <h1 className="text-lg font-bold">Company settings</h1>
+            <h1 className="truncate text-lg font-bold">Company settings</h1>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
+          <Button variant="outline" size="sm" className="h-10 shrink-0 px-3" onClick={() => void load()} aria-label="Refresh">
+            <RefreshCw className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
       </header>
@@ -310,16 +336,42 @@ export default function CompanySettings() {
                 <CardTitle className="text-lg">Projects</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {projects.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No projects yet. Create one from the dashboard.</p>
-                ) : (
+                {projects.length === 0 && joinedProjects.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    {company?.companyType === "sub"
+                      ? "Not on any projects yet. Enter a general contractor's code below, or open the invite link they sent you."
+                      : "No projects yet. Create one from the dashboard."}
+                  </p>
+                )}
+                {joinedProjects.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Projects you&apos;re on</p>
+                    <ul className="divide-y rounded-md border">
+                      {joinedProjects.map((project) => (
+                        <li key={project.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{project.name}</p>
+                            <p className="truncate text-sm text-muted-foreground">
+                              {project.gcName}
+                              {project.address ? ` · ${project.address}` : ""}
+                            </p>
+                          </div>
+                          <Button asChild size="sm" variant="outline">
+                            <Link to={`/dashboard?project=${project.id}`}>Open</Link>
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {projects.length === 0 ? null : (
                   <ul className="divide-y">
                     {projects.map((project) => {
                       const draft = aliases[project.id] ?? { name: "", address: "" };
                       return (
                         <li key={project.id} className="space-y-2 py-3">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
                               <p className="font-medium">{draft.name || project.name}</p>
                               <p className="text-sm text-muted-foreground">
                                 {draft.address || project.address || "No address"}
@@ -331,6 +383,7 @@ export default function CompanySettings() {
                               <Button
                                 variant="outline"
                                 size="sm"
+                                className="shrink-0"
                                 disabled={busy}
                                 onClick={() => setDeleteTarget(project)}
                               >
@@ -338,6 +391,7 @@ export default function CompanySettings() {
                               </Button>
                             )}
                           </div>
+                          {editingAlias === project.id ? (
                           <div className="flex flex-wrap items-end gap-2">
                             <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-1">
                               <Label htmlFor={`alias-name-${project.id}`}>Display name (optional)</Label>
@@ -367,10 +421,23 @@ export default function CompanySettings() {
                                 placeholder={project.address ?? ""}
                               />
                             </div>
-                            <Button size="sm" variant="secondary" disabled={busy} onClick={() => void saveAlias(project.id)}>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={busy}
+                              onClick={() => void saveAlias(project.id).then(() => setEditingAlias(null))}
+                            >
                               Save name
                             </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setEditingAlias(null)}>
+                              Cancel
+                            </Button>
                           </div>
+                          ) : (
+                            <Button size="sm" variant="link" className="h-auto px-0 text-xs" onClick={() => setEditingAlias(project.id)}>
+                              Edit display name
+                            </Button>
+                          )}
                         </li>
                       );
                     })}
@@ -516,6 +583,17 @@ export default function CompanySettings() {
               </CardContent>
             </Card>
           </>
+        )}
+
+        {companyId && (
+          <ProjectAssignmentsCard
+            projects={assignmentProjects}
+            employees={employees.map((e) => ({ id: e.id, name: e.name }))}
+            staff={members
+              .filter((m) => m.isCompanyCreator || ["partial", "full", "account_holder"].includes(m.permissionLevel))
+              .map((m) => ({ id: m.userId, name: m.fullName ?? m.email }))}
+            canEdit={hasPartialOrHigher}
+          />
         )}
 
         {company?.companyType === "sub" && (

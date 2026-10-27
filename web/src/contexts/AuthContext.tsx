@@ -10,6 +10,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import { authApi, type SessionUser } from "@/lib/api";
 import { getToken, onAuthChange, setToken, supabase } from "@/lib/supabase";
+import { clearViewAs } from "@/lib/viewAs";
 
 export type PermissionLevel = "basic" | "standard" | "level_1" | "partial" | "full" | "account_holder";
 
@@ -222,6 +223,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    // Signing out while viewing as someone ends the operator's session too.
+    clearViewAs();
     authApi.logout();
     userRoleRef.current = null;
     setUser(null);

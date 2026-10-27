@@ -655,11 +655,11 @@ const CalendarPanel = ({
                   } flex h-full flex-col items-stretch gap-0.5 rounded-md text-sm relative transition-colors select-none text-left
                   ${hasVisibleTaskLabel ? 'z-20' : 'z-0'}
                   ${!isCurrentMonth ? 'text-muted-foreground/50' : 'text-foreground'}
-                  ${isLocked && !isSelected ? (isMobile ? 'bg-muted/60 text-muted-foreground' : 'opacity-50 bg-muted/60') : ''}
+                  ${isLocked && !isSelected ? (isMobile ? 'bg-muted/15 text-muted-foreground/60' : 'opacity-50 bg-muted/60') : ''}
                   ${isSelected ? 'bg-primary text-primary-foreground' : ''}
                   ${!isSelected && !isLocked && statusColor ? statusColor : ''}
                   ${isPending && !isSelected && !statusColor && !isLocked ? 'bg-destructive/20 hover:bg-destructive/30' : ''}
-                  ${!isSelected && !isPending && !statusColor && !isLocked ? 'hover:bg-muted' : ''}
+                  ${!isSelected && !isPending && !statusColor && !isLocked && !isMobile ? 'hover:bg-muted' : ''}
                   ${isToday && !isSelected ? 'ring-2 ring-primary ring-offset-2' : ''}
                 `}
 

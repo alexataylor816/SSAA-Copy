@@ -46,6 +46,12 @@ interface ScheduleRequestRow {
   image_urls: string; // JSON array of /uploads/* paths attached to the request
   status: ScheduleRequestStatus;
   status_reason: string | null;
+  edited: number | null;
+  last_edited_by_company_id: string | null;
+  sub_assigned: number | null;
+  silent_assignment: number | null;
+  group_id: string | null;
+  edit_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -120,6 +126,18 @@ export async function ensureSchedulingTables(): Promise<void> {
     }
     if (!columns.has("status_reason")) {
       await database.exec("ALTER TABLE schedule_requests ADD COLUMN status_reason TEXT");
+    }
+    // Weekly view: sub self-assignment, the GC's "Edited" tag, one id per publish.
+    const weekly: [string, string][] = [
+      ["edited", "INTEGER NOT NULL DEFAULT 0"],
+      ["last_edited_by_company_id", "TEXT"],
+      ["sub_assigned", "INTEGER NOT NULL DEFAULT 0"],
+      ["silent_assignment", "INTEGER NOT NULL DEFAULT 0"],
+      ["group_id", "TEXT"],
+      ["edit_reason", "TEXT"],
+    ];
+    for (const [name, type] of weekly) {
+      if (!columns.has(name)) await database.exec(`ALTER TABLE schedule_requests ADD COLUMN ${name} ${type}`);
     }
   }
 }
@@ -303,6 +321,15 @@ export async function listAvailabilityForCompany(companyId: string, startDate: s
   return rows.map(mapAvailabilityRow);
 }
 
+/** One person's posted hours on one day (every stop). */
+export async function listAvailabilityForEmployeeOn(employeeId: string, date: string): Promise<Availability[]> {
+  const rows = await database.all<AvailabilityRow>(
+    "SELECT * FROM availability WHERE employee_id = ? AND date = ? ORDER BY start_time",
+    [employeeId, date],
+  );
+  return rows.map(mapAvailabilityRow);
+}
+
 export async function deleteAvailabilityRow(id: string) {
   await database.run("DELETE FROM availability WHERE id = ?", [id]);
 }
@@ -334,12 +361,20 @@ export async function createScheduleRequestRow(params: {
   endTime: string | null;
   description: string | null;
   imageUrls: string[];
+  /** Weekly-view publishes set these; the classic request flow leaves the defaults. */
+  status?: ScheduleRequestStatus;
+  edited?: boolean;
+  lastEditedByCompanyId?: string | null;
+  subAssigned?: boolean;
+  silentAssignment?: boolean;
+  groupId?: string | null;
 }): Promise<ScheduleRequest> {
   const id = crypto.randomUUID();
   await database.run(
     `INSERT INTO schedule_requests
-       (id, project_id, requesting_company_id, sub_company_id, employee_ids, date, start_time, end_time, description, image_urls)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, project_id, requesting_company_id, sub_company_id, employee_ids, date, start_time, end_time, description, image_urls,
+        status, edited, last_edited_by_company_id, sub_assigned, silent_assignment, group_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       params.projectId,
@@ -351,6 +386,12 @@ export async function createScheduleRequestRow(params: {
       params.endTime,
       params.description,
       JSON.stringify(params.imageUrls),
+      params.status ?? "pending",
+      params.edited ? 1 : 0,
+      params.lastEditedByCompanyId ?? null,
+      params.subAssigned ? 1 : 0,
+      params.silentAssignment ? 1 : 0,
+      params.groupId ?? null,
     ],
   );
   return (await findScheduleRequestById(id))!;
@@ -375,6 +416,63 @@ export async function listScheduleRequestsForCompany(
   return Promise.all(rows.map(mapScheduleRequestRow));
 }
 
+/** What the Weekly grid needs from a request: no name lookups, so a wide date range stays fast. */
+export interface RequestLite {
+  id: string;
+  projectId: string;
+  subCompanyId: string;
+  employeeIds: string[];
+  date: string;
+  startTime: string | null;
+  endTime: string | null;
+  status: ScheduleRequestStatus;
+  edited: boolean;
+  lastEditedByCompanyId: string | null;
+  subAssigned: boolean;
+  silentAssignment: boolean;
+  groupId: string | null;
+}
+
+export async function listActiveRequestsLiteBetween(startDate: string, endDate: string): Promise<RequestLite[]> {
+  const rows = await database.all<ScheduleRequestRow>(
+    "SELECT * FROM schedule_requests WHERE date BETWEEN ? AND ? AND status IN ('pending', 'confirmed') ORDER BY date, start_time",
+    [startDate, endDate],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    projectId: row.project_id,
+    subCompanyId: row.sub_company_id,
+    employeeIds: JSON.parse(row.employee_ids) as string[],
+    date: row.date,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    status: row.status,
+    edited: !!Number(row.edited ?? 0),
+    lastEditedByCompanyId: row.last_edited_by_company_id ?? null,
+    subAssigned: !!Number(row.sub_assigned ?? 0),
+    silentAssignment: !!Number(row.silent_assignment ?? 0),
+    groupId: row.group_id ?? null,
+  }));
+}
+
+/** Pending or confirmed requests in a date range, across all companies (callers filter by person). */
+export async function listActiveScheduleRequestsBetween(startDate: string, endDate: string): Promise<ScheduleRequest[]> {
+  const rows = await database.all<ScheduleRequestRow>(
+    "SELECT * FROM schedule_requests WHERE date BETWEEN ? AND ? AND status IN ('pending', 'confirmed') ORDER BY date, start_time",
+    [startDate, endDate],
+  );
+  return Promise.all(rows.map(mapScheduleRequestRow));
+}
+
+/** Requests still holding someone's time on a date (pending or confirmed), across all companies. */
+export async function listActiveScheduleRequestsOnDate(date: string): Promise<ScheduleRequest[]> {
+  const rows = await database.all<ScheduleRequestRow>(
+    "SELECT * FROM schedule_requests WHERE date = ? AND status IN ('pending', 'confirmed') ORDER BY start_time",
+    [date],
+  );
+  return Promise.all(rows.map(mapScheduleRequestRow));
+}
+
 export async function updateScheduleRequestStatusRow(id: string, status: ScheduleRequestStatus, reason: string | null) {
   await database.run("UPDATE schedule_requests SET status = ?, status_reason = ?, updated_at = ? WHERE id = ?", [
     status,
@@ -382,6 +480,50 @@ export async function updateScheduleRequestStatusRow(id: string, status: Schedul
     database.now(),
     id,
   ]);
+}
+
+/** A Weekly-view edit: who is on it, where and when, and the resulting status/"Edited" state. */
+export async function updateScheduleRequestRow(
+  id: string,
+  fields: {
+    projectId: string;
+    employeeIds: string[];
+    date: string;
+    startTime: string | null;
+    endTime: string | null;
+    status: ScheduleRequestStatus;
+    edited: boolean;
+    lastEditedByCompanyId: string | null;
+    subAssigned: boolean;
+    groupId: string | null;
+    editReason: string | null;
+  },
+) {
+  await database.run(
+    `UPDATE schedule_requests SET project_id = ?, employee_ids = ?, date = ?, start_time = ?, end_time = ?, status = ?,
+       edited = ?, last_edited_by_company_id = ?, sub_assigned = ?, group_id = ?, edit_reason = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      fields.projectId,
+      JSON.stringify(fields.employeeIds),
+      fields.date,
+      fields.startTime,
+      fields.endTime,
+      fields.status,
+      fields.edited ? 1 : 0,
+      fields.lastEditedByCompanyId,
+      fields.subAssigned ? 1 : 0,
+      fields.groupId,
+      fields.editReason,
+      database.now(),
+      id,
+    ],
+  );
+}
+
+/** The GC's "Confirm Changes": the edit has been seen. */
+export async function clearScheduleRequestEdited(id: string) {
+  await database.run("UPDATE schedule_requests SET edited = 0, updated_at = ? WHERE id = ?", [database.now(), id]);
 }
 
 async function mapScheduleRequestRow(row: ScheduleRequestRow): Promise<ScheduleRequest> {
@@ -402,6 +544,12 @@ async function mapScheduleRequestRow(row: ScheduleRequestRow): Promise<ScheduleR
     statusReason: row.status_reason,
     requestingCompanyName: (await findCompanyById(row.requesting_company_id))?.name ?? null,
     subCompanyName: (await findCompanyById(row.sub_company_id))?.name ?? null,
+    edited: !!Number(row.edited ?? 0),
+    lastEditedByCompanyId: row.last_edited_by_company_id ?? null,
+    subAssigned: !!Number(row.sub_assigned ?? 0),
+    silentAssignment: !!Number(row.silent_assignment ?? 0),
+    groupId: row.group_id ?? null,
+    editReason: row.edit_reason ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

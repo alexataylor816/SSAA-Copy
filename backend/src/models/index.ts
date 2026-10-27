@@ -18,6 +18,9 @@ import { ensureNotificationTables } from "../notifications/service.js";
 import { ensureCompanyDeletionTables } from "../rbac/companyDeletion.js";
 import { ensureContractorTables } from "../contractors/models.js";
 import { ensureTemplateTables, seedNotificationTemplates } from "../notifications/templates.js";
+import { ensureAiTables } from "../ai/recommender.js";
+import { ensureCorrespondenceTables } from "../notifications/correspondence.js";
+import { ensureOperatorTables } from "../admin/operators.js";
 
 export async function ensureSchema(): Promise<void> {
   if (database.dialect === "mysql") {
@@ -37,6 +40,9 @@ export async function ensureSchema(): Promise<void> {
   await ensureProjectTables();
   await ensureMessagingTables();
   await ensureNotificationTables();
+  await ensureAiTables();
+  await ensureCorrespondenceTables();
+  await ensureOperatorTables();
 }
 
 export * from "./users.js";

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import AiSchedulePanel from "@/components/dashboard/AiSchedulePanel";
 import { api } from "@/lib/api";
 import { EVENT } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
@@ -100,8 +101,10 @@ const formatTime = (value: string | null) => {
   return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 };
 
+const UPCOMING_SHOWN = 5;
+
 export default function Dashboard() {
-  const { user, isAccountHolder, isMOA, isBasicUser, permissionLevel, hasLevel1OrHigher, refreshProfile } = useAuth();
+  const { user, isAccountHolder, isMOA, isBasicUser, permissionLevel, hasLevel1OrHigher, hasPartialOrHigher, refreshProfile } = useAuth();
   // Mirrors the original's can_manage_projects(): full or account holder, any company type.
   const canManageProjects = isAccountHolder || isMOA || permissionLevel === "full";
   const location = useLocation();
@@ -130,6 +133,8 @@ export default function Dashboard() {
   const [taskEditorOpen, setTaskEditorOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<CalendarTask | null>(null);
   const [scheduleDayOpen, setScheduleDayOpen] = useState(false);
+  // A busy month lists dozens of requests; show the next few and let people expand.
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
 
   const companyId = user?.companyId ?? null;
   const viewMode: "gc" | "sub" = company?.companyType === "sub" ? "sub" : "gc";
@@ -492,13 +497,19 @@ const handleReorderTasks = useCallback(
   }, [projectParam, projects, setSearchParams]);
 
   const dayStatuses = useMemo(() => {
-    const byDate = new Map<string, { confirmed: number; pending: number; rejected: number; total: number }>();
+    const byDate = new Map<string, { confirmed: number; pending: number; rejected: number; total: number; edited: boolean; subAssigned: number }>();
     for (const entry of scheduleRequests) {
       const date = String(entry.date ?? "");
       if (!date) continue;
-      const bucket = byDate.get(date) ?? { confirmed: 0, pending: 0, rejected: 0, total: 0 };
+      const bucket = byDate.get(date) ?? { confirmed: 0, pending: 0, rejected: 0, total: 0, edited: false, subAssigned: 0 };
       const status = String(entry.status ?? "");
       bucket.total += 1;
+      // Changed by the other company and not yet confirmed here: the day turns orange (Luke's calendar).
+      const raw = entry as { edited?: boolean; lastEditedByCompanyId?: string | null; subAssigned?: boolean };
+      if (raw.edited && raw.lastEditedByCompanyId && raw.lastEditedByCompanyId !== companyId && (status === "pending" || status === "confirmed")) {
+        bucket.edited = true;
+      }
+      if (raw.subAssigned) bucket.subAssigned += 1;
       if (status === "confirmed" || status === "accepted") bucket.confirmed += 1;
       else if (status === "pending") bucket.pending += 1;
       else if (status === "rejected" || status === "declined" || status === "cancelled") {
@@ -514,8 +525,13 @@ const handleReorderTasks = useCallback(
       totalRequestedSubs: b.total,
       scheduledEmployeeCount: b.confirmed,
       availableEmployeeCount: b.total,
+      hasEdited: b.edited,
+      subAssignedCount: b.subAssigned,
     }));
-  }, [scheduleRequests]);
+  }, [scheduleRequests, companyId]);
+
+  // An operator with no company of their own starts on the operator dashboard (Luke's MOA landing).
+  if (isMOA && !companyId) return <Navigate to="/operator" replace />;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
@@ -592,6 +608,18 @@ const handleReorderTasks = useCallback(
                 }}
                 selectedProject={selectedProjectId ?? "master"}
                 projects={rightPanelProjects}
+                aiPanel={
+                  viewMode === "gc" && hasPartialOrHigher ? (
+                    <AiSchedulePanel
+                      projects={projects.filter((p) => p.companyId === companyId)}
+                      defaultProjectId={selectedProjectId}
+                      onChanged={() => {
+                        void reloadTasks();
+                        void loadScheduleRequests();
+                      }}
+                    />
+                  ) : undefined
+                }
               />
               </div>
 
@@ -721,7 +749,7 @@ const handleReorderTasks = useCallback(
                           Nothing scheduled in the next month. Click a day on the calendar to schedule.
                         </p>
                       ) : (
-                        upcomingRequests.map((entry) => (
+                        (showAllUpcoming ? upcomingRequests : upcomingRequests.slice(0, UPCOMING_SHOWN)).map((entry) => (
                           <button
                             key={entry.id}
                             type="button"
@@ -744,6 +772,11 @@ const handleReorderTasks = useCallback(
                             )}
                           </button>
                         ))
+                      )}
+                      {upcomingRequests.length > UPCOMING_SHOWN && (
+                        <Button variant="ghost" size="sm" className="w-full" onClick={() => setShowAllUpcoming((v) => !v)}>
+                          {showAllUpcoming ? "Show fewer" : `Show all ${upcomingRequests.length}`}
+                        </Button>
                       )}
                     </CardContent>
                   </Card>

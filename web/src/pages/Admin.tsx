@@ -1,106 +1,95 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
+import {
+  Ban,
+  Building2,
+  ChevronRight,
+  CreditCard,
+  Eye,
+  HardHat,
+  History,
+  LayoutDashboard,
+  Loader2,
+  LogOut,
+  Mail,
+  Search,
+  Shield,
+  UserCog,
+  Users,
+} from "lucide-react";
 import { api } from "@/lib/api";
+import { startViewAs, type ViewAsTarget } from "@/lib/viewAs";
+import {
+  OPERATOR_LEVEL_LABEL,
+  levelLabel,
+  type AdminCompany,
+  type AdminUser,
+  type DeletionRequest,
+  type OperatorMe,
+  type Overview,
+} from "@/lib/operatorApi";
 import { useAuth } from "@/contexts/AuthContext";
+import OverviewTab from "@/components/operator/OverviewTab";
+import CorrespondenceDialog from "@/components/operator/CorrespondenceDialog";
+import { AuditLogDialog, CancellationsDialog, OperatorsDialog } from "@/components/operator/ManageDialogs";
+import { CompanySheet, UserSheet } from "@/components/operator/DetailSheets";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Navigate } from "react-router-dom";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 
-interface AdminCompany {
-  id: string;
-  name: string;
-  companyType: string;
-  members: number;
-  projects: number;
-}
-
-interface Operator {
-  userId: string;
-  email: string;
-  fullName: string;
-}
-
-interface DeletionRequest {
-  id: string;
-  companyId: string;
-  companyName: string | null;
-  reason: string | null;
-  createdAt: string;
-}
-
-interface Template {
-  id: string;
-  eventType: string;
-  channel: string;
-  subject: string;
-  bodyHtml: string;
-  description: string | null;
-  isActive: boolean;
-  placeholderVariables: string[];
-}
-
-const SAMPLES: Record<string, string> = {
-  gc_name: "ABC Contracting",
-  sub_name: "Bao Plumbing",
-  crew: "2 people",
-  day: "Thu, Oct 9",
-  project_name: "Tower A",
-  date: "2026-10-09",
-  user_name: "Sam Framer",
-  company_name: "Bao Plumbing",
-};
-
-function preview(template: Template): string {
-  let out = `<strong>${template.subject}</strong><br/>${template.bodyHtml}`;
-  for (const v of template.placeholderVariables) {
-    out = out.split(`{{${v}}}`).join(SAMPLES[v] ?? `[${v}]`);
-  }
-  out = out.replace(/\{\{[^}]+\}\}/g, (m) => `[${m.slice(2, -2)}]`);
-  return out;
-}
-
 /**
- * Minimal platform-admin surface (no billing, no impersonation): company
- * overview, operator grants, the company-deletion queue, and notification
- * template editing. `isMOA` here means the local `isAdmin` flag.
+ * The SSAA Operator Dashboard (Luke's MOA view). Lovable's header tabs (Manage SSAA, Users,
+ * Subcontractor, General Contractor) plus an Overview. Every person and company opens a page with their
+ * details, what was sent to them and the support actions; "view as" opens the normal app as that person.
+ *
+ * Not ported: Guest GCs (guest companies don't exist here) and Subscriptions (billing isn't built yet).
  */
+
+type Tab = "overview" | "ssaa" | "users" | "sub" | "gc";
+type Panel = "correspondence" | "operators" | "cancellations" | "audit" | null;
+type UserFilter = "all" | "operators" | "suspended" | "none";
+
+const matches = (q: string, ...fields: (string | null | undefined)[]) => !q || fields.some((f) => f?.toLowerCase().includes(q.toLowerCase()));
+
 export default function Admin() {
-  const { user, isMOA, initializing, loading } = useAuth();
+  const { user, isMOA, initializing, loading, signOut } = useAuth();
   const { toast } = useToast();
+  const [params, setParams] = useSearchParams();
+  const tab = (["overview", "ssaa", "users", "sub", "gc"].includes(params.get("tab") ?? "") ? params.get("tab") : "overview") as Tab;
+  const setTab = (next: string) => setParams({ tab: next }, { replace: true });
+
+  const [me, setMe] = useState<OperatorMe | null>(null);
+  const [overview, setOverview] = useState<Overview | null>(null);
   const [companies, setCompanies] = useState<AdminCompany[]>([]);
-  const [operators, setOperators] = useState<Operator[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [queue, setQueue] = useState<DeletionRequest[]>([]);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [opEmail, setOpEmail] = useState("");
-  const [editing, setEditing] = useState<Template | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState("");
+  const [userFilter, setUserFilter] = useState<UserFilter>("all");
+  const [opening, setOpening] = useState<string | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
+  const [panel, setPanel] = useState<Panel>(null);
+  const [openUser, setOpenUser] = useState<string | null>(null);
+  const [openCompany, setOpenCompany] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [c, o, q, t] = await Promise.all([
+      const [m, o, c, u, q] = await Promise.all([
+        api.get<OperatorMe>("/admin/me"),
+        api.get<Overview>("/admin/overview"),
         api.get<{ companies: AdminCompany[] }>("/admin/companies"),
-        api.get<{ operators: Operator[] }>("/admin/operators"),
+        api.get<{ users: AdminUser[] }>("/admin/users"),
         api.get<{ requests: DeletionRequest[] }>("/admin/deletion-requests"),
-        api.get<{ templates: Template[] }>("/admin/templates"),
       ]);
+      setMe(m);
+      setOverview(o);
       setCompanies(c.companies);
-      setOperators(o.operators);
+      setUsers(u.users);
       setQueue(q.requests);
-      setTemplates(t.templates);
     } catch (err) {
-      toast({
-        title: "Could not load admin data",
-        description: err instanceof Error ? err.message : undefined,
-        variant: "destructive",
-      });
+      toast({ title: "Could not load operator data", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setPageLoading(false);
     }
@@ -111,297 +100,325 @@ export default function Admin() {
     if (!initializing && !loading && !isMOA) setPageLoading(false);
   }, [initializing, loading, isMOA, load]);
 
+  useEffect(() => setSearch(""), [tab]);
+
+  const visibleUsers = useMemo(
+    () =>
+      users.filter(
+        (u) =>
+          matches(search, u.fullName, u.email, u.companyName) &&
+          (userFilter === "all" ||
+            (userFilter === "operators" && u.isOperator) ||
+            (userFilter === "suspended" && u.suspended) ||
+            (userFilter === "none" && !u.companyId && !u.isOperator)),
+      ),
+    [users, search, userFilter],
+  );
+  const visibleCompanies = useMemo(
+    () => companies.filter((c) => c.companyType === tab && matches(search, c.name, c.primaryHolder?.fullName, c.primaryHolder?.email)),
+    [companies, tab, search],
+  );
+  const closeUser = useCallback(() => setOpenUser(null), []);
+  const closeCompany = useCallback(() => setOpenCompany(null), []);
+
   if (!initializing && !loading && !isMOA) return <Navigate to="/dashboard" replace />;
 
-  async function run(label: string, fn: () => Promise<unknown>) {
-    setBusy(true);
+  const canChange = me?.canChange ?? false;
+
+  async function viewAs(target: ViewAsTarget) {
+    setOpening(target.userId);
     try {
-      await fn();
-      await load();
-      toast({ title: label });
+      await startViewAs(target);
     } catch (err) {
-      toast({
-        title: label,
-        description: err instanceof Error ? err.message : undefined,
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
+      setOpening(null);
+      toast({ title: "Couldn't open that account", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     }
   }
 
-  async function saveTemplate(event: React.FormEvent) {
-    event.preventDefault();
-    if (!editing) return;
-    await run("Template saved", () =>
-      api.patch(`/admin/templates/${editing.id}`, {
-        subject: editing.subject,
-        bodyHtml: editing.bodyHtml,
-        channel: editing.channel,
-        isActive: editing.isActive,
-      }),
-    );
-    setEditing(null);
-  }
+  const tabs: { value: Tab; label: string; short: string; icon: typeof Users; dot?: boolean }[] = [
+    { value: "overview", label: "Overview", short: "Overview", icon: LayoutDashboard },
+    { value: "ssaa", label: "Manage SSAA", short: "Manage", icon: Shield, dot: queue.length > 0 },
+    { value: "users", label: "Users", short: "Users", icon: Users },
+    { value: "sub", label: "Subcontractor", short: "Subs", icon: HardHat },
+    { value: "gc", label: "General Contractor", short: "GCs", icon: Building2 },
+  ];
 
-  function insertToken(token: string) {
-    setEditing((e) => (e ? { ...e, bodyHtml: `${e.bodyHtml}{{${token}}}` } : e));
-  }
+  const searchBox = (placeholder: string) => (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={placeholder} className="pl-9" aria-label={placeholder} />
+    </div>
+  );
+
+  const manageCards: { key: Exclude<Panel, null>; title: string; description: string; icon: typeof Mail; badge?: number }[] = [
+    { key: "correspondence", title: "Correspondence", description: "Manage email templates and notifications, and see everything sent", icon: Mail },
+    { key: "operators", title: "Operators", description: "Manage operator accounts and permissions", icon: UserCog },
+    { key: "cancellations", title: "Cancellation Requests", description: "Review and approve company account deletions", icon: Ban, badge: queue.length },
+    { key: "audit", title: "Audit Log", description: "Every change an operator has made", icon: History },
+  ];
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 p-4">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/dashboard">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Dashboard
-              </Link>
-            </Button>
-            <h1 className="text-lg font-bold">Administration</h1>
+      <Tabs value={tab} onValueChange={setTab}>
+        <header className="bg-primary text-primary-foreground shadow-md">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-6">
+            <div className="min-w-0">
+              <h1 className="truncate text-xl font-bold lg:text-2xl">SSAA Operator Dashboard</h1>
+              {me && <p className="truncate text-xs text-primary-foreground/80">{OPERATOR_LEVEL_LABEL[me.level]}</p>}
+            </div>
+            <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+              <span className="hidden text-sm text-primary-foreground/80 md:inline">{user?.email}</span>
+              {user?.companyId && (
+                <Button variant="ghost" size="sm" asChild className="text-primary-foreground hover:bg-primary-foreground/10">
+                  <Link to="/dashboard" aria-label="My dashboard">
+                    <LayoutDashboard className="h-5 w-5 sm:mr-2 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">My dashboard</span>
+                  </Link>
+                </Button>
+              )}
+              <Button variant="ghost" size="icon" aria-label="Sign out" className="text-primary-foreground hover:bg-primary-foreground/10" onClick={() => void signOut()}>
+                <LogOut className="h-5 w-5" />
+              </Button>
+            </div>
           </div>
-          <span className="text-sm text-muted-foreground">Signed in as {user?.email}</span>
-        </div>
-      </header>
+          {/* Phone: short labels in a 3-column grid so every tab is visible without sideways scrolling. */}
+          <div className="mx-auto max-w-6xl px-4 pb-3 lg:px-6">
+            <TabsList className="grid h-auto w-full grid-cols-3 gap-1 bg-primary-foreground/10 p-1 sm:inline-flex sm:w-auto">
+              {tabs.map(({ value, label, short, icon: Icon, dot }) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  className="relative gap-1.5 whitespace-nowrap px-2 py-2 text-primary-foreground/80 data-[state=active]:bg-primary-foreground data-[state=active]:text-primary sm:gap-2 sm:px-4 sm:py-1.5"
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="sm:hidden">{short}</span>
+                  <span className="hidden sm:inline">{label}</span>
+                  {dot && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-destructive" aria-label="Needs attention" />}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
+        </header>
 
-      <main className="mx-auto max-w-5xl space-y-6 p-4">
-        {pageLoading ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </p>
-        ) : (
-          <>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Companies ({companies.length})</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {companies.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No companies yet.</p>
-                ) : (
-                  <ul className="divide-y">
-                    {companies.map((c) => (
-                      <li key={c.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{c.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {c.companyType === "gc" ? "General contractor" : "Subcontractor"} · {c.members}{" "}
-                            member{c.members === 1 ? "" : "s"} · {c.projects} project{c.projects === 1 ? "" : "s"}
-                          </p>
-                        </div>
-                        <Badge variant="outline">{c.companyType}</Badge>
-                      </li>
-                    ))}
-                  </ul>
+        <main className="mx-auto max-w-6xl p-4 lg:px-6">
+          {pageLoading ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+            </p>
+          ) : (
+            <>
+              <TabsContent value="overview" className="mt-0">
+                {overview && (
+                  <OverviewTab
+                    data={overview}
+                    onOpenUser={setOpenUser}
+                    onOpenCancellations={() => setPanel("cancellations")}
+                    onOpenLog={() => setPanel("correspondence")}
+                    onShowSuspended={() => {
+                      setUserFilter("suspended");
+                      setTab("users");
+                    }}
+                  />
                 )}
-              </CardContent>
-            </Card>
+              </TabsContent>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Operators</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <ul className="divide-y">
-                  {operators.map((o) => (
-                    <li key={o.userId} className="flex items-center justify-between gap-3 py-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{o.fullName || o.email}</p>
-                        <p className="truncate text-xs text-muted-foreground">{o.email}</p>
-                      </div>
+              {/* ---------- Manage SSAA (Lovable's ManageSSAAModal, as a page) ---------- */}
+              <TabsContent value="ssaa" className="mt-0 space-y-4">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold">Manage SSAA</h2>
+                  <p className="text-sm text-muted-foreground">Platform administration tools</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {manageCards.map((card) => (
+                    <button
+                      key={card.key}
+                      type="button"
+                      onClick={() => setPanel(card.key)}
+                      className="relative flex items-center gap-3 rounded-lg border bg-card p-4 text-left shadow-sm transition-colors hover:bg-muted/10"
+                    >
+                      {!!card.badge && (
+                        <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive px-1.5 text-xs font-semibold text-destructive-foreground">
+                          {card.badge}
+                        </span>
+                      )}
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <card.icon className="h-5 w-5" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium">{card.title}</span>
+                        <span className="block text-sm text-muted-foreground">{card.description}</span>
+                      </span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  ))}
+                  <div className="flex items-center gap-3 rounded-lg border border-dashed p-4 text-left">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/20 text-muted-foreground">
+                      <CreditCard className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-muted-foreground">Subscriptions</span>
+                      <span className="block text-sm text-muted-foreground">Plans and billing arrive with Stripe (not set up yet)</span>
+                    </span>
+                  </div>
+                </div>
+                {!canChange && <p className="text-sm text-muted-foreground">Your operator access is view only: you can look at everything here but not change it.</p>}
+              </TabsContent>
+
+              {/* ---------- Users ---------- */}
+              <TabsContent value="users" className="mt-0 space-y-4">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold">All users ({users.length})</h2>
+                  <p className="text-sm text-muted-foreground">Open someone for their details and support actions, or view the app exactly as they see it.</p>
+                </div>
+                {searchBox("Search users by name, email or company…")}
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Show">
+                  {(
+                    [
+                      ["all", "Everyone"],
+                      ["operators", "Operators"],
+                      ["suspended", "Suspended"],
+                      ["none", "No company"],
+                    ] as [UserFilter, string][]
+                  ).map(([value, label]) => (
+                    <Button key={value} size="sm" variant={userFilter === value ? "default" : "outline"} className="h-8 rounded-full" onClick={() => setUserFilter(value)}>
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+                <ul className="divide-y rounded-md border bg-card">
+                  {visibleUsers.length === 0 && <li className="p-4 text-sm text-muted-foreground">No users found.</li>}
+                  {visibleUsers.map((u) => (
+                    <li key={u.userId} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                      {/* Name and email get full lines; role and company share the third. */}
+                      <button type="button" onClick={() => setOpenUser(u.userId)} className="min-w-0 flex-1 text-left">
+                        <p className="truncate font-medium">
+                          {u.fullName || u.email}
+                          {u.suspended && <span className="ml-1.5 text-xs font-normal text-destructive">Suspended</span>}
+                        </p>
+                        <p className="truncate text-sm text-muted-foreground">{u.email}</p>
+                        <div className="mt-1 flex min-w-0 items-center gap-2">
+                          {u.isOperator && u.operatorLevel ? (
+                            <Badge className="shrink-0">{u.operatorLevel === "owner" ? "Owner" : u.operatorLevel === "view_only" ? "Operator (view)" : "Operator"}</Badge>
+                          ) : null}
+                          {u.permissionLevel && (
+                            <Badge variant="outline" className="shrink-0">
+                              {levelLabel(u.permissionLevel)}
+                            </Badge>
+                          )}
+                          <span className="truncate text-xs text-muted-foreground">
+                            {u.companyName ?? (u.isOperator ? "" : "No company")}
+                            {u.companyType && ` (${u.companyType.toUpperCase()})`}
+                          </span>
+                        </div>
+                      </button>
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={busy || o.userId === user?.id}
-                        onClick={() =>
-                          void run("Operator access revoked", () =>
-                            api.post("/admin/operators", { userId: o.userId, isAdmin: false }),
-                          )
-                        }
+                        className="shrink-0"
+                        disabled={u.isOperator || u.suspended || opening !== null}
+                        onClick={() => void viewAs({ userId: u.userId, name: u.fullName || u.email, email: u.email, companyName: u.companyName })}
                       >
-                        Revoke
+                        {opening === u.userId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
+                        View as
                       </Button>
                     </li>
                   ))}
                 </ul>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!opEmail.trim()) return;
-                    void run("Operator access granted", () => api.post("/admin/operators", { email: opEmail.trim() })).then(
-                      () => setOpEmail(""),
-                    );
-                  }}
-                  className="flex flex-wrap items-end gap-2 border-t pt-4"
-                >
-                  <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
-                    <Label htmlFor="opEmail">Grant operator access by email</Label>
-                    <Input
-                      id="opEmail"
-                      type="email"
-                      value={opEmail}
-                      onChange={(e) => setOpEmail(e.target.value)}
-                      placeholder="person@company.com"
-                      required
-                    />
-                  </div>
-                  <Button type="submit" disabled={busy}>
-                    Grant
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
+              </TabsContent>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Company deletion queue ({queue.length})</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {queue.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nothing waiting for review.</p>
-                ) : (
-                  <ul className="divide-y">
-                    {queue.map((r) => (
-                      <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium">{r.companyName ?? "Unknown company"}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {r.reason ? `“${r.reason}” · ` : ""}
-                            {new Date(r.createdAt).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            disabled={busy}
-                            onClick={() =>
-                              void run("Company deleted", () =>
-                                api.post(`/admin/deletion-requests/${r.id}/resolve`, { approve: true }),
-                              )
-                            }
-                          >
-                            Approve &amp; delete
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={busy}
-                            onClick={() =>
-                              void run("Request rejected", () =>
-                                api.post(`/admin/deletion-requests/${r.id}/resolve`, { approve: false }),
-                              )
-                            }
-                          >
-                            Reject
-                          </Button>
-                        </div>
+              {/* ---------- Subcontractor / General Contractor ---------- */}
+              {(["sub", "gc"] as const).map((type) => (
+                <TabsContent key={type} value={type} className="mt-0 space-y-4">
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-semibold">
+                      {type === "gc" ? "General contractors" : "Subcontractors"} ({companies.filter((c) => c.companyType === type).length})
+                    </h2>
+                    <p className="text-sm text-muted-foreground">Open a company for its people, projects and requests, or see the app as its account holder.</p>
+                  </div>
+                  {searchBox("Search companies…")}
+                  <ul className="divide-y rounded-md border bg-card">
+                    {visibleCompanies.length === 0 && <li className="p-4 text-sm text-muted-foreground">No companies found.</li>}
+                    {visibleCompanies.map((c) => (
+                      <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <button type="button" onClick={() => setOpenCompany(c.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                          <Building2 className="h-5 w-5 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">{c.name}</span>
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {c.members} member{c.members === 1 ? "" : "s"} · {c.projects} project{c.projects === 1 ? "" : "s"}
+                              {c.primaryHolder && ` · ${c.primaryHolder.fullName || c.primaryHolder.email}`}
+                            </span>
+                          </span>
+                        </button>
+                        <Button
+                          size="sm"
+                          className="shrink-0"
+                          disabled={!c.primaryHolder || opening !== null}
+                          onClick={() =>
+                            c.primaryHolder &&
+                            void viewAs({
+                              userId: c.primaryHolder.userId,
+                              name: c.primaryHolder.fullName || c.primaryHolder.email,
+                              email: c.primaryHolder.email,
+                              companyName: c.name,
+                            })
+                          }
+                        >
+                          {opening === c.primaryHolder?.userId && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          {c.primaryHolder ? "Open" : "No account holder"}
+                        </Button>
                       </li>
                     ))}
                   </ul>
-                )}
-              </CardContent>
-            </Card>
+                </TabsContent>
+              ))}
+            </>
+          )}
+        </main>
+      </Tabs>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Notification templates</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <ul className="divide-y">
-                  {templates.map((t) => (
-                    <li key={t.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">
-                          <span className="font-mono text-xs">{t.eventType}</span>
-                          {!t.isActive && (
-                            <Badge variant="outline" className="ml-2">
-                              off
-                            </Badge>
-                          )}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">{t.description ?? t.subject}</p>
-                      </div>
-                      <Button size="sm" variant="outline" onClick={() => setEditing({ ...t })}>
-                        Edit
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
+      <CorrespondenceDialog
+        open={panel === "correspondence"}
+        onOpenChange={(o) => !o && setPanel(null)}
+        onBack={() => {
+          setPanel(null);
+          setTab("ssaa");
+        }}
+        canChange={canChange}
+        emailTransport={me?.email ?? "none"}
+      />
+      <OperatorsDialog open={panel === "operators"} onOpenChange={(o) => !o && setPanel(null)} onBack={() => setPanel(null)} meId={user?.id} />
+      <CancellationsDialog
+        open={panel === "cancellations"}
+        onOpenChange={(o) => !o && setPanel(null)}
+        onBack={() => setPanel(null)}
+        canChange={canChange}
+        onChanged={() => void load()}
+      />
+      <AuditLogDialog open={panel === "audit"} onOpenChange={(o) => !o && setPanel(null)} onBack={() => setPanel(null)} />
 
-                {editing && (
-                  <form onSubmit={saveTemplate} className="space-y-3 rounded-md border p-4">
-                    <p className="font-mono text-sm font-medium">{editing.eventType}</p>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="tplSubject">Subject</Label>
-                        <Input
-                          id="tplSubject"
-                          value={editing.subject}
-                          onChange={(e) => setEditing({ ...editing, subject: e.target.value })}
-                        />
-                      </div>
-                      <div className="flex items-end gap-2">
-                        <div className="flex-1 space-y-2">
-                          <Label htmlFor="tplChannel">Channel</Label>
-                          <select
-                            id="tplChannel"
-                            value={editing.channel}
-                            onChange={(e) => setEditing({ ...editing, channel: e.target.value })}
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                          >
-                            <option value="email">email</option>
-                            <option value="sms">sms</option>
-                            <option value="bell">bell</option>
-                          </select>
-                        </div>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={editing.isActive}
-                            onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })}
-                          />
-                          Active
-                        </label>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="tplBody">Body (HTML, {"{{tokens}}"} supported)</Label>
-                      <Textarea
-                        id="tplBody"
-                        rows={5}
-                        value={editing.bodyHtml}
-                        onChange={(e) => setEditing({ ...editing, bodyHtml: e.target.value })}
-                        className="font-mono text-xs"
-                      />
-                      <div className="flex flex-wrap gap-1.5">
-                        {editing.placeholderVariables.map((v) => (
-                          <Button key={v} type="button" size="sm" variant="outline" onClick={() => insertToken(v)}>
-                            {`{{${v}}}`}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-md border bg-muted/40 p-3">
-                      <p className="mb-1 text-xs font-medium text-muted-foreground">Preview</p>
-                      <div className="text-sm" dangerouslySetInnerHTML={{ __html: preview(editing) }} />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button type="submit" disabled={busy}>
-                        Save template
-                      </Button>
-                      <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </form>
-                )}
-              </CardContent>
-            </Card>
-          </>
-        )}
-      </main>
+      <UserSheet
+        userId={openUser}
+        onClose={closeUser}
+        canChange={canChange}
+        onViewAs={(t) => void viewAs(t)}
+        onOpenCompany={(id) => {
+          setOpenUser(null);
+          setOpenCompany(id);
+        }}
+        onChanged={() => void load()}
+      />
+      <CompanySheet
+        companyId={openCompany}
+        onClose={closeCompany}
+        canChange={canChange}
+        onViewAs={(t) => void viewAs(t)}
+        onOpenUser={(id) => {
+          setOpenCompany(null);
+          setOpenUser(id);
+        }}
+        onChanged={() => void load()}
+      />
       <Toaster />
     </div>
   );

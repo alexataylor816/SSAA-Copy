@@ -91,7 +91,7 @@ export default function SignUp() {
             </div>
 
             {!inviteCompanyId && (
-              <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+              <p className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
                 After creating your account, you&apos;ll set up your company or join an existing one.
               </p>
             )}

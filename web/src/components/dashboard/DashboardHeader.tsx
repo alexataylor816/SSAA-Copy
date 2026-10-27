@@ -118,12 +118,12 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => navigate("/admin")}
+                onClick={() => navigate("/operator")}
                 className="hidden text-primary-foreground hover:bg-primary-foreground/10 lg:flex"
-                aria-label="Administration"
+                aria-label="Operator Dashboard"
               >
                 <ShieldCheck className="h-4 w-4 lg:mr-2" />
-                <span className="hidden lg:inline">Admin</span>
+                <span className="hidden lg:inline">Operator Dashboard</span>
               </Button>
             )}
 

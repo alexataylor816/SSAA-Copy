@@ -327,7 +327,8 @@ const RightPanel = ({
   };
 
   return (
-    <div className="w-full min-[1400px]:w-64 space-y-4 flex-shrink-0 order-1 min-[1400px]:order-none">
+    // No `order-*` here: inside the dashboard's right column that pushed Projects below every other card on phones.
+    <div className="w-full min-[1400px]:w-64 space-y-4 flex-shrink-0">
       {/* Project Selector */}
       <Card className="border-primary/20" data-tour="master-schedule">
         <CardHeader className="pb-3">

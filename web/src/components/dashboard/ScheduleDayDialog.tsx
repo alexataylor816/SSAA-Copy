@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
-import { Clock, Loader2, Lock, Trash2 } from "lucide-react";
+import { AlertTriangle, Clock, Loader2, Lock, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { api } from "@/lib/api";
+import { matrixApi, type BatchResult } from "@/lib/matrixApi";
 import { EVENT } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
+import { clip, freeWindows, windowOf, type TimeWindow } from "@/lib/timeWindows";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -31,6 +33,7 @@ interface ProjectLite {
 interface Company {
   id: string;
   name: string;
+  trade?: string | null;
 }
 
 interface Employee {
@@ -53,6 +56,11 @@ interface ScheduleRequest {
   endTime: string | null;
   description: string | null;
   status: "pending" | "confirmed" | "rejected" | "cancelled";
+  /** Changed by the other company since it was last confirmed (the "Edited" tag). */
+  edited?: boolean;
+  lastEditedByCompanyId?: string | null;
+  /** The sub put its own crew here from the Weekly view. */
+  subAssigned?: boolean;
 }
 
 interface Slot {
@@ -105,38 +113,51 @@ const STATUS_STYLE: Record<ScheduleRequest["status"], string> = {
   cancelled: "bg-red-100 text-red-800 border-red-200",
 };
 
-const overlaps = (a: { startTime: string | null; endTime: string | null }, b: { startTime: string; endTime: string }) =>
-  !a.startTime || !a.endTime || (a.startTime < b.endTime && b.startTime < a.endTime);
-
 const titleOf = (e: Employee) => e.jobTitle ?? e.job_title ?? null;
+
+/** Edited by the other company and not yet confirmed by this one. */
+const editedFor = (request: ScheduleRequest, companyId: string | null) =>
+  !!request.edited && !!request.lastEditedByCompanyId && request.lastEditedByCompanyId !== companyId;
 
 function RequestRow({
   request,
   label,
   names,
   actions,
+  edited = false,
+  children,
 }: {
   request: ScheduleRequest;
   label: string;
   names: string;
   actions?: React.ReactNode;
+  edited?: boolean;
+  children?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-2 rounded-md border bg-background p-3">
-      <div className="min-w-0 space-y-0.5">
-        <p className="text-sm font-medium">{label}</p>
-        <p className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Clock className="h-3 w-3" />
-          {fmtTime(request.startTime)} – {fmtTime(request.endTime)} · {names || `${request.employeeIds.length} person(s)`}
-        </p>
-        {request.description && <p className="text-xs text-muted-foreground">{request.description}</p>}
+    <div className={`space-y-2 rounded-md border bg-background p-3 ${edited ? "border-amber-300" : ""}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 space-y-0.5">
+          <p className="text-sm font-medium">{label}</p>
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            {fmtTime(request.startTime)} – {fmtTime(request.endTime)} · {names || `${request.employeeIds.length} person(s)`}
+          </p>
+          {request.description && <p className="text-xs text-muted-foreground">{request.description}</p>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {edited && (
+            <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
+              Edited
+            </Badge>
+          )}
+          <Badge variant="outline" className={`capitalize ${STATUS_STYLE[request.status]}`}>
+            {request.status}
+          </Badge>
+          {actions}
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className={`capitalize ${STATUS_STYLE[request.status]}`}>
-          {request.status}
-        </Badge>
-        {actions}
-      </div>
+      {children}
     </div>
   );
 }
@@ -160,7 +181,9 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
   const [selectedSubIds, setSelectedSubIds] = useState<string[]>([]);
   const [crew, setCrew] = useState<Employee[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
-  const [pickedSlotIds, setPickedSlotIds] = useState<string[]>([]);
+  // Free windows the GC picked, keyed by employee + window start. Times can be
+  // narrowed inside the window (book 7-12 and leave the afternoon free).
+  const [picks, setPicks] = useState<Record<string, { employeeId: string; window: TimeWindow; start: string; end: string }>>({});
   const [description, setDescription] = useState("");
 
   // Sub state
@@ -181,7 +204,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
   useEffect(() => {
     if (!open) return;
     setError(null);
-    setPickedSlotIds([]);
+    setPicks({});
     setDescription("");
     if (viewMode === "gc") {
       const preferred = ownedProjects.find((p) => p.id === defaultProjectId) ?? ownedProjects[0];
@@ -310,6 +333,21 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
   const setStatus = (id: string, status: "confirmed" | "rejected" | "cancelled") =>
     run(() => api.patch(`/schedule-requests/${id}`, { status }));
 
+  // "Edited" requests: confirm the other company's changes, or change the time and send it back.
+  const [resend, setResend] = useState<{ id: string; start: string; end: string } | null>(null);
+  const confirmChanges = (id: string) => run(() => matrixApi.acknowledgeEdit(id));
+  const editAndResend = (r: ScheduleRequest, start: string, end: string) =>
+    run(async () => {
+      if (!(start < end)) throw new Error("The start time must be before the end time.");
+      const res = await matrixApi.sendBatch({
+        create: [],
+        cancel: [],
+        update: [{ requestId: r.id, employeeIds: r.employeeIds, startTime: start, endTime: end }],
+      });
+      if (res.skipped.length > 0) throw new Error(res.skipped[0].reason);
+      setResend(null);
+    });
+
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "Project";
   const active = (r: ScheduleRequest) => r.status === "pending" || r.status === "confirmed";
 
@@ -323,8 +361,15 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
   const subName = (id: string) => subs.find((s) => s.id === id)?.name ?? "Subcontractor";
 
   const gcRequests = requests.filter((r) => r.projectId === projectId && r.requestingCompanyId === companyId);
-  const isBooked = (slot: Slot) =>
-    requests.some((r) => active(r) && r.employeeIds.includes(slot.employeeId) && overlaps(r, slot));
+  /** Time already held for someone today (any project, any GC), with what holds it. */
+  const takenFor = (employeeId: string) =>
+    requests
+      .filter((r) => active(r) && r.employeeIds.includes(employeeId))
+      .map((r) => ({ window: windowOf(r.startTime, r.endTime), status: r.status, project: projectName(r.projectId) }));
+  const pickedCount = Object.keys(picks).length;
+  const badPick = Object.values(picks).find(
+    (pk) => !(pk.start < pk.end && pk.start >= pk.window.start && pk.end <= pk.window.end),
+  );
 
   const availableCrew = crew
     .filter((e) => selectedSubIds.includes(e.companyId ?? ""))
@@ -333,14 +378,13 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
 
   const sendRequests = () =>
     run(async () => {
-      const picked = slots.filter((s) => pickedSlotIds.includes(s.id));
-      // One request per sub and time window, covering everyone picked for it.
+      // One request per sub and time, covering everyone picked for it.
       const groups = new Map<string, { subCompanyId: string; startTime: string; endTime: string; employeeIds: string[] }>();
-      for (const slot of picked) {
-        const subCompanyId = crew.find((e) => e.id === slot.employeeId)?.companyId ?? "";
-        const key = `${subCompanyId}|${slot.startTime}|${slot.endTime}`;
-        const group = groups.get(key) ?? { subCompanyId, startTime: slot.startTime, endTime: slot.endTime, employeeIds: [] };
-        if (!group.employeeIds.includes(slot.employeeId)) group.employeeIds.push(slot.employeeId);
+      for (const pk of Object.values(picks)) {
+        const subCompanyId = crew.find((e) => e.id === pk.employeeId)?.companyId ?? "";
+        const key = `${subCompanyId}|${pk.start}|${pk.end}`;
+        const group = groups.get(key) ?? { subCompanyId, startTime: pk.start, endTime: pk.end, employeeIds: [] };
+        if (!group.employeeIds.includes(pk.employeeId)) group.employeeIds.push(pk.employeeId);
         groups.set(key, group);
       }
       for (const group of groups.values()) {
@@ -351,7 +395,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           ...group,
         });
       }
-      setPickedSlotIds([]);
+      setPicks({});
       setDescription("");
     });
 
@@ -367,7 +411,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
             value={projectId}
             onChange={(e) => {
               setProjectId(e.target.value);
-              setPickedSlotIds([]);
+              setPicks({});
             }}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           >
@@ -386,21 +430,85 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           <p className="text-sm text-muted-foreground">Nothing scheduled on this project for this day.</p>
         ) : (
           <div className="space-y-2">
-            {gcRequests.map((r) => (
-              <RequestRow
-                key={r.id}
-                request={r}
-                label={subName(r.subCompanyId)}
-                names={namesOf(r)}
-                actions={
-                  active(r) && hasPartialOrHigher && !locked ? (
-                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setStatus(r.id, "cancelled")}>
-                      Cancel
-                    </Button>
-                  ) : null
-                }
-              />
-            ))}
+            {gcRequests.map((r) => {
+              const edited = editedFor(r, companyId);
+              const canAct = active(r) && hasPartialOrHigher && !locked;
+              const editing = resend?.id === r.id ? resend : null;
+              return (
+                <RequestRow
+                  key={r.id}
+                  request={r}
+                  label={subName(r.subCompanyId)}
+                  names={namesOf(r)}
+                  edited={edited}
+                  actions={
+                    // Luke: a normal request has Edit and Cancel; an Edited one gets its own row of buttons below.
+                    canAct && !edited && !editing ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => setResend({ id: r.id, start: r.startTime ?? "07:00", end: r.endTime ?? "15:30" })}
+                        >
+                          Edit
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setStatus(r.id, "cancelled")}>
+                          Cancel
+                        </Button>
+                      </>
+                    ) : null
+                  }
+                >
+                  {edited && r.subAssigned && (
+                    <p className="text-xs italic text-blue-600 dark:text-blue-400">
+                      The Subcontractor has assigned this additional personnel to the job for this day.
+                    </p>
+                  )}
+                  {edited && canAct && !editing && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" disabled={busy} onClick={() => void confirmChanges(r.id)}>
+                        Confirm Changes
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => setResend({ id: r.id, start: r.startTime ?? "07:00", end: r.endTime ?? "15:30" })}
+                      >
+                        Edit &amp; Resend
+                      </Button>
+                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setStatus(r.id, "cancelled")}>
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                  {editing && (
+                    <div className="space-y-2 rounded-md border bg-muted/15 p-2">
+                      <p className="text-xs text-muted-foreground">Change the time and send it back to {subName(r.subCompanyId)} to confirm.</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="space-y-1 text-xs text-muted-foreground">
+                          From
+                          <Input type="time" value={editing.start} onChange={(e) => setResend({ ...editing, start: e.target.value })} />
+                        </label>
+                        <label className="space-y-1 text-xs text-muted-foreground">
+                          Until
+                          <Input type="time" value={editing.end} onChange={(e) => setResend({ ...editing, end: e.target.value })} />
+                        </label>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="sm" disabled={busy} onClick={() => void editAndResend(r, editing.start, editing.end)}>
+                          Resend
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setResend(null)}>
+                          Back
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </RequestRow>
+              );
+            })}
           </div>
         )}
       </div>
@@ -414,18 +522,24 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                 No subcontractors on this project yet. Share its connection code so they can join.
               </p>
             ) : (
-              <div className="flex flex-wrap gap-3 rounded-md border bg-muted/30 p-3">
-                {subs.map((s) => (
-                  <label key={s.id} className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={selectedSubIds.includes(s.id)}
-                      onCheckedChange={(checked) =>
-                        setSelectedSubIds((prev) => (checked ? [...prev, s.id] : prev.filter((id) => id !== s.id)))
-                      }
-                    />
-                    {s.name}
-                  </label>
-                ))}
+              <div className="flex flex-wrap gap-3 rounded-md border bg-muted/15 p-3">
+                {subs.map((s) => {
+                  // Luke's Monthly view greys out a sub nobody has posted hours for that day.
+                  const posted = slots.some((slot) => crew.find((e) => e.id === slot.employeeId)?.companyId === s.id);
+                  return (
+                    <label key={s.id} className={`flex items-center gap-2 text-sm ${posted ? "" : "text-muted-foreground opacity-60"}`}>
+                      <Checkbox
+                        checked={selectedSubIds.includes(s.id)}
+                        onCheckedChange={(checked) =>
+                          setSelectedSubIds((prev) => (checked ? [...prev, s.id] : prev.filter((id) => id !== s.id)))
+                        }
+                      />
+                      {s.name}
+                      {s.trade && <span className="text-xs text-muted-foreground">· {s.trade}</span>}
+                      {!posted && <span className="text-xs">· No availability</span>}
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -433,7 +547,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           {subs.length > 0 && (
             <div className="space-y-2">
               <Label>Available personnel & time slots</Label>
-              <div className="max-h-64 space-y-4 overflow-y-auto rounded-md border bg-muted/30 p-3">
+              <div className="max-h-64 space-y-4 overflow-y-auto rounded-md border bg-muted/15 p-3">
                 {availableCrew.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     No one from the selected subs has posted availability for this day yet.
@@ -448,36 +562,93 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                       </p>
                       <div className="space-y-1 pl-4">
                         {empSlots.map((slot) => {
-                          const booked = isBooked(slot);
-                          const picked = pickedSlotIds.includes(slot.id);
+                          const slotWindow = windowOf(slot.startTime, slot.endTime);
+                          const taken = takenFor(employee.id);
+                          const held = taken
+                            .map((t) => ({ ...t, part: clip(t.window, slotWindow) }))
+                            .filter((t): t is typeof t & { part: TimeWindow } => t.part !== null);
+                          const free = freeWindows(slotWindow, taken.map((t) => t.window));
                           return (
-                            <label
-                              key={slot.id}
-                              className={`flex items-center gap-2 rounded-md border p-2 text-sm ${
-                                booked
-                                  ? "cursor-not-allowed bg-muted opacity-60"
-                                  : picked
-                                    ? "cursor-pointer border-primary bg-primary/10"
-                                    : "cursor-pointer bg-background hover:bg-muted/50"
-                              }`}
-                            >
-                              <Checkbox
-                                checked={picked}
-                                disabled={booked}
-                                onCheckedChange={(checked) =>
-                                  setPickedSlotIds((prev) => (checked ? [...prev, slot.id] : prev.filter((id) => id !== slot.id)))
-                                }
-                              />
-                              <Clock className="h-3 w-3 text-muted-foreground" />
-                              <span className="flex-1">
-                                {date && format(date, "EEEE")}, {slot.stopLabel ?? "Available"}: {fmtTime(slot.startTime)} - {fmtTime(slot.endTime)}
-                              </span>
-                              {booked && (
-                                <Badge variant="secondary" className="text-xs">
-                                  Booked
-                                </Badge>
+                            <div key={slot.id} className="space-y-1">
+                              {slot.stopLabel && <p className="text-xs font-medium text-muted-foreground">{slot.stopLabel}</p>}
+                              {held.map((h, i) => (
+                                <div
+                                  key={`held-${i}`}
+                                  className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm ${
+                                    h.status === "confirmed"
+                                      ? "border-green-300 bg-green-50 text-green-900"
+                                      : "border-amber-300 bg-amber-50 text-amber-900"
+                                  }`}
+                                >
+                                  <Lock className="h-3.5 w-3.5 shrink-0" />
+                                  <span className="flex-1">
+                                    {fmtTime(h.part.start)} – {fmtTime(h.part.end)} · {h.project}
+                                  </span>
+                                  <Badge variant="outline" className="shrink-0 bg-background/70 text-xs">
+                                    {h.status === "confirmed" ? "Booked" : "Requested"}
+                                  </Badge>
+                                </div>
+                              ))}
+                              {free.map((w) => {
+                                const key = `${employee.id}@${w.start}`;
+                                const pick = picks[key];
+                                return (
+                                  <div
+                                    key={key}
+                                    className={`rounded-md border p-2 text-sm ${pick ? "border-primary bg-primary/10" : "bg-background hover:bg-muted/50"}`}
+                                  >
+                                    <label className="flex cursor-pointer items-center gap-2">
+                                      <Checkbox
+                                        checked={!!pick}
+                                        onCheckedChange={(checked) =>
+                                          setPicks((prev) => {
+                                            const next = { ...prev };
+                                            if (checked) next[key] = { employeeId: employee.id, window: w, start: w.start, end: w.end };
+                                            else delete next[key];
+                                            return next;
+                                          })
+                                        }
+                                      />
+                                      <Clock className="h-3 w-3 text-muted-foreground" />
+                                      <span className="flex-1">
+                                        Free {fmtTime(w.start)} – {fmtTime(w.end)}
+                                      </span>
+                                    </label>
+                                    {pick && (
+                                      <div className="mt-2 grid grid-cols-2 gap-2 pl-6">
+                                        <label className="space-y-1 text-xs text-muted-foreground">
+                                          Book from
+                                          <Input
+                                            type="time"
+                                            value={pick.start}
+                                            min={w.start}
+                                            max={w.end === "24:00" ? undefined : w.end}
+                                            onChange={(e) =>
+                                              setPicks((prev) => ({ ...prev, [key]: { ...prev[key], start: e.target.value } }))
+                                            }
+                                          />
+                                        </label>
+                                        <label className="space-y-1 text-xs text-muted-foreground">
+                                          until
+                                          <Input
+                                            type="time"
+                                            value={pick.end === "24:00" ? "23:59" : pick.end}
+                                            min={w.start}
+                                            max={w.end === "24:00" ? undefined : w.end}
+                                            onChange={(e) =>
+                                              setPicks((prev) => ({ ...prev, [key]: { ...prev[key], end: e.target.value } }))
+                                            }
+                                          />
+                                        </label>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              {free.length === 0 && held.length > 0 && (
+                                <p className="pl-1 text-xs text-muted-foreground">No free time left in this slot.</p>
                               )}
-                            </label>
+                            </div>
                           );
                         })}
                       </div>
@@ -499,9 +670,14 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
             />
           </div>
 
-          <Button className="w-full" disabled={busy || pickedSlotIds.length === 0} onClick={() => void sendRequests()}>
+          {badPick && (
+            <p className="text-sm text-destructive">
+              Times for a pick must stay inside its free window ({fmtTime(badPick.window.start)} – {fmtTime(badPick.window.end)}).
+            </p>
+          )}
+          <Button className="w-full" disabled={busy || pickedCount === 0 || !!badPick} onClick={() => void sendRequests()}>
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Send request{pickedSlotIds.length > 1 ? "s" : ""}
+            Send request{pickedCount > 1 ? "s" : ""}
           </Button>
         </>
       )}
@@ -518,8 +694,24 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
   const postable = hasPartialOrHigher ? roster : roster.filter((e) => e.id === selfEmployee?.id);
   const canRemove = (slot: Slot) => hasPartialOrHigher || slot.employeeId === selfEmployee?.id;
 
-  const publishAvailability = () =>
+  // Luke: setting someone's hours on a project they aren't assigned to gets the same one-time exception warning.
+  const [availAsk, setAvailAsk] = useState<{ name: string; project: string }[] | null>(null);
+  const publishAvailability = (allowUnassigned = false) =>
     run(async () => {
+      if (!availAllProjects && !allowUnassigned) {
+        const misses: { name: string; project: string }[] = [];
+        for (const projectId of availProjectIds) {
+          const { employeeIds } = await api.get<{ employeeIds: string[] }>(`/projects/${projectId}/assignments`);
+          for (const id of availFor) {
+            if (!employeeIds.includes(id)) misses.push({ name: roster.find((e) => e.id === id)?.name ?? "Employee", project: projectName(projectId) });
+          }
+        }
+        if (misses.length > 0) {
+          setAvailAsk(misses);
+          return;
+        }
+      }
+      setAvailAsk(null);
       // One entry per person: either for every project, or one per chosen project.
       const targets: (string | undefined)[] = availAllProjects ? [undefined] : availProjectIds;
       const blocks = multipleStops
@@ -539,6 +731,58 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           }
         }
       }
+    });
+
+  // "Assign Personnel to Job": people with hours posted today, placed on a connected project.
+  const [assignProjectId, setAssignProjectId] = useState("");
+  const [assignPeople, setAssignPeople] = useState<string[]>([]);
+  const [assignStart, setAssignStart] = useState("07:00");
+  const [assignEnd, setAssignEnd] = useState("15:30");
+  const [assignNotifyGc, setAssignNotifyGc] = useState(true);
+  const [unassignedAsk, setUnassignedAsk] = useState<BatchResult["unassigned"] | null>(null);
+  const workingToday = roster.filter((e) => myAvailability.some((s) => s.employeeId === e.id));
+
+  const pickToAssign = (employeeId: string, on: boolean) => {
+    setUnassignedAsk(null);
+    setAssignPeople((prev) => {
+      // The first person picked sets the times to their posted hours.
+      const slot = myAvailability.find((s) => s.employeeId === employeeId);
+      if (on && prev.length === 0 && slot) {
+        setAssignStart(slot.startTime.slice(0, 5));
+        setAssignEnd(slot.endTime.slice(0, 5));
+      }
+      return on ? [...prev, employeeId] : prev.filter((id) => id !== employeeId);
+    });
+  };
+
+  const assignToJob = (allowUnassigned: boolean) =>
+    run(async () => {
+      if (!(assignStart < assignEnd)) throw new Error("The start time must be before the end time.");
+      const create = assignPeople.map((employeeId) => ({
+        projectId: assignProjectId,
+        subCompanyId: companyId ?? "",
+        employeeIds: [employeeId],
+        date: day ?? "",
+        startTime: assignStart,
+        endTime: assignEnd,
+      }));
+      if (!allowUnassigned) {
+        const dry = await matrixApi.sendBatch({ create, cancel: [], dryRun: true });
+        if (dry.skipped.length > 0) throw new Error(dry.skipped.map((s) => s.reason).join(" "));
+        if (dry.unassigned.length > 0) {
+          setUnassignedAsk(dry.unassigned);
+          return;
+        }
+      }
+      const res = await matrixApi.sendBatch({
+        create,
+        cancel: [],
+        allowUnassigned,
+        notify: { gcEmail: false, gcPush: assignNotifyGc, personnelEmail: false, personnelPush: false },
+      });
+      if (res.skipped.length > 0) throw new Error(res.skipped.map((s) => s.reason).join(" "));
+      setUnassignedAsk(null);
+      setAssignPeople([]);
     });
 
   const respond = (r: ScheduleRequest) =>
@@ -562,7 +806,14 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
         ) : (
           <div className="space-y-2">
             {pending.map((r) => (
-              <RequestRow key={r.id} request={r} label={projectName(r.projectId)} names={namesOf(r)} actions={respond(r)} />
+              <RequestRow
+                key={r.id}
+                request={r}
+                label={projectName(r.projectId)}
+                names={namesOf(r)}
+                actions={respond(r)}
+                edited={editedFor(r, companyId)}
+              />
             ))}
           </div>
         )}
@@ -636,6 +887,95 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           </div>
         )}
       </div>
+
+      {!locked && hasPartialOrHigher && connectedProjects.length > 0 && workingToday.length > 0 && (
+        // Luke's "Assign Personnel to Job": the sub books its own crew (confirmed straight away).
+        <div className="space-y-3 border-t pt-4">
+          <Label htmlFor="assign-project">Assign Personnel to Job</Label>
+          <select
+            id="assign-project"
+            value={assignProjectId}
+            onChange={(e) => {
+              setAssignProjectId(e.target.value);
+              setUnassignedAsk(null);
+            }}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            <option value="">Choose a project</option>
+            {connectedProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <div className="space-y-1 rounded-md border p-2">
+            {workingToday.map((e) => (
+              <label key={e.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50">
+                <Checkbox checked={assignPeople.includes(e.id)} onCheckedChange={(value) => pickToAssign(e.id, !!value)} />
+                {e.name}
+                {titleOf(e) && <span className="text-muted-foreground"> - {titleOf(e)}</span>}
+              </label>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="assign-start" className="text-xs">
+                From
+              </Label>
+              <Input id="assign-start" type="time" value={assignStart} onChange={(e) => setAssignStart(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="assign-end" className="text-xs">
+                Until
+              </Label>
+              <Input id="assign-end" type="time" value={assignEnd} onChange={(e) => setAssignEnd(e.target.value)} />
+            </div>
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox checked={assignNotifyGc} onCheckedChange={(value) => setAssignNotifyGc(!!value)} />
+            Notify the general contractor
+          </label>
+          {unassignedAsk ? (
+            <div role="alertdialog" aria-label="Unassigned employee placement" className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <AlertTriangle className="h-4 w-4 text-destructive" />
+                Unassigned employee placement
+              </p>
+              <p className="text-sm text-muted-foreground">
+                You&apos;ve assigned one or more employees to a project they are not officially assigned to. Are you sure
+                you want to proceed?
+              </p>
+              <ul className="space-y-1 text-sm">
+                {unassignedAsk.map((u) => (
+                  <li key={u.employeeId}>
+                    <span className="font-medium">{u.employeeName}</span>
+                    {u.jobTitle && <span className="text-muted-foreground"> – {u.jobTitle}</span>}
+                    <span className="text-muted-foreground"> is not assigned to </span>
+                    <span className="font-medium">{u.projectName}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => setUnassignedAsk(null)}>
+                  Cancel
+                </Button>
+                <Button size="sm" variant="destructive" disabled={busy} onClick={() => void assignToJob(true)}>
+                  Proceed
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              className="w-full"
+              disabled={busy || !assignProjectId || assignPeople.length === 0}
+              onClick={() => void assignToJob(false)}
+            >
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Assign to job
+            </Button>
+          )}
+        </div>
+      )}
 
       {!locked && postable.length > 0 && (
         // Laid out like Lovable's "View Availability" panel.
@@ -788,14 +1128,44 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
             )}
           </div>
 
-          <Button
-            className="w-full"
-            disabled={busy || availFor.length === 0 || (!availAllProjects && availProjectIds.length === 0)}
-            onClick={() => void publishAvailability()}
-          >
-            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Post availability
-          </Button>
+          {availAsk ? (
+            <div role="alertdialog" aria-label="Unassigned employee placement" className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <AlertTriangle className="h-4 w-4 text-destructive" />
+                Unassigned employee placement
+              </p>
+              <p className="text-sm text-muted-foreground">
+                You&apos;ve assigned one or more employees to a project they are not officially assigned to. Are you sure you
+                want to proceed? This is a one-time exception and won&apos;t change their project assignments.
+              </p>
+              <ul className="space-y-1 text-sm">
+                {availAsk.map((m, i) => (
+                  <li key={i}>
+                    <span className="font-medium">{m.name}</span>
+                    <span className="text-muted-foreground"> is not assigned to </span>
+                    <span className="font-medium">{m.project}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => setAvailAsk(null)}>
+                  Cancel
+                </Button>
+                <Button size="sm" variant="destructive" disabled={busy} onClick={() => void publishAvailability(true)}>
+                  Yes, proceed with exception
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              className="w-full"
+              disabled={busy || availFor.length === 0 || (!availAllProjects && availProjectIds.length === 0)}
+              onClick={() => void publishAvailability()}
+            >
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Post availability
+            </Button>
+          )}
         </div>
       )}
     </div>

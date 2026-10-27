@@ -177,7 +177,7 @@ export default function MobileTabBar({ pendingJoinCount = 0 }: { pendingJoinCoun
                 onClick={() => go(() => navigate("/settings/company"))}
               />
             )}
-            {isMOA && <SheetRow icon={ShieldCheck} label="Admin" onClick={() => go(() => navigate("/admin"))} />}
+            {isMOA && <SheetRow icon={ShieldCheck} label="Operator Dashboard" onClick={() => go(() => navigate("/operator"))} />}
             <div className="my-2 border-t" />
             <SheetRow icon={LogOut} label="Sign out" danger onClick={() => go(() => void signOut())} />
           </div>
