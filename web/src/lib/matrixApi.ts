@@ -6,6 +6,7 @@
  * line: call `matrixApi.load(...)` instead.
  */
 import { api } from "@/lib/api";
+import { tr } from "@/i18n/runtime";
 
 export type CompanyType = "gc" | "sub";
 export type BookingStatus = "pending" | "confirmed";
@@ -302,7 +303,7 @@ export function mockSendBatch(data: MatrixData, body: BatchBody): BatchResult {
       if (data.viewer.companyType === "sub" && !emp.assignedProjectIds.includes(c.projectId)) {
         result.unassigned.push({ employeeId: id, employeeName: emp.name, jobTitle: emp.jobTitle, projectId: c.projectId, projectName: projectName(c.projectId), date: c.date });
         if (!body.dryRun && !body.allowUnassigned) {
-          result.skipped.push({ kind: "create", index, reason: `${emp.name} is not assigned to ${projectName(c.projectId)}.` });
+          result.skipped.push({ kind: "create", index, reason: tr("matrixApi.isNotAssignedTo", { name: emp.name, projectId: projectName(c.projectId) }) });
           return;
         }
       }
@@ -310,7 +311,7 @@ export function mockSendBatch(data: MatrixData, body: BatchBody): BatchResult {
       const start = c.startTime ?? "00:00";
       const end = c.endTime ?? "24:00";
       if (!free.some((f) => f.start <= start && f.end >= end)) {
-        result.skipped.push({ kind: "create", index, reason: `${emp.name} isn't free then on ${c.date}. Pick a time inside their free hours.` });
+        result.skipped.push({ kind: "create", index, reason: tr("matrixApi.isnTFreeThenOnPick", { name: emp.name, date: c.date }) });
         return;
       }
     }

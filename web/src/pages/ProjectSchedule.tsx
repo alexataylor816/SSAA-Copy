@@ -23,6 +23,8 @@ import { ArrowLeft, CalendarDays, Plus } from "lucide-react";
 import RejectRequestDialog from "@/components/RejectRequestDialog";
 import ScheduleRequestPhotos from "@/components/ScheduleRequestPhotos";
 import { getToken } from "@/lib/supabase";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 interface ConnectedCompany {
   id: string;
@@ -37,10 +39,10 @@ interface Employee {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: "Pending",
-  confirmed: "Confirmed",
-  rejected: "Rejected",
-  cancelled: "Cancelled",
+  get pending() { return tr("projectSchedule.statusLabels.pending"); },
+  get confirmed() { return tr("projectSchedule.statusLabels.confirmed"); },
+  get rejected() { return tr("projectSchedule.statusLabels.rejected"); },
+  get cancelled() { return tr("projectSchedule.statusLabels.cancelled"); },
 };
 
 /** Local calendar date; toISOString() would roll over to tomorrow in US evenings. */
@@ -48,6 +50,7 @@ const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export default function ProjectSchedule() {
+  const { t } = useLanguage();
   const { projectId } = useParams<{ projectId: string }>();
   const { user, hasPartialOrHigher } = useAuth();
 
@@ -140,8 +143,8 @@ export default function ProjectSchedule() {
   async function submitRequest(event: React.FormEvent) {
     event.preventDefault();
     if (!projectId) return;
-    if (!subCompanyId) return setError("Choose a company to schedule.");
-    if (selectedEmployees.length === 0) return setError("Pick at least one employee.");
+    if (!subCompanyId) return setError(tr("projectSchedule.chooseCompany"));
+    if (selectedEmployees.length === 0) return setError(tr("projectSchedule.pickEmployee"));
 
     setBusy(true);
     setError(null);
@@ -162,7 +165,7 @@ export default function ProjectSchedule() {
       setPhotoUrls([]);
       await loadRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send that request.");
+      setError(err instanceof Error ? err.message : tr("projectSchedule.couldNotSend"));
     } finally {
       setBusy(false);
     }
@@ -184,11 +187,11 @@ export default function ProjectSchedule() {
         body: form,
       });
       const payload = (await res.json()) as { url?: string; error?: string };
-      if (!res.ok) throw new Error(payload.error ?? `Upload failed with ${res.status}.`);
-      if (!payload.url) throw new Error("Upload did not return a URL.");
+      if (!res.ok) throw new Error(payload.error ?? tr("projectSchedule.uploadFailedWith", { status: res.status }));
+      if (!payload.url) throw new Error(t("projectSchedule.uploadDidNotReturnAUrl"));
       setPhotoUrls((current) => (current.length >= 6 ? current : [...current, payload.url as string]));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not upload that photo.");
+      setError(err instanceof Error ? err.message : tr("projectSchedule.couldNotUpload"));
     } finally {
       setUploading(false);
     }
@@ -200,7 +203,7 @@ export default function ProjectSchedule() {
       await api.patch(`/schedule-requests/${id}`, { status, statusReason });
       await loadRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update that request.");
+      setError(err instanceof Error ? err.message : tr("common.couldNotUpdateRequest"));
     } finally {
       setBusy(false);
     }
@@ -217,36 +220,39 @@ export default function ProjectSchedule() {
             <Button variant="ghost" size="sm" asChild>
               <Link to="/dashboard">
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Dashboard
+                
+                {t("projectSchedule.dashboard")}
               </Link>
             </Button>
-            <h1 className="text-lg font-bold">Project schedule</h1>
+            <h1 className="text-lg font-bold">{t("projectSchedule.projectSchedule")}</h1>
           </div>
           {hasPartialOrHigher && (
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button size="sm">
                   <Plus className="mr-2 h-4 w-4" />
-                  Request crew
+                  
+                  {t("projectSchedule.requestCrew")}
                 </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Request crew</DialogTitle>
+                  <DialogTitle>{t("projectSchedule.requestCrew")}</DialogTitle>
                   <DialogDescription>
-                    Pick the sub company, then the people you need. They will see this request immediately.
+                    
+                    {t("projectSchedule.pickTheSubCompanyThenThe")}
                   </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={submitRequest} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="subCompanyId">Company</Label>
+                    <Label htmlFor="subCompanyId">{t("common.company")}</Label>
                     <select
                       id="subCompanyId"
                       value={subCompanyId}
                       onChange={(e) => setSubCompanyId(e.target.value)}
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     >
-                      <option value="">Select a connected company</option>
+                      <option value="">{t("projectSchedule.selectAConnectedCompany")}</option>
                       {companies.map((company) => (
                         <option key={company.id} value={company.id}>
                           {company.name}
@@ -256,10 +262,10 @@ export default function ProjectSchedule() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Employees</Label>
+                    <Label>{t("projectSchedule.employees")}</Label>
                     {employees.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
-                        {subCompanyId ? "This company has no employees available." : "Choose a company first."}
+                        {subCompanyId ? t("projectSchedule.thisCompanyHasNoEmployeesAvailable") : t("projectSchedule.chooseACompanyFirst")}
                       </p>
                     ) : (
                       <div className="max-h-56 space-y-2 overflow-y-auto rounded-md border p-3">
@@ -278,11 +284,11 @@ export default function ProjectSchedule() {
 
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-3 space-y-2 sm:col-span-1">
-                      <Label htmlFor="date">Date</Label>
+                      <Label htmlFor="date">{t("projectSchedule.date")}</Label>
                       <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="startTime">Start</Label>
+                      <Label htmlFor="startTime">{t("common.start")}</Label>
                       <Input
                         id="startTime"
                         type="time"
@@ -291,31 +297,32 @@ export default function ProjectSchedule() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="endTime">End</Label>
+                      <Label htmlFor="endTime">{t("common.end")}</Label>
                       <Input id="endTime" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="description">Notes</Label>
+                    <Label htmlFor="description">{t("projectSchedule.notes")}</Label>
                     <Input
                       id="description"
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
-                      placeholder="Anything the crew should know"
+                      placeholder={t("projectSchedule.anythingTheCrewShouldKnow")}
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="photos">Photos (optional, up to 6)</Label>
+                    <Label htmlFor="photos">{t("projectSchedule.photosOptionalUpTo6")}</Label>
                     <Input id="photos" type="file" accept="image/*" onChange={handlePhotoPicked} disabled={uploading} />
-                    {uploading && <p className="text-xs text-muted-foreground">Uploading...</p>}
+                    {uploading && <p className="text-xs text-muted-foreground">{t("projectSchedule.uploading")}</p>}
                     <ScheduleRequestPhotos imageUrls={photoUrls} />
                   </div>
 
                   <DialogFooter>
                     <Button type="submit" disabled={busy}>
-                      Send request
+                      
+                      {t("projectSchedule.sendRequest")}
                     </Button>
                   </DialogFooter>
                 </form>
@@ -334,14 +341,14 @@ export default function ProjectSchedule() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-lg">{showHistory ? "Request history" : "Upcoming requests"}</CardTitle>
+            <CardTitle className="text-lg">{showHistory ? t("projectSchedule.requestHistory") : t("projectSchedule.upcomingRequests")}</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => setShowHistory((v) => !v)}>
-              {showHistory ? "Show upcoming" : "Show history"}
+              {showHistory ? t("projectSchedule.showUpcoming") : t("projectSchedule.showHistory")}
             </Button>
           </CardHeader>
           <CardContent>
             {requests.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing scheduled yet.</p>
+              <p className="text-sm text-muted-foreground">{t("projectSchedule.nothingScheduledYet")}</p>
             ) : (
               <ul className="divide-y">
                 {requests.map((request) => (
@@ -354,7 +361,7 @@ export default function ProjectSchedule() {
                       <p className="text-sm text-muted-foreground">
                         {((request.employeeNames as string[] | undefined)?.length
                           ? (request.employeeNames as string[]).join(", ")
-                          : `${(request.employeeIds as string[] | undefined)?.length ?? 0} employee(s)`) }
+                          : t(((request.employeeIds as string[] | undefined)?.length ?? 0) === 1 ? "projectSchedule.employees.one" : "projectSchedule.employees.other", { count: (request.employeeIds as string[] | undefined)?.length ?? 0 })) }
                         {request.description ? ` · ${String(request.description)}` : ""}
                       </p>
                       {request.requestingCompanyName || request.subCompanyName ? (
@@ -374,7 +381,8 @@ export default function ProjectSchedule() {
                       {hasPartialOrHigher && request.subCompanyId === companyId && request.status === "pending" && (
                         <>
                           <Button size="sm" disabled={busy} onClick={() => void setStatus(String(request.id), "confirmed")}>
-                            Confirm
+                            
+                            {t("projectSchedule.confirm")}
                           </Button>
                           <Button
                             size="sm"
@@ -382,7 +390,8 @@ export default function ProjectSchedule() {
                             disabled={busy}
                             onClick={() => setReasonDialog({ id: String(request.id), mode: "reject" })}
                           >
-                            Decline
+                            
+                            {t("common.decline")}
                           </Button>
                         </>
                       )}
@@ -395,7 +404,8 @@ export default function ProjectSchedule() {
                             disabled={busy}
                             onClick={() => setReasonDialog({ id: String(request.id), mode: "remove-cancel" })}
                           >
-                            Cancel
+                            
+                            {t("common.cancel")}
                           </Button>
                         )}
                     </div>

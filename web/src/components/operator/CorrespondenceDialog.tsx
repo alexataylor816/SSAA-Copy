@@ -21,6 +21,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToastAction } from "@/components/ui/toast";
 import { useToast } from "@/components/ui/use-toast";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 /**
  * Manage SSAA → Correspondence (Lovable's ManageCorrespondenceModal): the email and push wording for
@@ -34,9 +36,9 @@ const fill = (text: string, samples: Record<string, string>) =>
   text.replace(/\{\{?\s*([a-z_][a-z0-9_]*)\s*\}?\}/gi, (_m, n: string) => samples[n] ?? `[${n}]`);
 
 const EMAIL_NOTE: Record<EmailTransport, string> = {
-  resend: "Email goes out through Resend. With the test key it only reaches the Resend account owner until a domain is verified.",
-  smtp: "Email goes out through the configured SMTP account.",
-  none: "Email isn't set up on this server, so emails are logged as not sent. Push notifications still go out.",
+  get resend() { return tr("correspondenceDialog.emailNote.resend"); },
+  get smtp() { return tr("correspondenceDialog.emailNote.smtp"); },
+  get none() { return tr("correspondenceDialog.emailNote.none"); },
 };
 
 export default function CorrespondenceDialog({
@@ -52,6 +54,7 @@ export default function CorrespondenceDialog({
   canChange: boolean;
   emailTransport: EmailTransport;
 }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [tab, setTab] = useState<"email" | "push" | "log">("email");
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -87,11 +90,11 @@ export default function CorrespondenceDialog({
       const res = await api.get<{ entries: CorrespondenceEntry[] }>(`/admin/correspondence?${params}`);
       setEntries(res.entries);
     } catch (err) {
-      toast({ title: "Couldn't load the log", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("correspondenceDialog.couldnTLoadTheLog"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setLogLoading(false);
     }
-  }, [logChannel, logStatus, logSearch, toast]);
+  }, [logChannel, logStatus, logSearch, toast, t]);
 
   useEffect(() => {
     if (!open) return;
@@ -122,7 +125,7 @@ export default function CorrespondenceDialog({
       if (editing?.template.id === template.id) setEditing((e) => (e ? { ...e, template: list.find((t) => t.id === template.id) ?? updated } : e));
       toast({
         title: message,
-        description: undo ? "You can undo this for the next few seconds." : undefined,
+        description: undo ? t("correspondenceDialog.youCanUndoThisForThe") : undefined,
         action: undo ? (
           <ToastAction
             altText="Undo"
@@ -130,19 +133,19 @@ export default function CorrespondenceDialog({
               try {
                 await api.patch(`/admin/templates/${template.id}`, undo);
                 await loadTemplates();
-                toast({ title: "Reverted to the previous version" });
+                toast({ title: t("correspondenceDialog.revertedToThePreviousVersion") });
               } catch (err) {
-                toast({ title: "Undo failed", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+                toast({ title: t("correspondenceDialog.undoFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
               }
             }}
           >
-            <Undo2 className="mr-1 h-3 w-3" /> Undo
+            <Undo2 className="mr-1 h-3 w-3" /> {" "}{t("correspondenceDialog.undo")}
           </ToastAction>
         ) : undefined,
       });
       return true;
     } catch (err) {
-      toast({ title: "Couldn't save", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("common.couldnTSave"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
       return false;
     } finally {
       setBusy(false);
@@ -154,8 +157,8 @@ export default function CorrespondenceDialog({
     const t = editing.template;
     const ok =
       editing.channel === "email"
-        ? await patch(t, { subject: draft.subject, bodyHtml: draft.bodyHtml }, "Template saved", { subject: t.subject, bodyHtml: t.bodyHtml })
-        : await patch(t, { pushTitle: draft.pushTitle ?? "", pushBody: draft.pushBody ?? "" }, "Template saved", {
+        ? await patch(t, { subject: draft.subject, bodyHtml: draft.bodyHtml }, tr("correspondenceDialog.templateSaved"), { subject: t.subject, bodyHtml: t.bodyHtml })
+        : await patch(t, { pushTitle: draft.pushTitle ?? "", pushBody: draft.pushBody ?? "" }, tr("correspondenceDialog.templateSaved"), {
             pushTitle: t.pushTitle ?? "",
             pushBody: t.pushBody ?? "",
           });
@@ -168,19 +171,19 @@ export default function CorrespondenceDialog({
     try {
       const res = await api.post<{ status: CorrespondenceEntry["status"]; to: string }>(`/admin/templates/${editing.template.id}/test`);
       toast({
-        title: res.status === "sent" ? `Test sent to ${res.to}` : "Test not sent",
+        title: res.status === "sent" ? t("correspondenceDialog.testSentTo", { to: res.to }) : t("correspondenceDialog.testNotSent"),
         description:
           res.status === "sent"
-            ? "Save first if you want the test to use your latest changes."
+            ? t("correspondenceDialog.saveFirstIfYouWantThe")
             : res.status === "off"
-              ? "This template is switched off."
+              ? t("correspondenceDialog.thisTemplateIsSwitchedOff")
               : res.status === "skipped"
-                ? "Email isn't set up on this server."
-                : "The email provider refused it. See the Log tab.",
+                ? t("correspondenceDialog.emailIsnTSetUpOn")
+                : t("correspondenceDialog.theEmailProviderRefusedItSee"),
         variant: res.status === "sent" ? undefined : "destructive",
       });
     } catch (err) {
-      toast({ title: "Test not sent", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("correspondenceDialog.testNotSent"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -208,15 +211,17 @@ export default function CorrespondenceDialog({
           className="flex flex-1 items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault();
-            void patch(editing.template, { displayName: nameDraft.trim() || null }, "Template name updated").then(() => setRenaming(false));
+            void patch(editing.template, { displayName: nameDraft.trim() || null }, tr("correspondenceDialog.templateNameUpdated")).then(() => setRenaming(false));
           }}
         >
-          <Input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} className="h-9 max-w-sm" aria-label="Template name" />
+          <Input autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} className="h-9 max-w-sm" aria-label={t("correspondenceDialog.templateName")} />
           <Button size="sm" type="submit" disabled={busy}>
-            Save
+            
+            {t("correspondenceDialog.save")}
           </Button>
           <Button size="sm" type="button" variant="ghost" onClick={() => setRenaming(false)}>
-            Cancel
+            
+            {t("common.cancel")}
           </Button>
         </form>
       ) : (
@@ -232,7 +237,8 @@ export default function CorrespondenceDialog({
               setRenaming(true);
             }}
           >
-            Edit Name of Template
+            
+            {t("correspondenceDialog.editNameOfTemplate")}
           </Button>
         )}
         {canChange && !editingDesc && (
@@ -244,11 +250,12 @@ export default function CorrespondenceDialog({
               setEditingDesc(true);
             }}
           >
-            Edit Description
+            
+            {t("correspondenceDialog.editDescription")}
           </Button>
         )}
         <Button variant="outline" size="sm" onClick={() => setEditing(null)}>
-          {canChange ? "Cancel" : "Back"}
+          {canChange ? t("common.cancel") : t("common.back")}
         </Button>
       </div>
     </div>
@@ -258,17 +265,19 @@ export default function CorrespondenceDialog({
     editing &&
     (editingDesc ? (
       <div className="space-y-2">
-        <Textarea autoFocus value={descDraft} onChange={(e) => setDescDraft(e.target.value)} rows={3} placeholder="Describe when this message is sent" />
+        <Textarea autoFocus value={descDraft} onChange={(e) => setDescDraft(e.target.value)} rows={3} placeholder={t("correspondenceDialog.describeWhenThisMessageIsSent")} />
         <div className="flex gap-2">
           <Button
             size="sm"
             disabled={busy}
-            onClick={() => void patch(editing.template, { description: descDraft.trim() || null }, "Template description updated").then(() => setEditingDesc(false))}
+            onClick={() => void patch(editing.template, { description: descDraft.trim() || null }, tr("correspondenceDialog.templateDescriptionUpdated")).then(() => setEditingDesc(false))}
           >
-            Save
+            
+            {t("correspondenceDialog.save")}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setEditingDesc(false)}>
-            Cancel
+            
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -278,37 +287,37 @@ export default function CorrespondenceDialog({
 
   const list = (items: Template[], channel: Channel) => (
     <div className="space-y-2">
-      {items.map((t) => {
-        const active = channel === "email" ? t.isActive : t.pushActive;
+      {items.map((tpl) => {
+        const active = channel === "email" ? tpl.isActive : tpl.pushActive;
         return (
-          <div key={t.id} className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3">
+          <div key={tpl.id} className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{label(t)}</span>
-                <Badge variant={active ? "default" : "secondary"}>{active ? "Active" : "Inactive"}</Badge>
+                <span className="font-medium">{label(tpl)}</span>
+                <Badge variant={active ? "default" : "secondary"}>{active ? t("correspondenceDialog.active") : t("correspondenceDialog.inactive")}</Badge>
               </div>
-              {t.description && <p className="mt-1 text-sm text-muted-foreground">{t.description}</p>}
+              {tpl.description && <p className="mt-1 text-sm text-muted-foreground">{tpl.description}</p>}
               <p className="mt-1 truncate text-xs text-muted-foreground">
-                {channel === "email" ? `Subject: ${t.subject}` : `${t.pushTitle}: ${t.pushBody}`}
+                {channel === "email" ? t("correspondenceDialog.subject", { subject: tpl.subject }) : `${tpl.pushTitle}: ${tpl.pushBody}`}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-3">
               <Switch
                 checked={active}
                 disabled={!canChange || busy}
-                aria-label={`${label(t)} ${channel} ${active ? "on" : "off"}`}
+                aria-label={`${label(tpl)} ${channel} ${active ? "on" : "off"}`}
                 onCheckedChange={(on) =>
-                  void patch(t, channel === "email" ? { isActive: on } : { pushActive: on }, `${label(t)}: ${channel} ${on ? "on" : "off"}`)
+                  void patch(tpl, channel === "email" ? { isActive: on } : { pushActive: on }, `${label(tpl)}: ${channel} ${on ? "on" : "off"}`)
                 }
               />
-              <Button variant="outline" size="sm" onClick={() => startEdit(t, channel)}>
-                {canChange ? "Edit" : "View"}
+              <Button variant="outline" size="sm" onClick={() => startEdit(tpl, channel)}>
+                {canChange ? t("correspondenceDialog.edit") : t("correspondenceDialog.view")}
               </Button>
             </div>
           </div>
         );
       })}
-      {items.length === 0 && <p className="py-8 text-center text-muted-foreground">No templates yet.</p>}
+      {items.length === 0 && <p className="py-8 text-center text-muted-foreground">{t("correspondenceDialog.noTemplatesYet")}</p>}
     </div>
   );
 
@@ -318,11 +327,11 @@ export default function CorrespondenceDialog({
         <DialogHeader>
           <div className="flex items-center gap-2">
             {onBack && (
-              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Back to Manage SSAA" onClick={onBack}>
+              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={t("correspondenceDialog.backToManageSsaa")} onClick={onBack}>
                 <ArrowLeft className="h-4 w-4" />
               </Button>
             )}
-            <DialogTitle>Correspondence</DialogTitle>
+            <DialogTitle>{t("correspondenceDialog.correspondence")}</DialogTitle>
           </div>
           <DialogDescription className="text-left">{EMAIL_NOTE[emailTransport]}</DialogDescription>
         </DialogHeader>
@@ -337,13 +346,13 @@ export default function CorrespondenceDialog({
         >
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="email" className="gap-2">
-              <Mail className="h-4 w-4" /> Email
+              <Mail className="h-4 w-4" /> {" "}{t("common.email")}
             </TabsTrigger>
             <TabsTrigger value="push" className="gap-2">
               <Bell className="h-4 w-4" /> Push
             </TabsTrigger>
             <TabsTrigger value="log" className="gap-2">
-              <RefreshCw className="h-4 w-4" /> Log
+              <RefreshCw className="h-4 w-4" /> {" "}{t("correspondenceDialog.log")}
             </TabsTrigger>
           </TabsList>
 
@@ -354,17 +363,17 @@ export default function CorrespondenceDialog({
                   {heading}
                   {description}
                   <div className="space-y-2">
-                    <Label htmlFor="tpl-subject">Subject Line</Label>
+                    <Label htmlFor="tpl-subject">{t("correspondenceDialog.subjectLine")}</Label>
                     <Input id="tpl-subject" value={draft.subject} disabled={!canChange} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Email Body</Label>
+                    <Label>{t("correspondenceDialog.emailBody")}</Label>
                     <EmailEditor value={draft.bodyHtml} onChange={(html) => setDraft((d) => (d ? { ...d, bodyHtml: html } : d))} placeholders={editing.template.placeholderVariables} />
                   </div>
                   <div className="rounded-md border">
                     <div className="border-b px-4 py-2 text-xs">
-                      <div className="text-muted-foreground">Recipient preview (placeholders filled with sample values)</div>
-                      <div className="mt-1 font-medium">Subject: {fill(draft.subject, samples)}</div>
+                      <div className="text-muted-foreground">{t("correspondenceDialog.recipientPreviewPlaceholdersFilledWithSa")}</div>
+                      <div className="mt-1 font-medium">{t("correspondenceDialog.subject2")}{" "}{fill(draft.subject, samples)}</div>
                     </div>
                     <div
                       className="max-h-[320px] overflow-y-auto rounded-b-md bg-white p-5 text-sm text-neutral-900 [&_a]:text-blue-700 [&_a]:underline [&_h1]:text-xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-2 [&_ul]:list-disc"
@@ -376,11 +385,13 @@ export default function CorrespondenceDialog({
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <Button onClick={() => void saveTemplate()} disabled={busy} className="flex-1">
                         {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                        Save Template
+                        
+                        {t("correspondenceDialog.saveTemplate")}
                       </Button>
                       <Button variant="outline" onClick={() => void sendTest()} disabled={busy}>
                         <Send className="mr-2 h-4 w-4" />
-                        Send test to me
+                        
+                        {t("correspondenceDialog.sendTestToMe")}
                       </Button>
                     </div>
                   )}
@@ -396,7 +407,7 @@ export default function CorrespondenceDialog({
                   {heading}
                   {description}
                   <div className="space-y-2">
-                    <Label htmlFor="tpl-push-title">Push Notification Title</Label>
+                    <Label htmlFor="tpl-push-title">{t("correspondenceDialog.pushNotificationTitle")}</Label>
                     <Input
                       id="tpl-push-title"
                       value={draft.pushTitle ?? ""}
@@ -406,7 +417,7 @@ export default function CorrespondenceDialog({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Insert Placeholder</Label>
+                    <Label>{t("correspondenceDialog.insertPlaceholder")}</Label>
                     <div className="flex flex-wrap gap-1.5">
                       {editing.template.placeholderVariables.map((v) => (
                         <button
@@ -423,7 +434,8 @@ export default function CorrespondenceDialog({
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="tpl-push-body">
-                      Message Body {editing.template.eventType === "schedule_assigned" ? "(also sent as a message in the person's People chat)" : "(shown under the bell)"}
+                      
+                      {t("correspondenceDialog.messageBody")}{" "}{editing.template.eventType === "schedule_assigned" ? t("correspondenceDialog.alsoSentAsAMessageIn") : t("correspondenceDialog.shownUnderTheBell")}
                     </Label>
                     <Textarea
                       id="tpl-push-body"
@@ -434,19 +446,20 @@ export default function CorrespondenceDialog({
                       maxLength={1600}
                       disabled={!canChange}
                     />
-                    <p className="text-xs text-muted-foreground">{(draft.pushBody ?? "").length}/1600 characters</p>
+                    <p className="text-xs text-muted-foreground">{(draft.pushBody ?? "").length}{t("correspondenceDialog.n1600Characters")}</p>
                   </div>
                   <div className="rounded-md border p-4">
-                    <div className="mb-2 text-xs font-medium text-muted-foreground">Live preview</div>
+                    <div className="mb-2 text-xs font-medium text-muted-foreground">{t("correspondenceDialog.livePreview")}</div>
                     <div className="max-w-md rounded-2xl bg-primary/10 px-4 py-3 text-sm">
                       <div className="font-medium">{fill(draft.pushTitle ?? "", samples)}</div>
-                      <div className="whitespace-pre-wrap">{fill(draft.pushBody ?? "", samples) || <span className="italic text-muted-foreground">Empty message</span>}</div>
+                      <div className="whitespace-pre-wrap">{fill(draft.pushBody ?? "", samples) || <span className="italic text-muted-foreground">{t("correspondenceDialog.emptyMessage")}</span>}</div>
                     </div>
                   </div>
                   {canChange && (
                     <Button onClick={() => void saveTemplate()} disabled={busy} className="w-full">
                       {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                      Save Template
+                      
+                      {t("correspondenceDialog.saveTemplate")}
                     </Button>
                   )}
                 </div>
@@ -459,42 +472,42 @@ export default function CorrespondenceDialog({
               <div className="flex flex-col gap-2 sm:flex-row">
                 <div className="relative flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Search recipient, subject or event…" className="pl-9" aria-label="Search the log" />
+                  <Input value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder={t("correspondenceDialog.searchRecipientSubjectOrEvent")} className="pl-9" aria-label={t("correspondenceDialog.searchTheLog")} />
                 </div>
                 <div className="grid grid-cols-2 gap-2 sm:flex">
-                  <select value={logChannel} onChange={(e) => setLogChannel(e.target.value)} className="h-10 rounded-md border border-input bg-background px-2 text-sm" aria-label="Channel">
-                    <option value="">All channels</option>
-                    <option value="email">Email</option>
+                  <select value={logChannel} onChange={(e) => setLogChannel(e.target.value)} className="h-10 rounded-md border border-input bg-background px-2 text-sm" aria-label={t("correspondenceDialog.channel")}>
+                    <option value="">{t("correspondenceDialog.allChannels")}</option>
+                    <option value="email">{t("common.email")}</option>
                     <option value="push">Push</option>
                     <option value="chat">Chat</option>
                   </select>
-                  <select value={logStatus} onChange={(e) => setLogStatus(e.target.value)} className="h-10 rounded-md border border-input bg-background px-2 text-sm" aria-label="Status">
-                    <option value="">Any status</option>
-                    <option value="sent">Sent</option>
-                    <option value="failed">Failed</option>
-                    <option value="skipped">Email not set up</option>
-                    <option value="off">Template off</option>
+                  <select value={logStatus} onChange={(e) => setLogStatus(e.target.value)} className="h-10 rounded-md border border-input bg-background px-2 text-sm" aria-label={t("correspondenceDialog.status")}>
+                    <option value="">{t("correspondenceDialog.anyStatus")}</option>
+                    <option value="sent">{t("correspondenceDialog.sent")}</option>
+                    <option value="failed">{t("correspondenceDialog.failed")}</option>
+                    <option value="skipped">{t("correspondenceDialog.emailNotSetUp")}</option>
+                    <option value="off">{t("correspondenceDialog.templateOff")}</option>
                   </select>
                 </div>
-                <Button variant="outline" onClick={() => void loadLog()} disabled={logLoading} aria-label="Refresh the log">
+                <Button variant="outline" onClick={() => void loadLog()} disabled={logLoading} aria-label={t("correspondenceDialog.refreshTheLog")}>
                   <RefreshCw className={`h-4 w-4 ${logLoading ? "animate-spin" : ""}`} />
                 </Button>
               </div>
 
               {entries.length === 0 ? (
-                <p className="py-10 text-center text-muted-foreground">{logLoading ? "Loading…" : "Nothing sent yet."}</p>
+                <p className="py-10 text-center text-muted-foreground">{logLoading ? t("common.loading2") : t("correspondenceDialog.nothingSentYet")}</p>
               ) : (
                 <>
                   {/* Desktop: Lovable's table. */}
                   <table className="hidden w-full text-sm md:table">
                     <thead>
                       <tr className="border-b text-left text-xs text-muted-foreground">
-                        <th className="py-2 pr-3 font-medium">Date</th>
-                        <th className="py-2 pr-3 font-medium">Event</th>
-                        <th className="py-2 pr-3 font-medium">Channel</th>
-                        <th className="py-2 pr-3 font-medium">Recipient</th>
-                        <th className="py-2 pr-3 font-medium">Subject</th>
-                        <th className="py-2 font-medium">Status</th>
+                        <th className="py-2 pr-3 font-medium">{t("correspondenceDialog.date")}</th>
+                        <th className="py-2 pr-3 font-medium">{t("correspondenceDialog.event")}</th>
+                        <th className="py-2 pr-3 font-medium">{t("correspondenceDialog.channel")}</th>
+                        <th className="py-2 pr-3 font-medium">{t("correspondenceDialog.recipient")}</th>
+                        <th className="py-2 pr-3 font-medium">{t("correspondenceDialog.subject3")}</th>
+                        <th className="py-2 font-medium">{t("correspondenceDialog.status")}</th>
                       </tr>
                     </thead>
                     <tbody>

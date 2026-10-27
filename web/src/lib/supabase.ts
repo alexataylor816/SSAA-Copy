@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useReducer, useRef } from "react";
-import { getLanguage } from "@/i18n/runtime";
+import { getLanguage, tr } from "@/i18n/runtime";
 
 /** The wire format accepted by `/query`. `is`/`not`/`in` are emitted by the
  * dedicated helpers below, so `.filter()` accepts only the comparison ops. */
@@ -119,7 +119,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   const text = await res.text();
   const payload = text ? JSON.parse(text) : {};
   if (!res.ok) {
-    const message = payload.error ?? `Request failed with ${res.status}.`;
+    const message = payload.error ?? tr("supabase.requestFailedWith", { status: res.status });
     const error = new Error(message) as Error & { status?: number };
     error.status = res.status;
     throw error;
@@ -132,7 +132,7 @@ async function toResult<T = any>(run: () => Promise<T>): Promise<QueryResult<T>>
   try {
     return { data: await run(), error: null };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Request failed.";
+    const message = err instanceof Error ? err.message : tr("supabase.requestFailed");
     const status = (err as { status?: number }).status;
     return { data: null as T, error: { message, ...(status ? { status } : {}) } };
   }

@@ -5,6 +5,7 @@
 
 import { getToken, setToken } from "./supabase";
 import { getLanguage } from "@/i18n/runtime";
+import { tr } from "@/i18n/runtime";
 
 export class ApiError extends Error {
   constructor(
@@ -31,7 +32,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await res.text();
   const payload = text ? JSON.parse(text) : {};
   if (!res.ok) {
-    throw new ApiError(payload.error ?? `Request failed with ${res.status}.`, res.status);
+    throw new ApiError(payload.error ?? tr("api.requestFailedWith", { status: res.status }), res.status);
   }
   return payload as T;
 }

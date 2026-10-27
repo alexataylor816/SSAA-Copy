@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useLanguage } from '@/contexts/LanguageContext';
 import AnchoredFirstClickTip from '@/components/onboarding/AnchoredFirstClickTip';
+import { tr } from "@/i18n/runtime";
 
 const TRADES = [
   'Drywall', 'HVAC', 'Electrical', 'Sprinkler', 'Flooring',
@@ -215,8 +216,8 @@ const LeftPanel = ({
             <AnchoredFirstClickTip
               tipKey="overlays"
               copy={projects.length > 1
-                ? "Toggle overlays to layer additional data on your calendar like project task lines, request statuses, and even multiple project schedules so you can see the full picture at a glance."
-                : "Toggle overlays to layer additional data on your calendar like project task lines."}
+                ? t("leftPanel.toggleOverlaysToLayerAdditionalData")
+                : t("leftPanel.toggleOverlaysToLayerAdditionalData2")}
             >
               <div className="flex items-center gap-1">
                 <Checkbox
@@ -256,7 +257,7 @@ const LeftPanel = ({
                     grouped[pid].push(task);
                   });
                   return Object.entries(grouped).map(([pid, projectTasks]) => {
-                    const projectName = projects.find(p => p.id === pid)?.name || 'Unknown Project';
+                    const projectName = projects.find(p => p.id === pid)?.name || tr("leftPanel.unknownProject");
                     return (
                       <Collapsible key={pid} defaultOpen>
                         <CollapsibleTrigger className="flex items-center justify-between w-full text-xs font-bold text-foreground pt-1 pb-0.5 hover:text-primary transition-colors">
@@ -340,7 +341,7 @@ const LeftPanel = ({
       {selectedProject === 'master' && projects.length > 0 && (
         <Card className={`border-primary/20 ${masterOverlayProjectIds.length > 0 ? 'max-h-[50%] flex flex-col min-h-0' : 'flex-shrink-0'}`}>
           <CardHeader className="py-2 px-3 flex-shrink-0">
-            <CardTitle className="text-sm">Project Schedule Overlays</CardTitle>
+            <CardTitle className="text-sm">{t("leftPanel.projectScheduleOverlays")}</CardTitle>
           </CardHeader>
           <CardContent className="px-3 pb-3 flex-1 min-h-0">
             <ScrollArea className={masterOverlayProjectIds.length > 0 ? 'h-full' : 'max-h-40'}>

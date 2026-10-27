@@ -11,6 +11,8 @@ import EmployeeCard from "./EmployeeCard";
 import { dayLabel } from "./canDrop";
 import { slotDragId } from "./helpers";
 import type { FreeSlot, MatrixModel } from "./useMatrixDrafts";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { jobTitleLabel } from "@/i18n/labels";
 
 /**
  * The right-hand panel (O6), from Luke's MatrixSubSidebar (GC) and MatrixSidebar (sub): who is free on
@@ -54,6 +56,7 @@ export default function SubSidebar({
   pickedKey,
   className = "",
 }: Props) {
+  const { t } = useLanguage();
   const [search, setSearch] = useState("");
   const [jobTitle, setJobTitle] = useState("all");
   const { setNodeRef, isOver } = useDroppable({ id: "sidebar-drop" });
@@ -95,12 +98,12 @@ export default function SubSidebar({
   if (collapsed) {
     return (
       <div className={`flex w-10 shrink-0 flex-col items-center border-l bg-card py-4 ${className}`}>
-        <Button variant="ghost" size="icon" onClick={onToggleCollapse} className="mb-4" aria-label="Open the side panel">
+        <Button variant="ghost" size="icon" onClick={onToggleCollapse} className="mb-4" aria-label={t("subSidebar.openTheSidePanel")}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
         {isGc ? <Building2 className="h-4 w-4 text-muted-foreground" /> : <Users className="h-4 w-4 text-muted-foreground" />}
         <span className="mt-1 rotate-180 text-xs text-muted-foreground [writing-mode:vertical-lr]">
-          {isGc ? `Subcontractors (${data.crews.length})` : "Available"}
+          {isGc ? t("subSidebar.subcontractors", { length: data.crews.length }) : t("subSidebar.available")}
         </span>
       </div>
     );
@@ -110,7 +113,7 @@ export default function SubSidebar({
     <>
       {g.scheduled.length > 0 && (
         <div className="mb-2">
-          <div className="mb-1 px-1 text-[10px] font-semibold uppercase text-muted-foreground">Scheduled</div>
+          <div className="mb-1 px-1 text-[10px] font-semibold uppercase text-muted-foreground">{t("subSidebar.scheduled")}</div>
           <div className="space-y-1">
             {g.scheduled.map(({ employee, here, elsewhere }) => (
               <EmployeeCard
@@ -130,7 +133,7 @@ export default function SubSidebar({
       )}
       {g.available.length > 0 && (
         <div>
-          <div className="mb-1 px-1 text-[10px] font-semibold uppercase text-muted-foreground">Available</div>
+          <div className="mb-1 px-1 text-[10px] font-semibold uppercase text-muted-foreground">{t("subSidebar.available")}</div>
           <div className="space-y-1">
             {g.available.map(({ employee, slot }) => {
               const id = slotDragId(slot);
@@ -156,7 +159,7 @@ export default function SubSidebar({
         </div>
       )}
       {g.available.length === 0 && g.scheduled.length === 0 && (
-        <p className="py-2 text-center text-[10px] text-muted-foreground">No availability for this day</p>
+        <p className="py-2 text-center text-[10px] text-muted-foreground">{t("subSidebar.noAvailabilityForThisDay")}</p>
       )}
     </>
   );
@@ -166,21 +169,21 @@ export default function SubSidebar({
     <aside
       ref={setNodeRef}
       className={`flex w-72 shrink-0 flex-col border-l bg-card transition-colors ${isOver ? "bg-primary/10 ring-2 ring-inset ring-primary/40" : ""} ${className}`}
-      aria-label="People to schedule"
+      aria-label={t("subSidebar.peopleToSchedule")}
     >
       {/* On a phone this sits in a sheet whose own close button is top-right: keep clear of it. */}
       <div className={`flex items-center justify-between gap-1 border-b p-2 ${onPickSlot ? "pr-12" : ""}`}>
-        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Previous day" onClick={() => onStepDate(-1)}>
+        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={t("subSidebar.previousDay")} onClick={() => onStepDate(-1)}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <h3 className="flex-1 truncate text-center text-sm font-semibold">
-          {isGc ? "Subs" : "Available"} — {dayLabel(selectedDate)}
+          {isGc ? t("subSidebar.subs") : t("subSidebar.available")} — {dayLabel(selectedDate)}
         </h3>
-        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Next day" onClick={() => onStepDate(1)}>
+        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={t("subSidebar.nextDay")} onClick={() => onStepDate(1)}>
           <ChevronRight className="h-4 w-4" />
         </Button>
         {!onPickSlot && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Collapse the side panel" onClick={onToggleCollapse}>
+          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={t("subSidebar.collapseTheSidePanel")} onClick={onToggleCollapse}>
             <X className="h-4 w-4" />
           </Button>
         )}
@@ -190,8 +193,8 @@ export default function SubSidebar({
         <div className="relative">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder={isGc ? "Search subs or employees..." : "Search by name..."}
-            aria-label="Search people"
+            placeholder={isGc ? t("subSidebar.searchSubsOrEmployees") : t("subSidebar.searchByName")}
+            aria-label={t("subSidebar.searchPeople")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-8 pl-7 text-xs"
@@ -199,14 +202,14 @@ export default function SubSidebar({
         </div>
         {jobTitles.length > 0 && (
           <Select value={jobTitle} onValueChange={setJobTitle}>
-            <SelectTrigger className="h-8 text-xs" aria-label="Filter by job title">
-              <SelectValue placeholder="Filter by job title" />
+            <SelectTrigger className="h-8 text-xs" aria-label={t("subSidebar.filterByJobTitle")}>
+              <SelectValue placeholder={t("subSidebar.filterByJobTitle")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Job Titles</SelectItem>
-              {jobTitles.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {t}
+              <SelectItem value="all">{t("subSidebar.allJobTitles")}</SelectItem>
+              {jobTitles.map((title) => (
+                <SelectItem key={title} value={title}>
+                  {jobTitleLabel(title)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -216,15 +219,16 @@ export default function SubSidebar({
           (copiedDate ? (
             <div className="flex items-center gap-1.5 rounded-md border border-primary/20 bg-primary/10 p-2">
               <Copy className="h-3.5 w-3.5 shrink-0 text-primary" />
-              <span className="flex-1 truncate text-xs text-primary">Copying from {dayLabel(copiedDate)} · click a day to paste</span>
-              <Button variant="ghost" size="icon" className="h-5 w-5" aria-label="Stop copying" onClick={onClearCopy}>
+              <span className="flex-1 truncate text-xs text-primary">{t("subSidebar.copyingFrom")}{" "}{dayLabel(copiedDate)} {" "}{t("subSidebar.clickADayToPaste")}</span>
+              <Button variant="ghost" size="icon" className="h-5 w-5" aria-label={t("subSidebar.stopCopying")} onClick={onClearCopy}>
                 <X className="h-3 w-3" />
               </Button>
             </div>
           ) : (
             <Button variant="outline" size="sm" className="h-8 w-full text-xs" onClick={onCopy}>
               <Copy className="mr-1.5 h-3.5 w-3.5" />
-              Copy Current Schedule
+              
+              {t("subSidebar.copyCurrentSchedule")}
             </Button>
           ))}
       </div>
@@ -232,7 +236,7 @@ export default function SubSidebar({
       <div className="flex-1 overflow-y-auto p-2">
         {groups.length === 0 ? (
           <p className="py-4 text-center text-xs text-muted-foreground">
-            {data.crews.length === 0 ? (isGc ? "No connected subcontractors" : "No crew yet") : "No matches"}
+            {data.crews.length === 0 ? (isGc ? t("subSidebar.noConnectedSubcontractors") : t("subSidebar.noCrewYet")) : t("subSidebar.noMatches")}
           </p>
         ) : (
           <Accordion type="multiple" defaultValue={data.crews.map((c) => c.companyId)} className="space-y-1">
@@ -242,9 +246,9 @@ export default function SubSidebar({
                   <div className="mr-2 flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left">
                     <span className="w-full truncate text-xs font-semibold">{g.crew.companyName}</span>
                     <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                      <span>{g.availableCount} available</span>
+                      <span>{t("subSidebar.availableCount", { count: g.availableCount })}</span>
                       <span>•</span>
-                      <span className="font-medium text-green-600 dark:text-green-500">{g.scheduledCount} scheduled</span>
+                      <span className="font-medium text-green-600 dark:text-green-500">{t("subSidebar.scheduledCount", { count: g.scheduledCount })}</span>
                     </div>
                   </div>
                 </AccordionTrigger>

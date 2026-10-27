@@ -793,7 +793,7 @@ const CalendarPanel = ({
                           </span>
                         ))}
                         {subsWithAvail.length > 5 && (
-                          <span className="text-[10px] text-muted-foreground">+{subsWithAvail.length - 5} more</span>
+                          <span className="text-[10px] text-muted-foreground">{t("calendarPanel.more", { count: subsWithAvail.length - 5 })}</span>
                         )}
                       </>
                     )}

@@ -37,7 +37,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { CalendarDays, Plus } from "lucide-react";
-import { dateLocale } from "@/i18n/runtime";
+import { dateLocale, tr } from "@/i18n/runtime";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Project {
   id: string;
@@ -73,10 +74,10 @@ interface JoinRequest {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: "Pending",
-  confirmed: "Confirmed",
-  rejected: "Declined",
-  cancelled: "Cancelled",
+  get pending() { return tr("dashboard.statusLabels.pending"); },
+  get confirmed() { return tr("dashboard.statusLabels.confirmed"); },
+  get rejected() { return tr("dashboard.statusLabels.rejected"); },
+  get cancelled() { return tr("dashboard.statusLabels.cancelled"); },
 };
 
 const STATUS_STYLE: Record<string, string> = {
@@ -105,6 +106,7 @@ const formatTime = (value: string | null) => {
 const UPCOMING_SHOWN = 5;
 
 export default function Dashboard() {
+  const { t } = useLanguage();
   const { user, isAccountHolder, isMOA, isBasicUser, permissionLevel, hasLevel1OrHigher, hasPartialOrHigher, refreshProfile } = useAuth();
   // Mirrors the original's can_manage_projects(): full or account holder, any company type.
   const canManageProjects = isAccountHolder || isMOA || permissionLevel === "full";
@@ -247,7 +249,7 @@ export default function Dashboard() {
     })().catch((err) => {
       // Unmount aborts the request on purpose; anything else is a real failure.
       if (controller.signal.aborted) return;
-      setError(err instanceof Error ? err.message : "Could not load the dashboard.");
+      setError(err instanceof Error ? err.message : tr("dashboard.couldNotLoad"));
       setLoading(false);
     });
     return () => controller.abort();
@@ -283,7 +285,7 @@ export default function Dashboard() {
       setProjectName("");
       await loadProjects();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create that project.");
+      setError(err instanceof Error ? err.message : tr("dashboard.couldNotCreateProject"));
     } finally {
       setBusy(false);
     }
@@ -301,7 +303,7 @@ export default function Dashboard() {
       await refreshProfile();
       setNewCompanyName("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create that company.");
+      setError(err instanceof Error ? err.message : tr("common.couldNotCreateCompany"));
     } finally {
       setBusy(false);
     }
@@ -316,7 +318,7 @@ export default function Dashboard() {
       });
       await loadJoinRequests();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update that request.");
+      setError(err instanceof Error ? err.message : tr("common.couldNotUpdateRequest"));
     } finally {
       setBusy(false);
     }
@@ -400,11 +402,11 @@ const handleReorderTasks = useCallback(
       // With no project chosen the calendar is showing every project, so a new
       // task needs one explicitly rather than landing in an arbitrary project.
       const projectId = selectedProjectId ?? projects[0]?.id;
-      if (!projectId) throw new Error("Create a project before adding tasks.");
+      if (!projectId) throw new Error(t("dashboard.createAProjectBeforeAddingTasks"));
       await createTask(projectId, { name, start_date: iso(startDate), end_date: iso(endDate) });
       await reloadTasks();
     },
-    [selectedProjectId, projects, reloadTasks],
+    [selectedProjectId, projects, reloadTasks, t],
   );
 
   const handleUpdateTask = useCallback(
@@ -549,24 +551,25 @@ const handleReorderTasks = useCallback(
           <div className="mx-auto max-w-2xl">
             <Card>
               <CardHeader>
-                <CardTitle>{pendingJoinRequest ? "Request sent" : "Set up your company"}</CardTitle>
+                <CardTitle>{pendingJoinRequest ? t("dashboard.requestSent") : t("dashboard.setUpYourCompany")}</CardTitle>
               </CardHeader>
             <CardContent className="space-y-4">
               {pendingJoinRequest ? (
                 <p className="text-sm text-muted-foreground">
-                  Your request to join has been sent. The account holder needs to approve it before you can
-                  start scheduling with that company.
+                  
+                  {t("dashboard.yourRequestToJoinHasBeen")}
                 </p>
               ) : (
                 <>
                   <p className="text-sm text-muted-foreground">
-                    Your account is ready, but you are not part of a company yet. Create one to start scheduling.
+                    
+                    {t("dashboard.yourAccountIsReadyButYou")}
                   </p>
                   <form onSubmit={createCompany} className="flex gap-2">
                     <Input
                       value={newCompanyName}
                       onChange={(e) => setNewCompanyName(e.target.value)}
-                      placeholder="Company name"
+                      placeholder={t("dashboard.companyName")}
                       required
                     />
                     <select
@@ -574,11 +577,12 @@ const handleReorderTasks = useCallback(
                       onChange={(e) => setNewCompanyType(e.target.value as "gc" | "sub")}
                       className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
                     >
-                      <option value="gc">General contractor</option>
-                      <option value="sub">Subcontractor</option>
+                      <option value="gc">{t("common.generalContractor")}</option>
+                      <option value="sub">{t("common.subcontractor")}</option>
                     </select>
                     <Button type="submit" disabled={busy}>
-                      Create
+                      
+                      {t("dashboard.create")}
                     </Button>
                   </form>
                 </>
@@ -669,19 +673,21 @@ const handleReorderTasks = useCallback(
                         <DialogTrigger asChild>
                           <Button variant="outline" className="w-full border-primary/20 bg-card">
                             <Plus className="mr-2 h-4 w-4" />
-                            New Project
+                            
+                            {t("dashboard.newProject")}
                           </Button>
                         </DialogTrigger>
                         <DialogContent>
                           <DialogHeader>
-                            <DialogTitle>New project</DialogTitle>
+                            <DialogTitle>{t("dashboard.newProject2")}</DialogTitle>
                             <DialogDescription>
-                              Projects belong to your company. Subs join yours with a connection code.
+                              
+                              {t("dashboard.projectsBelongToYourCompanySubs")}
                             </DialogDescription>
                           </DialogHeader>
                           <form onSubmit={createProject} className="space-y-4">
                             <div className="space-y-2">
-                              <Label htmlFor="projectName">Project name</Label>
+                              <Label htmlFor="projectName">{t("dashboard.projectName")}</Label>
                               <Input
                                 id="projectName"
                                 value={projectName}
@@ -691,7 +697,8 @@ const handleReorderTasks = useCallback(
                             </div>
                             <DialogFooter>
                               <Button type="submit" disabled={busy}>
-                                Create project
+                                
+                                {t("dashboard.createProject")}
                               </Button>
                             </DialogFooter>
                           </form>
@@ -702,13 +709,11 @@ const handleReorderTasks = useCallback(
                   {pendingRequests.length > 0 && (
                     <Card className="border-primary/20">
                       <CardHeader className="pb-3">
-                        <CardTitle className="text-lg">Join Requests</CardTitle>
+                        <CardTitle className="text-lg">{t("dashboard.joinRequests")}</CardTitle>
                       </CardHeader>
                       <CardContent>
                         <p className="mb-2 text-xs text-muted-foreground">
-                          {pendingRequests.length === 1 ? "This person wants" : "These people want"} to join your
-                          company. Approving gives them access at the lowest level; you can raise it under All Team
-                          Members.
+                          {pendingRequests.length === 1 ? t("dashboard.thisPersonWants") : t("dashboard.thesePeopleWant")} {" "}{t("dashboard.toJoinYourCompanyApprovingGives")}
                         </p>
                         <ul className="divide-y">
                           {pendingRequests.map((request) => (
@@ -722,7 +727,8 @@ const handleReorderTasks = useCallback(
                               </div>
                               <div className="grid grid-cols-2 gap-2">
                                 <Button size="sm" disabled={busy} onClick={() => void respondToJoinRequest(request.id, true)}>
-                                  Approve
+                                  
+                                  {t("dashboard.approve")}
                                 </Button>
                                 <Button
                                   size="sm"
@@ -730,7 +736,8 @@ const handleReorderTasks = useCallback(
                                   disabled={busy}
                                   onClick={() => void respondToJoinRequest(request.id, false)}
                                 >
-                                  Decline
+                                  
+                                  {t("common.decline")}
                                 </Button>
                               </div>
                             </li>
@@ -742,12 +749,13 @@ const handleReorderTasks = useCallback(
 
                   <Card className="border-primary/20">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-lg">Upcoming Requests</CardTitle>
+                      <CardTitle className="text-lg">{t("dashboard.upcomingRequests")}</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-1">
                       {upcomingRequests.length === 0 ? (
                         <p className="text-sm text-muted-foreground">
-                          Nothing scheduled in the next month. Click a day on the calendar to schedule.
+                          
+                          {t("dashboard.nothingScheduledInTheNextMonth")}
                         </p>
                       ) : (
                         (showAllUpcoming ? upcomingRequests : upcomingRequests.slice(0, UPCOMING_SHOWN)).map((entry) => (
@@ -776,7 +784,7 @@ const handleReorderTasks = useCallback(
                       )}
                       {upcomingRequests.length > UPCOMING_SHOWN && (
                         <Button variant="ghost" size="sm" className="w-full" onClick={() => setShowAllUpcoming((v) => !v)}>
-                          {showAllUpcoming ? "Show fewer" : `Show all ${upcomingRequests.length}`}
+                          {showAllUpcoming ? t("dashboard.showFewer") : t("dashboard.showAll", { length: upcomingRequests.length })}
                         </Button>
                       )}
                     </CardContent>

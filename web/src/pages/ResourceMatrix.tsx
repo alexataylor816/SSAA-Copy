@@ -47,7 +47,8 @@ import NotifyDialog from "@/components/matrix/NotifyDialog";
 import GCNotifyDialog from "@/components/matrix/GCNotifyDialog";
 import { applyDrop, applyRemove, dayLabel, isLockedDate, type DragSource, type DropTarget } from "@/components/matrix/canDrop";
 import { buildModel, cellKey, toBatch, useMatrixDrafts, type Placement } from "@/components/matrix/useMatrixDrafts";
-import { dateLocale } from "@/i18n/runtime";
+import { dateLocale, tr } from "@/i18n/runtime";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 // Sliding range: start two weeks back, extend four weeks at a time at either end, at most about a year.
 const CHUNK_DAYS = 28;
@@ -76,6 +77,7 @@ function readCollapsed(): Set<string> {
 }
 
 export default function ResourceMatrix() {
+  const { t } = useLanguage();
   const { user } = useAuth();
   const { toast } = useToast();
   const isMobile = useIsMobile();
@@ -155,7 +157,7 @@ export default function ResourceMatrix() {
       if (!projectFilter) setAllProjects(next.projects);
       setLoadError(null);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Could not load the schedule.");
+      setLoadError(err instanceof Error ? err.message : tr("resourceMatrix.couldNotLoad"));
     } finally {
       setLoading(false);
     }
@@ -224,7 +226,7 @@ export default function ResourceMatrix() {
     setDrafts(next);
     if (reasons.length) {
       toast({
-        title: placed ? `${placed} placed, ${reasons.length} couldn't go there` : "Can't place here",
+        title: placed ? t("resourceMatrix.placedCouldnTGoThere", { placed: placed, length: reasons.length }) : t("resourceMatrix.canTPlaceHere"),
         description: reasons.join(" "),
         variant: placed ? undefined : "destructive",
       });
@@ -235,7 +237,7 @@ export default function ResourceMatrix() {
   const removeCard = (placement: Placement) => {
     const result = applyRemove(drafts, placement);
     if (result.ok) setDrafts(result.drafts);
-    else if (result.reason) toast({ title: "Can't remove", description: result.reason, variant: "destructive" });
+    else if (result.reason) toast({ title: t("resourceMatrix.canTRemove"), description: result.reason, variant: "destructive" });
   };
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -289,7 +291,7 @@ export default function ResourceMatrix() {
         if (s.kind !== "card") continue;
         const r = applyRemove(next, s.placement);
         if (r.ok) next = r.drafts;
-        else if (r.reason) toast({ title: "Can't remove", description: r.reason, variant: "destructive" });
+        else if (r.reason) toast({ title: t("resourceMatrix.canTRemove"), description: r.reason, variant: "destructive" });
       }
       setDrafts(next);
       setSelection(new Set());
@@ -315,11 +317,11 @@ export default function ResourceMatrix() {
       .filter((p) => p.date === selectedDate)
       .map((p) => ({ employeeId: p.employeeId, projectId: p.projectId, start: p.start, end: p.end }));
     if (items.length === 0) {
-      toast({ title: "Nothing to copy", description: `No one is scheduled on ${dayLabel(selectedDate)}.` });
+      toast({ title: t("resourceMatrix.nothingToCopy"), description: t("resourceMatrix.noOneIsScheduledOn", { day: dayLabel(selectedDate) }) });
       return;
     }
     setCopied({ date: selectedDate, items });
-    toast({ title: "Schedule copied", description: `Copied schedule from ${dayLabel(selectedDate)}. Click a day header to paste.` });
+    toast({ title: t("resourceMatrix.scheduleCopied"), description: t("resourceMatrix.copiedScheduleFromClickADay", { day: dayLabel(selectedDate) }) });
   };
 
   const pasteDay = (date: string) => {
@@ -341,8 +343,8 @@ export default function ResourceMatrix() {
     setDrafts(next);
     setSelectedDate(date);
     toast({
-      title: `Pasted to ${dayLabel(date)}`,
-      description: `${placed} placed${reasons.length ? `, ${reasons.length} skipped: ${reasons.join(" ")}` : "."} Review and publish.`,
+      title: t("resourceMatrix.pastedTo", { dayLabeldate: dayLabel(date) }),
+      description: t("resourceMatrix.placedReviewAndPublish", { placed: placed, value: reasons.length ? `, ${reasons.length} skipped: ${reasons.join(" ")}` : "." }),
     });
   };
 
@@ -362,9 +364,9 @@ export default function ResourceMatrix() {
       if (!isGc && dry.unassigned.length > 0) {
         if (!data.viewer.canMakeException) {
           toast({
-            title: "Permission required",
+            title: t("resourceMatrix.permissionRequired"),
             description:
-              "You do not have permission to assign employees to projects they are not assigned to. Ask an admin to update assignments in Manage Team Profiles.",
+              t("resourceMatrix.youDoNotHavePermissionTo"),
             variant: "destructive",
           });
           return;
@@ -374,7 +376,7 @@ export default function ResourceMatrix() {
       }
       setNotifyStep(isGc ? "gc" : "sub");
     } catch (err) {
-      toast({ title: "Couldn't check the changes", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("resourceMatrix.couldnTCheckTheChanges"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setPublishing(false);
     }
@@ -393,11 +395,11 @@ export default function ResourceMatrix() {
       setDrafts((prev) => prev.filter((d) => keep.has(d.id)));
       const saved = drafts.length - keep.size;
       toast({
-        title: isGc ? "Requests sent" : "Schedule published",
+        title: isGc ? t("resourceMatrix.requestsSent") : t("resourceMatrix.schedulePublished"),
         description: [
-          `${saved} change${saved === 1 ? "" : "s"} saved.`,
+          t(saved === 1 ? "resourceMatrix.changesSaved.one" : "resourceMatrix.changesSaved.other", { count: saved }),
           res.skipped.length ? `${res.skipped.length} skipped: ${res.skipped.map((s) => s.reason).join(" ")}` : "",
-          (notify.gcEmail || notify.personnelEmail) && !res.notified.email ? "Email isn't set up yet, so only in-app notifications were sent." : "",
+          (notify.gcEmail || notify.personnelEmail) && !res.notified.email ? tr("resourceMatrix.emailNotSetUp") : "",
         ]
           .filter(Boolean)
           .join(" "),
@@ -405,7 +407,7 @@ export default function ResourceMatrix() {
       });
       await load();
     } catch (err) {
-      toast({ title: "Publish failed", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("resourceMatrix.publishFailed"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setPublishing(false);
     }
@@ -504,7 +506,7 @@ export default function ResourceMatrix() {
         <DashboardHeader />
         <main className="mx-auto max-w-5xl p-4">
           <Card>
-            <CardContent className="p-6 text-sm text-muted-foreground">Join a company before using the weekly schedule.</CardContent>
+            <CardContent className="p-6 text-sm text-muted-foreground">{t("resourceMatrix.joinACompanyBeforeUsingThe")}</CardContent>
           </Card>
         </main>
         <MobileTabBar />
@@ -514,13 +516,14 @@ export default function ResourceMatrix() {
 
   const weekArrows = (
     <div className="flex shrink-0 items-center gap-1">
-      <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Previous week" onClick={() => (isMobile ? stepDay(-7) : slideWeeks(-1))}>
+      <Button variant="outline" size="icon" className="h-9 w-9" aria-label={t("resourceMatrix.previousWeek")} onClick={() => (isMobile ? stepDay(-7) : slideWeeks(-1))}>
         <ChevronLeft className="h-4 w-4" />
       </Button>
       <Button variant="outline" size="sm" className="h-9" onClick={goToday}>
-        Today
+        
+        {t("resourceMatrix.today")}
       </Button>
-      <Button variant="outline" size="icon" className="h-9 w-9" aria-label="Next week" onClick={() => (isMobile ? stepDay(7) : slideWeeks(1))}>
+      <Button variant="outline" size="icon" className="h-9 w-9" aria-label={t("resourceMatrix.nextWeek")} onClick={() => (isMobile ? stepDay(7) : slideWeeks(1))}>
         <ChevronRight className="h-4 w-4" />
       </Button>
     </div>
@@ -532,7 +535,7 @@ export default function ResourceMatrix() {
       <div className="space-y-2 px-4 py-3 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:space-y-0">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold">Weekly Schedule</h1>
+            <h1 className="text-lg font-semibold">{t("resourceMatrix.weeklySchedule")}</h1>
             <p className="truncate text-sm text-muted-foreground">{weekLabel}</p>
           </div>
           <div className="sm:hidden">{weekArrows}</div>
@@ -542,9 +545,9 @@ export default function ResourceMatrix() {
             value={projectFilter}
             onChange={(e) => setProjectFilter(e.target.value)}
             className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm sm:h-9 sm:w-auto sm:max-w-[220px]"
-            aria-label="Project"
+            aria-label={t("common.project")}
           >
-            <option value="">Master Schedule (all projects)</option>
+            <option value="">{t("resourceMatrix.masterScheduleAllProjects")}</option>
             {allProjects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -587,7 +590,7 @@ export default function ResourceMatrix() {
   const body =
     loading && !data ? (
       <div className="flex flex-1 items-center justify-center py-16 text-sm text-muted-foreground">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading schedule…
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {" "}{t("resourceMatrix.loadingSchedule")}
       </div>
     ) : loadError && !data ? (
       <div className="p-4">
@@ -595,7 +598,8 @@ export default function ResourceMatrix() {
           <CardContent className="flex items-center justify-between gap-3 p-4 text-sm">
             <span className="text-destructive">{loadError}</span>
             <Button size="sm" variant="outline" onClick={() => void load()}>
-              Try again
+              
+              {t("resourceMatrix.tryAgain")}
             </Button>
           </CardContent>
         </Card>
@@ -618,7 +622,7 @@ export default function ResourceMatrix() {
             data &&
             model && (
               <main className="space-y-3 p-3">
-                <div ref={dayStrip} className="-mx-3 flex snap-x gap-1.5 overflow-x-auto px-3 pb-1" role="tablist" aria-label="Day">
+                <div ref={dayStrip} className="-mx-3 flex snap-x gap-1.5 overflow-x-auto px-3 pb-1" role="tablist" aria-label={t("resourceMatrix.day")}>
                   {weekDays.map((d, i) => {
                     const date = new Date(`${d}T00:00:00`);
                     const active = d === selectedDate;
@@ -649,17 +653,20 @@ export default function ResourceMatrix() {
                 {picked ? (
                   <div className="flex items-center gap-2 rounded-md border border-primary bg-primary/10 p-2 text-sm">
                     <span className="flex-1">
-                      Tap a project to place <strong>{picked.name}</strong>
+                      
+                      {t("resourceMatrix.tapAProjectToPlace")}{" "}<strong>{picked.name}</strong>
                     </span>
                     <Button size="sm" variant="ghost" onClick={() => setPicked(null)}>
-                      Cancel
+                      
+                      {t("common.cancel")}
                     </Button>
                   </div>
                 ) : (
                   canDrag && (
                     <Button className="w-full" variant="outline" onClick={() => setSheetOpen(true)}>
                       <UserPlus className="mr-2 h-4 w-4" />
-                      Add people
+                      
+                      {t("resourceMatrix.addPeople")}
                     </Button>
                   )
                 )}
@@ -681,10 +688,10 @@ export default function ResourceMatrix() {
                     >
                       <div className={`flex items-baseline justify-between gap-2 ${list.length === 0 && !picked ? "" : "mb-2"}`}>
                         <h2 className={`truncate text-sm ${list.length ? "font-semibold" : "font-medium text-muted-foreground"}`}>{project.name}</h2>
-                        <span className="shrink-0 text-xs text-muted-foreground">{list.length ? `${list.length} scheduled` : "No one"}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{list.length ? t("resourceMatrix.scheduled", { length: list.length }) : t("resourceMatrix.noOne")}</span>
                       </div>
                       {list.length === 0 ? (
-                        picked ? <p className="text-xs italic text-primary">Tap to place here</p> : null
+                        picked ? <p className="text-xs italic text-primary">{t("resourceMatrix.tapToPlaceHere")}</p> : null
                       ) : (
                         <div className="flex flex-col gap-1">
                           {list.map((p) => {
@@ -713,14 +720,14 @@ export default function ResourceMatrix() {
                     </section>
                   );
                 })}
-                {data.projects.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No projects to schedule yet.</p>}
+                {data.projects.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{t("resourceMatrix.noProjectsToScheduleYet")}</p>}
               </main>
             )
           )}
           <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
             <SheetContent side="bottom" className="flex h-[80dvh] flex-col p-0">
               <SheetHeader className="sr-only">
-                <SheetTitle>Add people</SheetTitle>
+                <SheetTitle>{t("resourceMatrix.addPeople")}</SheetTitle>
               </SheetHeader>
               {data && model && (
                 <SubSidebar
@@ -777,9 +784,10 @@ export default function ResourceMatrix() {
                 <div className="flex min-w-0 flex-1 flex-col">
                   {copied && (
                     <div className="flex items-center gap-2 border-b bg-primary/10 px-4 py-1.5 text-sm text-primary">
-                      Pasting {dayLabel(copied.date)}: click a day header to paste it there.
+                      
+                      {t("resourceMatrix.pasting")}{" "}{dayLabel(copied.date)}{t("resourceMatrix.clickADayHeaderToPaste")}
                       <Button size="sm" variant="ghost" className="ml-auto h-7" onClick={() => setCopied(null)}>
-                        <X className="mr-1 h-3.5 w-3.5" /> Cancel
+                        <X className="mr-1 h-3.5 w-3.5" /> {" "}{t("common.cancel")}
                       </Button>
                     </div>
                   )}

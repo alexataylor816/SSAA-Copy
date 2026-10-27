@@ -2,6 +2,8 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { BatchResult } from "@/lib/matrixApi";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { jobTitleLabel } from "@/i18n/labels";
 
 /** Luke's "Unassigned employee placement" exception dialog (O9), wording as in his app. */
 export default function UnassignedDialog({
@@ -15,6 +17,7 @@ export default function UnassignedDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useLanguage();
   const grouped = new Map<string, { name: string; jobTitle: string | null; projects: Set<string> }>();
   for (const p of pairs) {
     const entry = grouped.get(p.employeeId) ?? { name: p.employeeName, jobTitle: p.jobTitle, projects: new Set<string>() };
@@ -27,11 +30,12 @@ export default function UnassignedDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-destructive" />
-            Unassigned employee placement
+            
+            {t("unassignedDialog.unassignedEmployeePlacement")}
           </DialogTitle>
           <DialogDescription>
-            You&apos;ve assigned one or more employees to a project they are not officially assigned to. Are you sure you want to
-            proceed?
+            
+            {t("unassignedDialog.youVeAssignedOneOrMore")}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">
@@ -39,29 +43,31 @@ export default function UnassignedDialog({
             {[...grouped.entries()].map(([id, info]) => (
               <li key={id}>
                 <span className="font-medium">{info.name}</span>
-                {info.jobTitle && <span className="text-muted-foreground"> – {info.jobTitle}</span>}
-                <span className="text-muted-foreground"> is not assigned to </span>
+                {info.jobTitle && <span className="text-muted-foreground"> – {jobTitleLabel(info.jobTitle)}</span>}
+                <span className="text-muted-foreground"> {" "}{t("unassignedDialog.isNotAssignedTo")}{" "}</span>
                 <span className="font-medium">{[...info.projects].join(", ")}</span>
               </li>
             ))}
           </ul>
           <div className="space-y-1 rounded-md border bg-muted/50 p-3 text-xs text-muted-foreground">
             <p>
-              <strong className="text-foreground">This is a one-time exception.</strong> Confirming will only apply to this specific
-              day/time/shift and <em>will not</em> permanently change the employee&apos;s project assignment.
+              <strong className="text-foreground">{t("unassignedDialog.thisIsAOneTimeException")}</strong> {" "}{t("unassignedDialog.confirmingWillOnlyApplyToThis")}{" "}<em>{t("unassignedDialog.willNot")}</em> {" "}{t("unassignedDialog.permanentlyChangeTheEmployeeSProject")}
             </p>
             <p>
-              To permanently update which projects an employee is assigned to, go to{" "}
-              <strong className="text-foreground">Project assignments</strong> in Manage My Company Account.
+              
+              {t("unassignedDialog.toPermanentlyUpdateWhichProjectsAn")}{" "}
+              <strong className="text-foreground">{t("unassignedDialog.projectAssignments")}</strong> {" "}{t("unassignedDialog.inManageMyCompanyAccount")}
             </p>
           </div>
         </div>
         <DialogFooter className="gap-2">
           <Button variant="ghost" onClick={onCancel}>
-            Cancel
+            
+            {t("common.cancel")}
           </Button>
           <Button variant="destructive" onClick={onConfirm}>
-            Yes, proceed with exception
+            
+            {t("unassignedDialog.yesProceedWithException")}
           </Button>
         </DialogFooter>
       </DialogContent>

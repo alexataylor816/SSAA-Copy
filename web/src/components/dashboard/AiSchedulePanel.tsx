@@ -13,7 +13,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { dateLocale } from "@/i18n/runtime";
+import { dateLocale, tr } from "@/i18n/runtime";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tradeLabel } from "@/i18n/labels";
 
 /**
  * The GC's AI Schedule Recommender and Upload Schedule (docs/AI_SCHEDULE_RECOMMENDER.md).
@@ -88,6 +90,7 @@ export default function AiSchedulePanel({
   defaultProjectId: string | null;
   onChanged: () => void;
 }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [projectId, setProjectId] = useState(defaultProjectId ?? projects[0]?.id ?? "");
   const [weeks, setWeeks] = useState(1);
@@ -119,7 +122,7 @@ export default function AiSchedulePanel({
       setRows(Object.fromEntries(r.suggestions.map((s) => [s.key, { on: true, people: s.employees, spare: s.alternates }])));
       setAnswers(Object.fromEntries(r.questions.map((q) => [q.taskName, q.suggested ?? ""])));
     } catch (err) {
-      toast({ title: "Couldn't generate a schedule", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("aiSchedulePanel.couldnTGenerateASchedule"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -133,9 +136,9 @@ export default function AiSchedulePanel({
     setBusy(true);
     try {
       await api.post("/ai/trade-answers", { projectId, answers: list });
-      toast({ title: "Thanks, remembered", description: "Those tasks will be matched automatically from now on." });
+      toast({ title: t("aiSchedulePanel.thanksRemembered"), description: t("aiSchedulePanel.thoseTasksWillBeMatchedAutomatically") });
     } catch (err) {
-      toast({ title: "Couldn't save", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("common.couldnTSave"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
       setBusy(false);
       return;
     }
@@ -162,13 +165,13 @@ export default function AiSchedulePanel({
         notify: { gcEmail: false, gcPush: true, personnelEmail: false, personnelPush: false },
       });
       toast({
-        title: `Sent ${res.created.length} request${res.created.length === 1 ? "" : "s"}`,
-        description: res.skipped.length ? `${res.skipped.length} skipped: ${res.skipped.map((x) => x.reason).join(" ")}` : "Subcontractors will confirm them in the app.",
+        title: t(res.created.length === 1 ? "aiSchedulePanel.sentRequest.one" : "aiSchedulePanel.sentRequest.other", { count: res.created.length }),
+        description: res.skipped.length ? t("aiSchedulePanel.skipped", { length: res.skipped.length, join: res.skipped.map((x) => x.reason).join(" ") }) : t("aiSchedulePanel.subcontractorsWillConfirmThemInThe"),
       });
       setRec(null);
       onChanged();
     } catch (err) {
-      toast({ title: "Couldn't send", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("aiSchedulePanel.couldnTSend"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -206,11 +209,11 @@ export default function AiSchedulePanel({
       // Multipart: the shared JSON client doesn't fit, so call fetch with the same session token.
       const res = await fetch("/api/ai/schedule-upload", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: form });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Upload failed.");
+      if (!res.ok) throw new Error(body.error ?? tr("common.uploadFailed"));
       setUploaded(body.tasks);
       setUploadNotes(body.notes ?? "");
     } catch (err) {
-      toast({ title: "Couldn't read that schedule", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("aiSchedulePanel.couldnTReadThatSchedule"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -219,13 +222,13 @@ export default function AiSchedulePanel({
     if (!uploaded?.length || !projectId) return;
     setBusy(true);
     try {
-      for (const t of uploaded) await createTask(projectId, { name: t.name, start_date: t.startDate, end_date: t.endDate, color: t.color });
-      toast({ title: `Added ${uploaded.length} tasks to ${projectName}` });
+      for (const task of uploaded) await createTask(projectId, { name: task.name, start_date: task.startDate, end_date: task.endDate, color: task.color });
+      toast({ title: t("aiSchedulePanel.addedTasksTo", { length: uploaded.length, projectName: projectName }) });
       setUploadOpen(false);
       setUploaded(null);
       onChanged();
     } catch (err) {
-      toast({ title: "Couldn't add the tasks", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("aiSchedulePanel.couldnTAddTheTasks"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -238,12 +241,12 @@ export default function AiSchedulePanel({
       <Card className="border-primary/20">
         <CardHeader className="px-3 py-2">
           <CardTitle className="flex items-center gap-2 text-sm">
-            <Sparkles className="h-4 w-4 text-primary" /> AI Schedule Recommender
+            <Sparkles className="h-4 w-4 text-primary" /> {" "}{t("aiSchedulePanel.aiScheduleRecommender")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 px-3 pb-3">
           <select
-            aria-label="Project to schedule"
+            aria-label={t("aiSchedulePanel.projectToSchedule")}
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
             className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
@@ -254,22 +257,23 @@ export default function AiSchedulePanel({
               </option>
             ))}
           </select>
-          <div className="flex gap-1" role="group" aria-label="How far ahead">
+          <div className="flex gap-1" role="group" aria-label={t("aiSchedulePanel.howFarAhead")}>
             {[1, 2, 3].map((w) => (
               <Button key={w} size="sm" variant={weeks === w ? "default" : "outline"} className="h-7 flex-1 text-xs" onClick={() => setWeeks(w)}>
-                {w} week{w > 1 ? "s" : ""}
+                {tr(w === 1 ? "aiSchedulePanel.weeks.one" : "aiSchedulePanel.weeks.other", { count: w })}
               </Button>
             ))}
           </div>
           <Button size="sm" className="w-full" disabled={busy || !projectId} onClick={() => void generate()}>
             {busy && !uploadOpen ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-            Generate Schedule
+            
+            {t("aiSchedulePanel.generateSchedule")}
           </Button>
           <Button size="sm" variant="outline" className="w-full" onClick={() => setUploadOpen(true)}>
-            <Upload className="mr-2 h-4 w-4" /> Upload Schedule
+            <Upload className="mr-2 h-4 w-4" /> {" "}{t("aiSchedulePanel.uploadSchedule")}
           </Button>
           {claudeReady === false && (
-            <p className="text-[10px] text-muted-foreground">AI helper not set up on this server: matching uses the lookup list and asks you about the rest.</p>
+            <p className="text-[10px] text-muted-foreground">{t("aiSchedulePanel.aiHelperNotSetUpOn")}</p>
           )}
         </CardContent>
       </Card>
@@ -278,28 +282,28 @@ export default function AiSchedulePanel({
       <Dialog open={!!rec} onOpenChange={(o) => !o && setRec(null)}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Suggested requests for {projectName}</DialogTitle>
+            <DialogTitle>{t("aiSchedulePanel.suggestedRequestsFor")}{" "}{projectName}</DialogTitle>
             <DialogDescription>
-              {rec && `${day(rec.window.start)} – ${day(rec.window.end)}. `}Adjust headcounts and untick anything you don&apos;t want, then send.
-              {rec?.claude.used && " AI helped match some tasks."}
+              {rec && `${day(rec.window.start)} – ${day(rec.window.end)}. `}{t("aiSchedulePanel.adjustHeadcountsAndUntickAnythingYou")}
+              {rec?.claude.used && ` ${t("aiSchedulePanel.aiHelpedMatch")}`}
             </DialogDescription>
           </DialogHeader>
 
           {rec?.questions.length ? (
             <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:bg-amber-950/30">
-              <p className="text-sm font-medium">Can you please identify what contractor or trade is associated with these tasks?</p>
+              <p className="text-sm font-medium">{t("aiSchedulePanel.canYouPleaseIdentifyWhatContractor")}</p>
               {rec.questions.map((q) => (
                 <div key={q.taskName} className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="min-w-0 flex-1">
                     <span className="font-medium">{q.taskName}</span> <span className="text-xs text-muted-foreground">({q.why})</span>
                   </span>
                   <select
-                    aria-label={`Trade for ${q.taskName}`}
+                    aria-label={t("aiSchedulePanel.tradeFor", { taskName: q.taskName })}
                     value={answers[q.taskName] ?? ""}
                     onChange={(e) => setAnswers((a) => ({ ...a, [q.taskName]: e.target.value }))}
                     className="h-8 rounded-md border border-input bg-background px-2 text-xs"
                   >
-                    <option value="">Not a trade task / skip</option>
+                    <option value="">{t("aiSchedulePanel.notATradeTaskSkip")}</option>
                     {q.options.map((t) => (
                       <option key={t} value={t}>
                         {t}
@@ -309,7 +313,8 @@ export default function AiSchedulePanel({
                 </div>
               ))}
               <Button size="sm" variant="secondary" disabled={busy || !Object.values(answers).some(Boolean)} onClick={() => void saveAnswers()}>
-                Save answers and update suggestions
+                
+                {t("aiSchedulePanel.saveAnswersAndUpdateSuggestions")}
               </Button>
             </div>
           ) : null}
@@ -322,7 +327,7 @@ export default function AiSchedulePanel({
             </ul>
           ) : null}
 
-          {rec && !rec.suggestions.length && <p className="py-4 text-center text-sm text-muted-foreground">No requests to suggest for this window.</p>}
+          {rec && !rec.suggestions.length && <p className="py-4 text-center text-sm text-muted-foreground">{t("aiSchedulePanel.noRequestsToSuggestForThis")}</p>}
 
           <div className="space-y-3">
             {byDate.map(([date, list]) => (
@@ -336,7 +341,7 @@ export default function AiSchedulePanel({
                       <div className="flex flex-wrap items-center gap-2">
                         <Checkbox
                           checked={row.on}
-                          aria-label={`Include ${s.taskName} on ${day(s.date)}`}
+                          aria-label={t("aiSchedulePanel.includeOn", { taskName: s.taskName, date: day(s.date) })}
                           onCheckedChange={(v) => setRows((r) => ({ ...r, [s.key]: { ...r[s.key], on: !!v } }))}
                         />
                         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: TRADE_COLORS[s.trade] ?? "#64748b" }} />
@@ -344,7 +349,7 @@ export default function AiSchedulePanel({
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Badge variant="outline" className="cursor-help text-[10px]">
-                              {s.trade} · {s.subName}
+                              {tradeLabel(s.trade)} · {s.subName}
                             </Badge>
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs text-xs">
@@ -356,13 +361,13 @@ export default function AiSchedulePanel({
                           {fmtTime(s.startTime)} – {fmtTime(s.endTime)}
                         </span>
                         <span className="ml-auto flex items-center gap-1">
-                          <Button size="icon" variant="outline" className="h-6 w-6" aria-label="One fewer person" disabled={!row.people.length} onClick={() => changeCount(s.key, -1)}>
+                          <Button size="icon" variant="outline" className="h-6 w-6" aria-label={t("aiSchedulePanel.oneFewerPerson")} disabled={!row.people.length} onClick={() => changeCount(s.key, -1)}>
                             <Minus className="h-3 w-3" />
                           </Button>
-                          <span className="w-6 text-center text-sm font-semibold" aria-label="Headcount">
+                          <span className="w-6 text-center text-sm font-semibold" aria-label={t("aiSchedulePanel.headcount")}>
                             {row.people.length}
                           </span>
-                          <Button size="icon" variant="outline" className="h-6 w-6" aria-label="One more person" disabled={!row.spare.length} onClick={() => changeCount(s.key, 1)}>
+                          <Button size="icon" variant="outline" className="h-6 w-6" aria-label={t("aiSchedulePanel.oneMorePerson")} disabled={!row.spare.length} onClick={() => changeCount(s.key, 1)}>
                             <Plus className="h-3 w-3" />
                           </Button>
                         </span>
@@ -371,13 +376,13 @@ export default function AiSchedulePanel({
                         {row.people.map((p) => (
                           <span key={p.id} className="flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs">
                             {p.name}
-                            {!p.assigned && <span className="text-[9px] text-red-600">not assigned</span>}
-                            <button type="button" aria-label={`Remove ${p.name}`} onClick={() => removePerson(s.key, p.id)} className="text-muted-foreground hover:text-foreground">
+                            {!p.assigned && <span className="text-[9px] text-red-600">{t("aiSchedulePanel.notAssigned")}</span>}
+                            <button type="button" aria-label={t("aiSchedulePanel.remove", { name: p.name })} onClick={() => removePerson(s.key, p.id)} className="text-muted-foreground hover:text-foreground">
                               <X className="h-3 w-3" />
                             </button>
                           </span>
                         ))}
-                        {!row.people.length && <span className="text-xs text-muted-foreground">Nobody (won&apos;t be sent)</span>}
+                        {!row.people.length && <span className="text-xs text-muted-foreground">{t("aiSchedulePanel.nobodyWonTBeSent")}</span>}
                       </div>
                       <p className="mt-1 pl-6 text-[11px] text-muted-foreground">
                         {s.tradeReason} {s.crewReason}
@@ -391,11 +396,13 @@ export default function AiSchedulePanel({
 
           <DialogFooter className="gap-2">
             <Button variant="ghost" onClick={() => setRec(null)}>
-              Cancel
+              
+              {t("common.cancel")}
             </Button>
             <Button disabled={busy || !chosen.length} onClick={() => void send()}>
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Send {chosen.length} request{chosen.length === 1 ? "" : "s"}
+              
+              {t(chosen.length === 1 ? "aiSchedulePanel.sendRequests.one" : "aiSchedulePanel.sendRequests.other", { count: chosen.length })}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -411,20 +418,21 @@ export default function AiSchedulePanel({
       >
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Upload Schedule</DialogTitle>
+            <DialogTitle>{t("aiSchedulePanel.uploadSchedule")}</DialogTitle>
             <DialogDescription>
-              Upload a photo, screenshot or PDF of {projectName}&apos;s schedule. The tasks it reads get their trade and colour automatically; check
-              them before adding.
+              
+              {t("aiSchedulePanel.uploadAPhotoScreenshotOrPdf")}{" "}{projectName}{t("aiSchedulePanel.sScheduleTheTasksItReads")}
             </DialogDescription>
           </DialogHeader>
           {claudeReady === false ? (
             <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
-              Reading schedules needs the AI helper, which isn&apos;t set up on this server yet. Add tasks by hand from the Tasks panel for now.
+              
+              {t("aiSchedulePanel.readingSchedulesNeedsTheAiHelper")}
             </p>
           ) : !uploaded ? (
             <label className="flex cursor-pointer flex-col items-center gap-2 rounded-md border-2 border-dashed p-8 text-sm text-muted-foreground hover:bg-muted/40">
               {busy ? <Loader2 className="h-6 w-6 animate-spin" /> : <Upload className="h-6 w-6" />}
-              {busy ? "Reading the schedule…" : "Choose an image or PDF"}
+              {busy ? t("aiSchedulePanel.readingTheSchedule") : t("aiSchedulePanel.chooseAnImageOrPdf")}
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
@@ -435,34 +443,34 @@ export default function AiSchedulePanel({
             </label>
           ) : (
             <div className="space-y-2">
-              {uploadNotes && <p className="text-xs text-muted-foreground">Note: {uploadNotes}</p>}
-              {uploaded.map((t, i) => (
+              {uploadNotes && <p className="text-xs text-muted-foreground">{t("aiSchedulePanel.note")}{" "}{uploadNotes}</p>}
+              {uploaded.map((task, i) => (
                 <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
-                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: t.color }} />
+                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: task.color }} />
                   <Input
-                    value={t.name}
-                    aria-label="Task name"
+                    value={task.name}
+                    aria-label={t("aiSchedulePanel.taskName")}
                     onChange={(e) => setUploaded((u) => u!.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
                     className="h-8 min-w-0 flex-1 text-sm"
                   />
-                  <Input type="date" aria-label="Start" value={t.startDate} onChange={(e) => setUploaded((u) => u!.map((x, j) => (j === i ? { ...x, startDate: e.target.value } : x)))} className="h-8 w-36 text-xs" />
-                  <Input type="date" aria-label="End" value={t.endDate} onChange={(e) => setUploaded((u) => u!.map((x, j) => (j === i ? { ...x, endDate: e.target.value } : x)))} className="h-8 w-36 text-xs" />
+                  <Input type="date" aria-label={t("common.start")} value={task.startDate} onChange={(e) => setUploaded((u) => u!.map((x, j) => (j === i ? { ...x, startDate: e.target.value } : x)))} className="h-8 w-36 text-xs" />
+                  <Input type="date" aria-label={t("common.end")} value={task.endDate} onChange={(e) => setUploaded((u) => u!.map((x, j) => (j === i ? { ...x, endDate: e.target.value } : x)))} className="h-8 w-36 text-xs" />
                   <select
-                    aria-label="Trade"
-                    value={t.trade ?? ""}
+                    aria-label={t("aiSchedulePanel.trade")}
+                    value={task.trade ?? ""}
                     onChange={(e) =>
                       setUploaded((u) => u!.map((x, j) => (j === i ? { ...x, trade: e.target.value || null, sure: true, color: TRADE_COLORS[e.target.value] ?? "#64748b" } : x)))
                     }
-                    className={`h-8 rounded-md border bg-background px-2 text-xs ${t.trade && t.sure ? "border-input" : "border-amber-400"}`}
+                    className={`h-8 rounded-md border bg-background px-2 text-xs ${task.trade && task.sure ? "border-input" : "border-amber-400"}`}
                   >
-                    <option value="">No trade</option>
-                    {Object.keys(TRADE_COLORS).map((tr) => (
-                      <option key={tr} value={tr}>
-                        {tr}
+                    <option value="">{t("aiSchedulePanel.noTrade")}</option>
+                    {Object.keys(TRADE_COLORS).map((trade) => (
+                      <option key={trade} value={trade}>
+                        {tradeLabel(trade)}
                       </option>
                     ))}
                   </select>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Remove task" onClick={() => setUploaded((u) => u!.filter((_, j) => j !== i))}>
+                  <Button size="icon" variant="ghost" className="h-7 w-7" aria-label={t("aiSchedulePanel.removeTask")} onClick={() => setUploaded((u) => u!.filter((_, j) => j !== i))}>
                     <X className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -472,11 +480,13 @@ export default function AiSchedulePanel({
           {uploaded && (
             <DialogFooter className="gap-2">
               <Button variant="ghost" onClick={() => setUploaded(null)}>
-                Choose another file
+                
+                {t("aiSchedulePanel.chooseAnotherFile")}
               </Button>
               <Button disabled={busy || !uploaded.length} onClick={() => void addUploaded()}>
                 {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Add {uploaded.length} tasks
+                
+                {t(uploaded.length === 1 ? "aiSchedulePanel.addTasks.one" : "aiSchedulePanel.addTasks.other", { count: uploaded.length })}
               </Button>
             </DialogFooter>
           )}

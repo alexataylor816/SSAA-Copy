@@ -6,7 +6,7 @@
  */
 import { buildModel, draftId, type Draft, type FreeSlot, type Placement } from "./useMatrixDrafts";
 import type { MatrixData } from "@/lib/matrixApi";
-import { dateLocale } from "@/i18n/runtime";
+import { dateLocale, tr } from "@/i18n/runtime";
 
 export type DragSource =
   | { kind: "side"; slot: FreeSlot }
@@ -50,18 +50,18 @@ export function applyDrop(data: MatrixData, drafts: Draft[], source: DragSource,
   const model = buildModel(data, drafts);
   const emp = model.employees.get(employeeOf(source));
   const projectName = model.projectNames.get(target.projectId) ?? "that project";
-  if (!emp) return { ok: false, reason: "That person isn't on a crew you can schedule." };
+  if (!emp) return { ok: false, reason: tr("canDrop.thatPersonIsnTOnA") };
 
   if (isLockedDate(target.date) || (source.kind === "card" && isLockedDate(source.placement.date))) {
-    return { ok: false, reason: "That week is locked." };
+    return { ok: false, reason: tr("canDrop.thatWeekIsLocked") };
   }
-  if (!data.viewer.canSchedule) return { ok: false, reason: "You don't have permission to schedule people." };
+  if (!data.viewer.canSchedule) return { ok: false, reason: tr("canDrop.youDonTHavePermissionTo") };
   if (data.viewer.companyType === "sub" && emp.subCompanyId !== data.viewer.companyId) {
-    return { ok: false, reason: "You can only place your own crew." };
+    return { ok: false, reason: tr("canDrop.youCanOnlyPlaceYourOwn") };
   }
   const crew = data.crews.find((c) => c.companyId === emp.subCompanyId);
   if (!crew?.projectIds.includes(target.projectId)) {
-    return { ok: false, reason: `${emp.companyName} isn't connected to ${projectName}.` };
+    return { ok: false, reason: tr("canDrop.isnTConnectedTo", { companyName: emp.companyName, projectName: projectName }) };
   }
 
   const card = source.kind === "card" ? source.placement : null;
@@ -82,7 +82,7 @@ export function applyDrop(data: MatrixData, drafts: Draft[], source: DragSource,
     .availabilityOn(emp.id, target.date)
     .filter((a) => a.allProjects || !a.projectId || a.projectId === target.projectId);
   if (posted.length === 0) {
-    return { ok: false, reason: `${firstName(emp.name)} has no hours posted on ${dayLabel(target.date)}.` };
+    return { ok: false, reason: tr("canDrop.hasNoHoursPostedOn", { name: firstName(emp.name), date: dayLabel(target.date) }) };
   }
   const usable = new Set(posted.map((a) => a.id));
   const free = model
@@ -115,8 +115,8 @@ export function applyDrop(data: MatrixData, drafts: Draft[], source: DragSource,
     return {
       ok: false,
       reason: blocker
-        ? `${firstName(emp.name)} is already ${blocker.status === "confirmed" ? "booked" : blocker.status === "draft" ? "placed" : "requested"} ${when} ${blocker.where}.`
-        : `${firstName(emp.name)} has no free time left on ${dayLabel(target.date)}.`,
+        ? tr("canDrop.isAlready", { name: firstName(emp.name), status: tr(blocker.status === "confirmed" ? "canDrop.statusBooked" : blocker.status === "draft" ? "canDrop.statusPlaced" : "canDrop.statusRequested"), when, where: blocker.where })
+        : tr("canDrop.hasNoFreeTimeLeftOn", { name: firstName(emp.name), date: dayLabel(target.date) }),
     };
   }
 
@@ -149,7 +149,7 @@ export function applyDrop(data: MatrixData, drafts: Draft[], source: DragSource,
 
 /** Take a card off the grid: a draft just goes away; a sent booking becomes a take-off draft. */
 export function applyRemove(drafts: Draft[], placement: Placement): DropResult {
-  if (isLockedDate(placement.date)) return { ok: false, reason: "That week is locked." };
+  if (isLockedDate(placement.date)) return { ok: false, reason: tr("canDrop.thatWeekIsLocked") };
   if (placement.draftId) return { ok: true, drafts: drafts.filter((d) => d.id !== placement.draftId) };
   if (!placement.requestId) return { ok: false, reason: null };
   return { ok: true, drafts: [...drafts, { id: draftId(), kind: "remove", requestId: placement.requestId, employeeId: placement.employeeId }] };

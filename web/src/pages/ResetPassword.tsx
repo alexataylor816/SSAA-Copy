@@ -7,8 +7,11 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import AuthLayout from "@/components/AuthLayout";
 import { Loader2 } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 export default function ResetPassword() {
+  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -19,7 +22,7 @@ export default function ResetPassword() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
-    if (newPassword.length < 6) return setError("Password must be at least 6 characters.");
+    if (newPassword.length < 6) return setError(tr("common.passwordMin6"));
 
     setSubmitting(true);
     try {
@@ -30,7 +33,7 @@ export default function ResetPassword() {
       });
       navigate("/signin");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reset that password.");
+      setError(err instanceof Error ? err.message : tr("resetPassword.couldNotReset"));
     } finally {
       setSubmitting(false);
     }
@@ -40,20 +43,20 @@ export default function ResetPassword() {
     <AuthLayout>
       <Card className="w-full max-w-md border-primary/20 shadow-lg">
         <CardHeader className="text-center pb-2">
-          <CardTitle className="text-2xl font-bold">Choose a new password</CardTitle>
+          <CardTitle className="text-2xl font-bold">{t("resetPassword.chooseANewPassword")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("common.email")}</Label>
               <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="code">Reset code</Label>
+              <Label htmlFor="code">{t("resetPassword.resetCode")}</Label>
               <Input id="code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="newPassword">New password</Label>
+              <Label htmlFor="newPassword">{t("resetPassword.newPassword")}</Label>
               <Input
                 id="newPassword"
                 type="password"
@@ -72,13 +75,15 @@ export default function ResetPassword() {
 
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Reset password
+              
+              {t("resetPassword.resetPassword")}
             </Button>
           </form>
 
           <div className="mt-6 text-center">
             <Link to="/signin" className="text-sm text-muted-foreground hover:text-primary transition-colors">
-              Back to sign in
+              
+              {t("common.backToSignIn")}
             </Link>
           </div>
         </CardContent>

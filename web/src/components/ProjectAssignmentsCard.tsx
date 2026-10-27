@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/components/ui/use-toast";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 /**
  * Who works which project (Luke's "Manage Team Profiles" assignments). The Weekly view outlines a
@@ -39,6 +41,7 @@ interface Props {
 }
 
 export default function ProjectAssignmentsCard({ projects, employees, staff, canEdit }: Props) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [saved, setSaved] = useState<Record<string, Assignment>>({});
   const [draft, setDraft] = useState<Record<string, Assignment>>({});
@@ -86,9 +89,9 @@ export default function ProjectAssignmentsCard({ projects, employees, staff, can
       const res = await api.put<Assignment>(`/projects/${projectId}/assignments`, draft[projectId]);
       setSaved((s) => ({ ...s, [projectId]: res }));
       setDraft((d) => ({ ...d, [projectId]: res }));
-      toast({ title: "Assignments saved" });
+      toast({ title: t("projectAssignmentsCard.assignmentsSaved") });
     } catch (err) {
-      toast({ title: "Couldn't save", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("common.couldnTSave"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setSavingId(null);
     }
@@ -117,9 +120,10 @@ export default function ProjectAssignmentsCard({ projects, employees, staff, can
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">Project assignments</CardTitle>
+        <CardTitle className="text-lg">{t("projectAssignmentsCard.projectAssignments")}</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Who works each job. Placing someone on a project they aren&apos;t assigned to asks for confirmation first.
+          
+          {t("projectAssignmentsCard.whoWorksEachJobPlacingSomeone")}
         </p>
       </CardHeader>
       <CardContent>
@@ -141,24 +145,25 @@ export default function ProjectAssignmentsCard({ projects, employees, staff, can
                     {project.detail && <span className="block truncate text-sm text-muted-foreground">{project.detail}</span>}
                   </span>
                   <Badge variant="outline" className="shrink-0">
-                    {crewCount} of {employees.length} crew
+                    {tr("projectAssignmentsCard.crewCount", { count: crewCount, total: employees.length })}
                   </Badge>
                 </button>
                 {open && (
                   <div className="space-y-4 border-t bg-muted/20 px-3 py-3">
                     <div className="space-y-2">
-                      <p className="text-sm font-medium">Crew on this job</p>
-                      {checklist(project.id, "employeeIds", employees, "No employees yet.")}
+                      <p className="text-sm font-medium">{t("projectAssignmentsCard.crewOnThisJob")}</p>
+                      {checklist(project.id, "employeeIds", employees, tr("projectAssignmentsCard.noEmployeesYet"))}
                     </div>
                     <div className="space-y-2">
-                      <p className="text-sm font-medium">Who gets schedule notices</p>
-                      <p className="text-xs text-muted-foreground">Leave empty to notify everyone with scheduling access.</p>
-                      {checklist(project.id, "userIds", staff, "Nobody with scheduling access yet.")}
+                      <p className="text-sm font-medium">{t("projectAssignmentsCard.whoGetsScheduleNotices")}</p>
+                      <p className="text-xs text-muted-foreground">{t("projectAssignmentsCard.leaveEmptyToNotifyEveryoneWith")}</p>
+                      {checklist(project.id, "userIds", staff, tr("projectAssignmentsCard.nobodyWithAccess"))}
                     </div>
                     {canEdit && (
                       <Button size="sm" disabled={!dirty(project.id) || savingId === project.id} onClick={() => void save(project.id)}>
                         {savingId === project.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Save assignments
+                        
+                        {t("projectAssignmentsCard.saveAssignments")}
                       </Button>
                     )}
                   </div>

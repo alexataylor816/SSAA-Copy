@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { tr } from "@/i18n/runtime";
 
 /** Lovable's ManageProfileModal, on the profile endpoints opencode added (PATCH /auth/profile, POST /uploads). */
 
@@ -31,7 +32,7 @@ function FieldLabel({ icon: Icon, htmlFor, children }: { icon: typeof User; html
 
 export default function ManageProfileDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { user, refreshProfile } = useAuth();
-  const { language, setLanguage } = useLanguage();
+  const { t, language, setLanguage } = useLanguage();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [name, setName] = useState("");
@@ -81,10 +82,10 @@ export default function ManageProfileDialog({ open, onOpenChange }: { open: bool
         body: form,
       });
       const payload = (await res.json()) as { url?: string; error?: string };
-      if (!res.ok || !payload.url) throw new Error(payload.error ?? "Upload failed.");
+      if (!res.ok || !payload.url) throw new Error(payload.error ?? tr("common.uploadFailed"));
       setPhoto(payload.url);
     } catch (err) {
-      toast({ title: "Could not upload that photo", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("manageProfileDialog.couldNotUploadThatPhoto"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setUploading(false);
     }
@@ -92,11 +93,11 @@ export default function ManageProfileDialog({ open, onOpenChange }: { open: bool
 
   async function save() {
     if (!name.trim()) {
-      toast({ title: "Full name is required", variant: "destructive" });
+      toast({ title: t("manageProfileDialog.fullNameIsRequired"), variant: "destructive" });
       return;
     }
     if (showPassword && (currentPassword || newPassword) && (!currentPassword || newPassword.length < 6)) {
-      toast({ title: "Enter your current password and a new one of at least 6 characters", variant: "destructive" });
+      toast({ title: t("manageProfileDialog.enterYourCurrentPasswordAndA"), variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -113,10 +114,10 @@ export default function ManageProfileDialog({ open, onOpenChange }: { open: bool
       }
       setLanguage(lang);
       await refreshProfile();
-      toast({ title: "Profile updated" });
+      toast({ title: t("manageProfileDialog.profileUpdated") });
       onOpenChange(false);
     } catch (err) {
-      toast({ title: "Could not save your profile", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("manageProfileDialog.couldNotSaveYourProfile"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -128,9 +129,10 @@ export default function ManageProfileDialog({ open, onOpenChange }: { open: bool
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <User className="h-5 w-5" />
-            Manage My Profile
+            
+            {t("manageProfileDialog.manageMyProfile")}
           </DialogTitle>
-          <DialogDescription>Update your personal information</DialogDescription>
+          <DialogDescription>{t("manageProfileDialog.updateYourPersonalInformation")}</DialogDescription>
         </DialogHeader>
 
         <div className="-mx-1 flex-1 space-y-5 overflow-y-auto px-1">
@@ -147,18 +149,19 @@ export default function ManageProfileDialog({ open, onOpenChange }: { open: bool
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 className="absolute -bottom-0.5 -right-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground shadow"
-                aria-label="Change photo"
+                aria-label={t("manageProfileDialog.changePhoto")}
               >
                 {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
               </button>
             </div>
             <div className="flex gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
-                {photo ? "Change Photo" : "Add Photo"}
+                {photo ? t("manageProfileDialog.changePhoto2") : t("manageProfileDialog.addPhoto")}
               </Button>
               {photo && (
                 <Button type="button" variant="ghost" size="sm" onClick={() => setPhoto(null)}>
-                  Remove
+                  
+                  {t("common.remove")}
                 </Button>
               )}
             </div>
@@ -167,44 +170,49 @@ export default function ManageProfileDialog({ open, onOpenChange }: { open: bool
 
           <div className="space-y-2">
             <FieldLabel icon={User} htmlFor="profile-name">
-              Full Name
+              
+              {t("manageProfileDialog.fullName")}
             </FieldLabel>
             <Input id="profile-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
 
           <div className="space-y-2">
             <FieldLabel icon={Mail} htmlFor="profile-email">
-              Email
+              
+              {t("common.email")}
             </FieldLabel>
             <Input id="profile-email" value={user?.email ?? ""} disabled />
           </div>
 
           <div className="space-y-2">
             <FieldLabel icon={Phone} htmlFor="profile-phone">
-              Phone Number
+              
+              {t("manageProfileDialog.phoneNumber")}
             </FieldLabel>
-            <Input id="profile-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Enter phone number" />
+            <Input id="profile-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t("manageProfileDialog.enterPhoneNumber")} />
           </div>
 
           {hasEmployeeRecord && (
             <div className="space-y-2">
               <FieldLabel icon={BadgeCheck} htmlFor="profile-employee-id">
-                Employee ID <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                
+                {t("manageProfileDialog.employeeId")}{" "}<span className="text-xs font-normal text-muted-foreground">{t("manageProfileDialog.optional")}</span>
               </FieldLabel>
               <Input
                 id="profile-employee-id"
                 value={employeeNumber}
                 onChange={(e) => setEmployeeNumber(e.target.value)}
-                placeholder="e.g. EMP-1234"
+                placeholder={t("manageProfileDialog.eGEmp1234")}
                 maxLength={40}
               />
-              <p className="text-xs text-muted-foreground">Optional payroll/HR identifier. Shown on timesheet exports only.</p>
+              <p className="text-xs text-muted-foreground">{t("manageProfileDialog.optionalPayrollHrIdentifierShownOn")}</p>
             </div>
           )}
 
           <div className="space-y-2">
             <FieldLabel icon={Globe} htmlFor="profile-language">
-              Language
+              
+              {t("manageProfileDialog.language")}
             </FieldLabel>
             <select
               id="profile-language"
@@ -225,13 +233,15 @@ export default function ManageProfileDialog({ open, onOpenChange }: { open: bool
               aria-expanded={showPassword}
             >
               <KeyRound className="h-4 w-4 text-muted-foreground" />
-              Change password
+              
+              {t("manageProfileDialog.changePassword")}
             </button>
             {showPassword && (
               <div className="space-y-3 border-t p-3">
                 <div className="space-y-1">
                   <Label htmlFor="profile-current-password" className="text-xs">
-                    Current password
+                    
+                    {t("manageProfileDialog.currentPassword")}
                   </Label>
                   <Input
                     id="profile-current-password"
@@ -243,7 +253,8 @@ export default function ManageProfileDialog({ open, onOpenChange }: { open: bool
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="profile-new-password" className="text-xs">
-                    New password
+                    
+                    {t("manageProfileDialog.newPassword")}
                   </Label>
                   <Input
                     id="profile-new-password"
@@ -260,11 +271,13 @@ export default function ManageProfileDialog({ open, onOpenChange }: { open: bool
 
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>
-            Cancel
+            
+            {t("common.cancel")}
           </Button>
           <Button className="flex-1" onClick={() => void save()} disabled={saving || uploading}>
             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save Changes
+            
+            {t("manageProfileDialog.saveChanges")}
           </Button>
         </DialogFooter>
       </DialogContent>

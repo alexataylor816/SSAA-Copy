@@ -16,7 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDate } from "@/i18n/runtime";
+import { formatDate, tr } from "@/i18n/runtime";
+import { jobTitleLabel, statusLabel, tradeLabel } from "@/i18n/labels";
 
 /**
  * The core of Lovable's ScheduleModal, opened by clicking a calendar day.
@@ -114,7 +115,7 @@ const STATUS_STYLE: Record<ScheduleRequest["status"], string> = {
   cancelled: "bg-red-100 text-red-800 border-red-200",
 };
 
-const titleOf = (e: Employee) => e.jobTitle ?? e.job_title ?? null;
+const titleOf = (e: Employee) => jobTitleLabel(e.jobTitle ?? e.job_title ?? null) || null;
 
 /** Edited by the other company and not yet confirmed by this one. */
 const editedFor = (request: ScheduleRequest, companyId: string | null) =>
@@ -135,6 +136,7 @@ function RequestRow({
   edited?: boolean;
   children?: React.ReactNode;
 }) {
+  const { t } = useLanguage();
   return (
     <div className={`space-y-2 rounded-md border bg-background p-3 ${edited ? "border-amber-300" : ""}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -142,18 +144,19 @@ function RequestRow({
           <p className="text-sm font-medium">{label}</p>
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="h-3 w-3" />
-            {fmtTime(request.startTime)} – {fmtTime(request.endTime)} · {names || `${request.employeeIds.length} person(s)`}
+            {fmtTime(request.startTime)} – {fmtTime(request.endTime)} · {names || t("scheduleDayDialog.personS", { length: request.employeeIds.length })}
           </p>
           {request.description && <p className="text-xs text-muted-foreground">{request.description}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {edited && (
             <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
-              Edited
+              
+              {t("scheduleDayDialog.edited")}
             </Badge>
           )}
-          <Badge variant="outline" className={`capitalize ${STATUS_STYLE[request.status]}`}>
-            {request.status}
+          <Badge variant="outline" className={STATUS_STYLE[request.status]}>
+            {statusLabel(request.status)}
           </Badge>
           {actions}
         </div>
@@ -296,7 +299,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
       if (viewMode === "gc") await loadGc();
       else await loadSub();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load this day.");
+      setError(err instanceof Error ? err.message : tr("scheduleDayDialog.couldNotLoadDay"));
     } finally {
       setLoading(false);
     }
@@ -325,7 +328,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
       await load();
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "That didn't work.");
+      setError(err instanceof Error ? err.message : tr("common.thatDidntWork"));
     } finally {
       setBusy(false);
     }
@@ -339,7 +342,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
   const confirmChanges = (id: string) => run(() => matrixApi.acknowledgeEdit(id));
   const editAndResend = (r: ScheduleRequest, start: string, end: string) =>
     run(async () => {
-      if (!(start < end)) throw new Error("The start time must be before the end time.");
+      if (!(start < end)) throw new Error(t("scheduleDayDialog.theStartTimeMustBeBefore"));
       const res = await matrixApi.sendBatch({
         create: [],
         cancel: [],
@@ -403,9 +406,9 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
   const gcView = (
     <div className="space-y-5">
       <div className="space-y-2">
-        <Label htmlFor="schedule-project">Project</Label>
+        <Label htmlFor="schedule-project">{t("common.project")}</Label>
         {ownedProjects.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Create a project first to schedule subcontractors.</p>
+          <p className="text-sm text-muted-foreground">{t("scheduleDayDialog.createAProjectFirstToSchedule")}</p>
         ) : (
           <select
             id="schedule-project"
@@ -426,9 +429,9 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
       </div>
 
       <div className="space-y-2">
-        <Label>Scheduled requests</Label>
+        <Label>{t("scheduleDayDialog.scheduledRequests")}</Label>
         {gcRequests.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing scheduled on this project for this day.</p>
+          <p className="text-sm text-muted-foreground">{t("scheduleDayDialog.nothingScheduledOnThisProjectFor")}</p>
         ) : (
           <div className="space-y-2">
             {gcRequests.map((r) => {
@@ -452,10 +455,12 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                           disabled={busy}
                           onClick={() => setResend({ id: r.id, start: r.startTime ?? "07:00", end: r.endTime ?? "15:30" })}
                         >
-                          Edit
+                          
+                          {t("scheduleDayDialog.edit")}
                         </Button>
                         <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setStatus(r.id, "cancelled")}>
-                          Cancel
+                          
+                          {t("common.cancel")}
                         </Button>
                       </>
                     ) : null
@@ -463,13 +468,15 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                 >
                   {edited && r.subAssigned && (
                     <p className="text-xs italic text-blue-600 dark:text-blue-400">
-                      The Subcontractor has assigned this additional personnel to the job for this day.
+                      
+                      {t("scheduleDayDialog.theSubcontractorHasAssignedThisAdditiona")}
                     </p>
                   )}
                   {edited && canAct && !editing && (
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" disabled={busy} onClick={() => void confirmChanges(r.id)}>
-                        Confirm Changes
+                        
+                        {t("scheduleDayDialog.confirmChanges")}
                       </Button>
                       <Button
                         size="sm"
@@ -477,32 +484,38 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                         disabled={busy}
                         onClick={() => setResend({ id: r.id, start: r.startTime ?? "07:00", end: r.endTime ?? "15:30" })}
                       >
-                        Edit &amp; Resend
+                        
+                        {t("scheduleDayDialog.editResend")}
                       </Button>
                       <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setStatus(r.id, "cancelled")}>
-                        Cancel
+                        
+                        {t("common.cancel")}
                       </Button>
                     </div>
                   )}
                   {editing && (
                     <div className="space-y-2 rounded-md border bg-muted/15 p-2">
-                      <p className="text-xs text-muted-foreground">Change the time and send it back to {subName(r.subCompanyId)} to confirm.</p>
+                      <p className="text-xs text-muted-foreground">{t("scheduleDayDialog.changeTheTimeAndSendIt")}{" "}{subName(r.subCompanyId)} {" "}{t("scheduleDayDialog.toConfirm")}</p>
                       <div className="grid grid-cols-2 gap-2">
                         <label className="space-y-1 text-xs text-muted-foreground">
-                          From
+                          
+                          {t("scheduleDayDialog.from")}
                           <Input type="time" value={editing.start} onChange={(e) => setResend({ ...editing, start: e.target.value })} />
                         </label>
                         <label className="space-y-1 text-xs text-muted-foreground">
-                          Until
+                          
+                          {t("scheduleDayDialog.until")}
                           <Input type="time" value={editing.end} onChange={(e) => setResend({ ...editing, end: e.target.value })} />
                         </label>
                       </div>
                       <div className="flex gap-2">
                         <Button size="sm" disabled={busy} onClick={() => void editAndResend(r, editing.start, editing.end)}>
-                          Resend
+                          
+                          {t("scheduleDayDialog.resend")}
                         </Button>
                         <Button size="sm" variant="ghost" disabled={busy} onClick={() => setResend(null)}>
-                          Back
+                          
+                          {t("common.back")}
                         </Button>
                       </div>
                     </div>
@@ -517,10 +530,11 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
       {hasPartialOrHigher && !locked && projectId && (
         <>
           <div className="space-y-2">
-            <Label>Select subcontractors</Label>
+            <Label>{t("scheduleDayDialog.selectSubcontractors")}</Label>
             {subs.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No subcontractors on this project yet. Share its connection code so they can join.
+                
+                {t("scheduleDayDialog.noSubcontractorsOnThisProjectYet")}
               </p>
             ) : (
               <div className="flex flex-wrap gap-3 rounded-md border bg-muted/15 p-3">
@@ -536,8 +550,8 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                         }
                       />
                       {s.name}
-                      {s.trade && <span className="text-xs text-muted-foreground">· {s.trade}</span>}
-                      {!posted && <span className="text-xs">· No availability</span>}
+                      {s.trade && <span className="text-xs text-muted-foreground">· {tradeLabel(s.trade)}</span>}
+                      {!posted && <span className="text-xs">{t("scheduleDayDialog.noAvailability")}</span>}
                     </label>
                   );
                 })}
@@ -547,11 +561,12 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
 
           {subs.length > 0 && (
             <div className="space-y-2">
-              <Label>Available personnel & time slots</Label>
+              <Label>{t("scheduleDayDialog.availablePersonnelTimeSlots")}</Label>
               <div className="max-h-64 space-y-4 overflow-y-auto rounded-md border bg-muted/15 p-3">
                 {availableCrew.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    No one from the selected subs has posted availability for this day yet.
+                    
+                    {t("scheduleDayDialog.noOneFromTheSelectedSubs")}
                   </p>
                 ) : (
                   availableCrew.map(({ employee, slots: empSlots }) => (
@@ -586,7 +601,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                                     {fmtTime(h.part.start)} – {fmtTime(h.part.end)} · {h.project}
                                   </span>
                                   <Badge variant="outline" className="shrink-0 bg-background/70 text-xs">
-                                    {h.status === "confirmed" ? "Booked" : "Requested"}
+                                    {h.status === "confirmed" ? t("scheduleDayDialog.booked") : t("scheduleDayDialog.requested")}
                                   </Badge>
                                 </div>
                               ))}
@@ -612,13 +627,15 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                                       />
                                       <Clock className="h-3 w-3 text-muted-foreground" />
                                       <span className="flex-1">
-                                        Free {fmtTime(w.start)} – {fmtTime(w.end)}
+                                        
+                                        {t("scheduleDayDialog.free")}{" "}{fmtTime(w.start)} – {fmtTime(w.end)}
                                       </span>
                                     </label>
                                     {pick && (
                                       <div className="mt-2 grid grid-cols-2 gap-2 pl-6">
                                         <label className="space-y-1 text-xs text-muted-foreground">
-                                          Book from
+                                          
+                                          {t("scheduleDayDialog.bookFrom")}
                                           <Input
                                             type="time"
                                             value={pick.start}
@@ -630,7 +647,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                                           />
                                         </label>
                                         <label className="space-y-1 text-xs text-muted-foreground">
-                                          until
+                                          {t("scheduleDayDialog.until")}
                                           <Input
                                             type="time"
                                             value={pick.end === "24:00" ? "23:59" : pick.end}
@@ -647,7 +664,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                                 );
                               })}
                               {free.length === 0 && held.length > 0 && (
-                                <p className="pl-1 text-xs text-muted-foreground">No free time left in this slot.</p>
+                                <p className="pl-1 text-xs text-muted-foreground">{t("scheduleDayDialog.noFreeTimeLeftInThis")}</p>
                               )}
                             </div>
                           );
@@ -661,24 +678,26 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="schedule-description">Description / work to be performed</Label>
+            <Label htmlFor="schedule-description">{t("scheduleDayDialog.descriptionWorkToBePerformed")}</Label>
             <Textarea
               id="schedule-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What the crew will be doing"
+              placeholder={t("scheduleDayDialog.whatTheCrewWillBeDoing")}
               rows={3}
             />
           </div>
 
           {badPick && (
             <p className="text-sm text-destructive">
-              Times for a pick must stay inside its free window ({fmtTime(badPick.window.start)} – {fmtTime(badPick.window.end)}).
+              
+              {t("scheduleDayDialog.timesForAPickMustStay")}{fmtTime(badPick.window.start)} – {fmtTime(badPick.window.end)}).
             </p>
           )}
           <Button className="w-full" disabled={busy || pickedCount === 0 || !!badPick} onClick={() => void sendRequests()}>
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Send request{pickedCount > 1 ? "s" : ""}
+            
+            {t("scheduleDayDialog.sendRequest")}{pickedCount > 1 ? "s" : ""}
           </Button>
         </>
       )}
@@ -704,7 +723,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
         for (const projectId of availProjectIds) {
           const { employeeIds } = await api.get<{ employeeIds: string[] }>(`/projects/${projectId}/assignments`);
           for (const id of availFor) {
-            if (!employeeIds.includes(id)) misses.push({ name: roster.find((e) => e.id === id)?.name ?? "Employee", project: projectName(projectId) });
+            if (!employeeIds.includes(id)) misses.push({ name: roster.find((e) => e.id === id)?.name ?? t("common.employee"), project: projectName(projectId) });
           }
         }
         if (misses.length > 0) {
@@ -718,7 +737,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
       const blocks = multipleStops
         ? stops.map((stop, i) => ({ startTime: stop.start, endTime: stop.end, stopNumber: i + 1 }))
         : [{ startTime: availStart, endTime: availEnd, stopNumber: undefined }];
-      if (blocks.some((b) => b.startTime >= b.endTime)) throw new Error("Each start time must be before its end time.");
+      if (blocks.some((b) => b.startTime >= b.endTime)) throw new Error(t("scheduleDayDialog.eachStartTimeMustBeBefore"));
       for (const employeeId of availFor) {
         for (const projectId of targets) {
           for (const block of blocks) {
@@ -758,7 +777,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
 
   const assignToJob = (allowUnassigned: boolean) =>
     run(async () => {
-      if (!(assignStart < assignEnd)) throw new Error("The start time must be before the end time.");
+      if (!(assignStart < assignEnd)) throw new Error(t("scheduleDayDialog.theStartTimeMustBeBefore"));
       const create = assignPeople.map((employeeId) => ({
         projectId: assignProjectId,
         subCompanyId: companyId ?? "",
@@ -790,10 +809,12 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
     hasPartialOrHigher && !locked ? (
       <>
         <Button size="sm" disabled={busy} onClick={() => void setStatus(r.id, "confirmed")}>
-          Confirm
+          
+          {t("scheduleDayDialog.confirm")}
         </Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => void setStatus(r.id, "rejected")}>
-          Decline
+          
+          {t("common.decline")}
         </Button>
       </>
     ) : null;
@@ -801,9 +822,9 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
   const subView = (
     <div className="space-y-5">
       <div className="space-y-2">
-        <Label>Pending requests</Label>
+        <Label>{t("scheduleDayDialog.pendingRequests")}</Label>
         {pending.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No requests waiting on you for this day.</p>
+          <p className="text-sm text-muted-foreground">{t("scheduleDayDialog.noRequestsWaitingOnYouFor")}</p>
         ) : (
           <div className="space-y-2">
             {pending.map((r) => (
@@ -822,7 +843,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
 
       {confirmed.length > 0 && (
         <div className="space-y-2">
-          <Label>Confirmed schedules</Label>
+          <Label>{t("scheduleDayDialog.confirmedSchedules")}</Label>
           <div className="space-y-2">
             {confirmed.map((r) => (
               <RequestRow
@@ -833,7 +854,8 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                 actions={
                   hasPartialOrHigher && !locked ? (
                     <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setStatus(r.id, "cancelled")}>
-                      Cancel
+                      
+                      {t("common.cancel")}
                     </Button>
                   ) : null
                 }
@@ -845,7 +867,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
 
       {closed.length > 0 && (
         <div className="space-y-2">
-          <Label className="text-red-600">Rejected / cancelled</Label>
+          <Label className="text-red-600">{t("scheduleDayDialog.rejectedCancelled")}</Label>
           <div className="space-y-2">
             {closed.map((r) => (
               <RequestRow key={r.id} request={r} label={projectName(r.projectId)} names={namesOf(r)} />
@@ -855,20 +877,20 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
       )}
 
       <div className="space-y-2">
-        <Label>Posted availability</Label>
+        <Label>{t("scheduleDayDialog.postedAvailability")}</Label>
         {myAvailability.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No availability posted for this day.</p>
+          <p className="text-sm text-muted-foreground">{t("scheduleDayDialog.noAvailabilityPostedForThisDay")}</p>
         ) : (
           <div className="space-y-1">
             {myAvailability.map((slot) => (
               <div key={slot.id} className="flex items-center gap-2 rounded-md border bg-background p-2 text-sm">
                 <Clock className="h-3 w-3 text-muted-foreground" />
                 <span className="flex-1">
-                  {nameById.get(slot.employeeId) ?? "Employee"}
+                  {nameById.get(slot.employeeId) ?? t("scheduleDayDialog.employee")}
                   {slot.stopLabel ? ` (${slot.stopLabel})` : ""}: {fmtTime(slot.startTime)} - {fmtTime(slot.endTime)}
                   <span className="text-xs text-muted-foreground">
                     {" "}
-                    · {slot.allProjects ? "all projects" : projectName(slot.projectId ?? "")}
+                    · {slot.allProjects ? t("scheduleDayDialog.allProjects") : projectName(slot.projectId ?? "")}
                   </span>
                 </span>
                 {canRemove(slot) && !locked && (
@@ -876,7 +898,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                     size="icon"
                     variant="ghost"
                     className="h-7 w-7"
-                    aria-label="Remove availability"
+                    aria-label={t("scheduleDayDialog.removeAvailability")}
                     disabled={busy}
                     onClick={() => void run(() => api.delete(`/availability/${slot.id}`))}
                   >
@@ -892,7 +914,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
       {!locked && hasPartialOrHigher && connectedProjects.length > 0 && workingToday.length > 0 && (
         // Luke's "Assign Personnel to Job": the sub books its own crew (confirmed straight away).
         <div className="space-y-3 border-t pt-4">
-          <Label htmlFor="assign-project">Assign Personnel to Job</Label>
+          <Label htmlFor="assign-project">{t("scheduleDayDialog.assignPersonnelToJob")}</Label>
           <select
             id="assign-project"
             value={assignProjectId}
@@ -902,7 +924,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
             }}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           >
-            <option value="">Choose a project</option>
+            <option value="">{t("scheduleDayDialog.chooseAProject")}</option>
             {connectedProjects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -921,47 +943,53 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="assign-start" className="text-xs">
-                From
+                
+                {t("scheduleDayDialog.from")}
               </Label>
               <Input id="assign-start" type="time" value={assignStart} onChange={(e) => setAssignStart(e.target.value)} />
             </div>
             <div className="space-y-1">
               <Label htmlFor="assign-end" className="text-xs">
-                Until
+                
+                {t("scheduleDayDialog.until")}
               </Label>
               <Input id="assign-end" type="time" value={assignEnd} onChange={(e) => setAssignEnd(e.target.value)} />
             </div>
           </div>
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <Checkbox checked={assignNotifyGc} onCheckedChange={(value) => setAssignNotifyGc(!!value)} />
-            Notify the general contractor
+            
+            {t("scheduleDayDialog.notifyTheGeneralContractor")}
           </label>
           {unassignedAsk ? (
-            <div role="alertdialog" aria-label="Unassigned employee placement" className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+            <div role="alertdialog" aria-label={t("scheduleDayDialog.unassignedEmployeePlacement")} className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
               <p className="flex items-center gap-2 text-sm font-semibold">
                 <AlertTriangle className="h-4 w-4 text-destructive" />
-                Unassigned employee placement
+                
+                {t("scheduleDayDialog.unassignedEmployeePlacement")}
               </p>
               <p className="text-sm text-muted-foreground">
-                You&apos;ve assigned one or more employees to a project they are not officially assigned to. Are you sure
-                you want to proceed?
+                
+                {t("scheduleDayDialog.youVeAssignedOneOrMore")}
               </p>
               <ul className="space-y-1 text-sm">
                 {unassignedAsk.map((u) => (
                   <li key={u.employeeId}>
                     <span className="font-medium">{u.employeeName}</span>
-                    {u.jobTitle && <span className="text-muted-foreground"> – {u.jobTitle}</span>}
-                    <span className="text-muted-foreground"> is not assigned to </span>
+                    {u.jobTitle && <span className="text-muted-foreground"> – {jobTitleLabel(u.jobTitle)}</span>}
+                    <span className="text-muted-foreground"> {" "}{t("scheduleDayDialog.isNotAssignedTo")}{" "}</span>
                     <span className="font-medium">{u.projectName}</span>
                   </li>
                 ))}
               </ul>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => setUnassignedAsk(null)}>
-                  Cancel
+                  
+                  {t("common.cancel")}
                 </Button>
                 <Button size="sm" variant="destructive" disabled={busy} onClick={() => void assignToJob(true)}>
-                  Proceed
+                  
+                  {t("scheduleDayDialog.proceed")}
                 </Button>
               </div>
             </div>
@@ -972,7 +1000,8 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
               onClick={() => void assignToJob(false)}
             >
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Assign to job
+              
+              {t("scheduleDayDialog.assignToJob")}
             </Button>
           )}
         </div>
@@ -982,7 +1011,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
         // Laid out like Lovable's "View Availability" panel.
         <div className="space-y-4 border-t pt-4">
           <div className="space-y-2">
-            <Label>Who is available?</Label>
+            <Label>{t("scheduleDayDialog.whoIsAvailable")}</Label>
             {postable.length > 1 && (
               <Button
                 type="button"
@@ -992,7 +1021,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                   setAvailFor(availFor.length === postable.length ? [] : postable.map((e) => e.id))
                 }
               >
-                {availFor.length === postable.length ? "Clear All" : "Select All"}
+                {availFor.length === postable.length ? t("scheduleDayDialog.clearAll") : t("scheduleDayDialog.selectAll")}
               </Button>
             )}
             <div className="space-y-2 rounded-md border p-2">
@@ -1024,15 +1053,16 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           <label className="flex cursor-pointer items-center justify-between rounded-md border bg-muted/40 px-3 py-2.5 text-sm font-medium">
             <span className="flex items-center gap-2">
               <Clock className="h-4 w-4" />
-              Multiple Stops
+              
+              {t("scheduleDayDialog.multipleStops")}
             </span>
-            <Switch checked={multipleStops} onCheckedChange={setMultipleStops} aria-label="Multiple stops" />
+            <Switch checked={multipleStops} onCheckedChange={setMultipleStops} aria-label={t("scheduleDayDialog.multipleStops2")} />
           </label>
 
           {multipleStops ? (
             <div className="space-y-3">
               <div className="space-y-1">
-                <Label htmlFor="stop-count">Number of stops</Label>
+                <Label htmlFor="stop-count">{t("scheduleDayDialog.numberOfStops")}</Label>
                 <select
                   id="stop-count"
                   value={stops.length}
@@ -1046,7 +1076,7 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                 >
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>
-                      {n} stop{n === 1 ? "" : "s"}
+                      {t(n === 1 ? "scheduleDayDialog.stops.one" : "scheduleDayDialog.stops.other", { count: n })}
                     </option>
                   ))}
                 </select>
@@ -1054,11 +1084,12 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
               <div className="space-y-2 rounded-md border p-2">
                 {stops.map((stop, i) => (
                   <div key={i} className="space-y-2 rounded-md bg-muted/40 p-3">
-                    <p className="text-sm font-medium">Stop #{i + 1}</p>
+                    <p className="text-sm font-medium">{t("scheduleDayDialog.stop")}{i + 1}</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <Label htmlFor={`stop-${i}-start`} className="text-xs">
-                          Start
+                          
+                          {t("common.start")}
                         </Label>
                         <Input
                           id={`stop-${i}-start`}
@@ -1071,7 +1102,8 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
                       </div>
                       <div className="space-y-1">
                         <Label htmlFor={`stop-${i}-end`} className="text-xs">
-                          End
+                          
+                          {t("common.end")}
                         </Label>
                         <Input
                           id={`stop-${i}-end`}
@@ -1090,11 +1122,11 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label htmlFor="avail-start">Start</Label>
+                <Label htmlFor="avail-start">{t("common.start")}</Label>
                 <Input id="avail-start" type="time" value={availStart} onChange={(e) => setAvailStart(e.target.value)} />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="avail-end">End</Label>
+                <Label htmlFor="avail-end">{t("common.end")}</Label>
                 <Input id="avail-end" type="time" value={availEnd} onChange={(e) => setAvailEnd(e.target.value)} />
               </div>
             </div>
@@ -1103,14 +1135,15 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           <div className="space-y-2">
             <label className="flex cursor-pointer items-center gap-2 text-sm">
               <Checkbox checked={availAllProjects} onCheckedChange={(value) => setAvailAllProjects(!!value)} />
-              Available for all projects
+              
+              {t("scheduleDayDialog.availableForAllProjects")}
             </label>
             {!availAllProjects && (
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Assign to specific project(s)</Label>
+                <Label className="text-xs text-muted-foreground">{t("scheduleDayDialog.assignToSpecificProjectS")}</Label>
                 <div className="space-y-1 rounded-md border p-2">
                   {connectedProjects.length === 0 ? (
-                    <p className="p-1 text-sm text-muted-foreground">You aren't connected to any projects yet.</p>
+                    <p className="p-1 text-sm text-muted-foreground">{t("scheduleDayDialog.youArenTConnectedToAny")}</p>
                   ) : (
                     connectedProjects.map((p) => (
                       <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50">
@@ -1130,30 +1163,33 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
           </div>
 
           {availAsk ? (
-            <div role="alertdialog" aria-label="Unassigned employee placement" className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+            <div role="alertdialog" aria-label={t("scheduleDayDialog.unassignedEmployeePlacement")} className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
               <p className="flex items-center gap-2 text-sm font-semibold">
                 <AlertTriangle className="h-4 w-4 text-destructive" />
-                Unassigned employee placement
+                
+                {t("scheduleDayDialog.unassignedEmployeePlacement")}
               </p>
               <p className="text-sm text-muted-foreground">
-                You&apos;ve assigned one or more employees to a project they are not officially assigned to. Are you sure you
-                want to proceed? This is a one-time exception and won&apos;t change their project assignments.
+                
+                {t("scheduleDayDialog.youVeAssignedOneOrMore2")}
               </p>
               <ul className="space-y-1 text-sm">
                 {availAsk.map((m, i) => (
                   <li key={i}>
                     <span className="font-medium">{m.name}</span>
-                    <span className="text-muted-foreground"> is not assigned to </span>
+                    <span className="text-muted-foreground"> {" "}{t("scheduleDayDialog.isNotAssignedTo")}{" "}</span>
                     <span className="font-medium">{m.project}</span>
                   </li>
                 ))}
               </ul>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => setAvailAsk(null)}>
-                  Cancel
+                  
+                  {t("common.cancel")}
                 </Button>
                 <Button size="sm" variant="destructive" disabled={busy} onClick={() => void publishAvailability(true)}>
-                  Yes, proceed with exception
+                  
+                  {t("scheduleDayDialog.yesProceedWithException")}
                 </Button>
               </div>
             </div>
@@ -1164,7 +1200,8 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
               onClick={() => void publishAvailability()}
             >
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Post availability
+              
+              {t("scheduleDayDialog.postAvailability")}
             </Button>
           )}
         </div>
@@ -1189,7 +1226,8 @@ export default function ScheduleDayDialog({ open, onOpenChange, date, viewMode, 
         {locked && (
           <p className="flex items-center gap-2 rounded-md border bg-muted/50 p-3 text-sm text-muted-foreground">
             <Lock className="h-4 w-4" />
-            This day is before the current week, so its schedule is locked.
+            
+            {t("scheduleDayDialog.thisDayIsBeforeTheCurrent")}
           </p>
         )}
         {error && (

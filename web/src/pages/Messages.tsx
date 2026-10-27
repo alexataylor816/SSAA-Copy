@@ -19,7 +19,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { formatDate, formatTime } from "@/i18n/runtime";
+import { formatDate, formatTime, tr } from "@/i18n/runtime";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 /**
  * Messages: a Projects / People / Group Chats picker at the top of the list
@@ -32,9 +33,9 @@ import { formatDate, formatTime } from "@/i18n/runtime";
 
 type Filter = "projects" | "people" | "groups";
 const FILTERS: { key: Filter; label: string }[] = [
-  { key: "projects", label: "Projects" },
-  { key: "people", label: "People" },
-  { key: "groups", label: "Group Chats" },
+  { key: "projects", get label() { return tr("common.projects"); } },
+  { key: "people", get label() { return tr("messages.people"); } },
+  { key: "groups", get label() { return tr("messages.groupChats"); } },
 ];
 
 // ---------- small presentational pieces ----------
@@ -94,14 +95,14 @@ function Avatar({
 function listTime(iso: string): string {
   const d = new Date(iso);
   if (isToday(d)) return formatTime(d);
-  if (isYesterday(d)) return "Yesterday";
+  if (isYesterday(d)) return tr("messages.yesterday");
   if (differenceInCalendarDays(new Date(), d) < 7) return formatDate(d, { weekday: "short" });
   return formatDate(d, { month: "short", day: "numeric" });
 }
 
 function dayLabel(d: Date): string {
-  if (isToday(d)) return "Today";
-  if (isYesterday(d)) return "Yesterday";
+  if (isToday(d)) return tr("messages.today");
+  if (isYesterday(d)) return tr("messages.yesterday");
   return formatDate(d, { weekday: "long", month: "long", day: "numeric" });
 }
 
@@ -132,7 +133,7 @@ function ConversationRow({
     ? conv.type !== "dm" && conv.lastMessage.senderName
       ? `${conv.lastMessage.senderName.split(" ")[0]}: ${conv.lastMessage.body}`
       : conv.lastMessage.body
-    : "No messages yet";
+    : tr("messages.noMessagesYet");
   return (
     <button
       onClick={onOpen}
@@ -176,15 +177,16 @@ function SectionHeader({ title, open, onToggle, unread }: { title: string; open:
 // ---------- members ----------
 
 const LEVEL_LABEL: Record<string, string> = {
-  account_holder: "Owner",
-  full: "Full access",
-  partial: "Manager",
-  level_1: "Foreman",
-  basic: "Crew",
+  get account_holder() { return tr("messages.levelLabel.accountHolder"); },
+  get full() { return tr("messages.levelLabel.full"); },
+  get partial() { return tr("messages.levelLabel.partial"); },
+  get level_1() { return tr("messages.levelLabel.level1"); },
+  get basic() { return tr("messages.levelLabel.basic"); },
 };
 
 /** Who is in a group or project chat, grouped by company. Managers only (server-enforced). */
 function MembersDialog({ conversationId, onClose }: { conversationId: string | null; onClose: () => void }) {
+  const { t } = useLanguage();
   const [members, setMembers] = useState<Contact[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -196,7 +198,7 @@ function MembersDialog({ conversationId, onClose }: { conversationId: string | n
     messagingApi
       .participants(conversationId)
       .then((res) => !cancelled && setMembers(res.participants))
-      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Could not load the members."));
+      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : tr("messages.couldNotLoadMembers")));
     return () => {
       cancelled = true;
     };
@@ -204,7 +206,7 @@ function MembersDialog({ conversationId, onClose }: { conversationId: string | n
 
   const byCompany = new Map<string, Contact[]>();
   for (const m of members ?? []) {
-    const key = m.companyName ?? "No company";
+    const key = m.companyName ?? tr("messages.noCompany");
     byCompany.set(key, [...(byCompany.get(key) ?? []), m]);
   }
 
@@ -212,13 +214,13 @@ function MembersDialog({ conversationId, onClose }: { conversationId: string | n
     <Dialog open={conversationId !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>People in this chat{members ? ` (${members.length})` : ""}</DialogTitle>
-          <DialogDescription>Only managers can see this list.</DialogDescription>
+          <DialogTitle>{t("messages.peopleInThisChat")}{members ? ` (${members.length})` : ""}</DialogTitle>
+          <DialogDescription>{t("messages.onlyManagersCanSeeThisList")}</DialogDescription>
         </DialogHeader>
         {error ? (
           <p className="text-sm text-destructive">{error}</p>
         ) : !members ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
         ) : (
           <div className="max-h-[60vh] space-y-4 overflow-y-auto">
             {[...byCompany.entries()].map(([companyName, people]) => (
@@ -267,6 +269,7 @@ function Thread({
   /** Set only for managers; group and project chats only. */
   onShowMembers?: () => void;
 }) {
+  const { t } = useLanguage();
   const { user } = useAuth();
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -286,7 +289,7 @@ function Thread({
       await onSend(text);
       setBody("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Message not sent.");
+      setError(err instanceof Error ? err.message : tr("messages.messageNotSent"));
     } finally {
       setSending(false);
     }
@@ -295,15 +298,15 @@ function Thread({
   const kind = conv.type === "group" ? "group" : conv.type === "project" ? "project" : "person";
   const subtitle =
     conv.type === "project"
-      ? `Project chat with ${conv.subtitle ?? "the other company"}`
+      ? t("messages.projectChatWith", { company: conv.subtitle ?? t("messages.theOtherCompany") })
       : conv.type === "group"
-        ? "Group chat"
+        ? t("messages.groupChat")
         : (conv.subtitle ?? "");
 
   return (
     <>
       <div className="flex items-center gap-3 border-b bg-card px-3 py-2.5 md:px-4">
-        <Button variant="ghost" size="icon" onClick={onBack} className="h-8 w-8 md:hidden" aria-label="Back to chats">
+        <Button variant="ghost" size="icon" onClick={onBack} className="h-8 w-8 md:hidden" aria-label={t("messages.backToChats")}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <Avatar name={conv.title} kind={kind} />
@@ -313,15 +316,15 @@ function Thread({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {conv.type !== "dm" && onShowMembers && (
-            <Button size="sm" variant="ghost" onClick={onShowMembers} aria-label="People in this chat">
+            <Button size="sm" variant="ghost" onClick={onShowMembers} aria-label={t("messages.peopleInThisChat")}>
               <Users className="h-4 w-4 sm:mr-1.5" />
-              <span className="hidden sm:inline">People</span>
+              <span className="hidden sm:inline">{t("messages.people")}</span>
             </Button>
           )}
           {conv.type === "group" && onAddPeople && (
-            <Button size="sm" variant="ghost" onClick={onAddPeople} aria-label="Add people">
+            <Button size="sm" variant="ghost" onClick={onAddPeople} aria-label={t("messages.addPeople")}>
               <UserPlus className="h-4 w-4 sm:mr-1.5" />
-              <span className="hidden sm:inline">Add</span>
+              <span className="hidden sm:inline">{t("common.add")}</span>
             </Button>
           )}
         </div>
@@ -333,7 +336,7 @@ function Thread({
             <div className="flex flex-col items-center gap-2 py-16 text-center">
               <Avatar name={conv.title} kind={kind} />
               <p className="text-sm font-medium">{conv.title}</p>
-              <p className="text-sm text-muted-foreground">No messages yet. Say hello.</p>
+              <p className="text-sm text-muted-foreground">{t("messages.noMessagesYetSayHello")}</p>
             </div>
           )}
           {messages.map((m, i) => {
@@ -383,11 +386,11 @@ function Thread({
               <div key={m.id}>
                 {separator}
                 <div className={`flex items-start gap-2 ${continued ? "mt-0.5" : "mt-3"}`}>
-                  <span className="w-8 shrink-0">{!continued && <Avatar name={m.senderName ?? "User"} size="sm" />}</span>
+                  <span className="w-8 shrink-0">{!continued && <Avatar name={m.senderName ?? t("messages.user")} size="sm" />}</span>
                   <div className="max-w-[80%] rounded-lg border bg-card px-3 py-2 shadow-sm md:max-w-[70%]">
                     {!continued && (
                       <div className="mb-0.5 flex flex-wrap items-baseline gap-x-2 text-[11px]">
-                        <span className="font-semibold text-foreground">{m.senderName ?? "User"}</span>
+                        <span className="font-semibold text-foreground">{m.senderName ?? t("messages.user")}</span>
                         {conv.type !== "dm" && m.senderCompanyName && (
                           <span className="text-muted-foreground">{m.senderCompanyName}</span>
                         )}
@@ -411,8 +414,8 @@ function Thread({
             <Input
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder="Type a message"
-              aria-label="Message"
+              placeholder={t("messages.typeAMessage")}
+              aria-label={t("messages.message")}
               className="border-0 bg-transparent shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -426,7 +429,7 @@ function Thread({
               variant="ghost"
               onClick={() => void send()}
               disabled={sending || !body.trim()}
-              aria-label="Send"
+              aria-label={t("common.send")}
               className="h-8 w-8 shrink-0 text-primary"
             >
               <Send className="h-4 w-4" />
@@ -435,7 +438,8 @@ function Thread({
         </div>
       ) : (
         <div className="border-t bg-card p-3 text-center text-xs text-muted-foreground">
-          You can read this project chat. Ask your company&apos;s owner if you need to post.
+          
+          {t("messages.youCanReadThisProjectChat")}
         </div>
       )}
     </>
@@ -463,6 +467,7 @@ function PeoplePicker({
   onPick: (userId: string) => void;
   onCreateGroup: (title: string, userIds: string[]) => Promise<void>;
 }) {
+  const { t } = useLanguage();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState("");
   const [title, setTitle] = useState("");
@@ -499,7 +504,7 @@ function PeoplePicker({
     try {
       await onCreateGroup(title.trim() || defaultTitle, picked);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the group.");
+      setError(err instanceof Error ? err.message : tr("messages.couldNotCreateGroup"));
     } finally {
       setBusy(false);
     }
@@ -509,29 +514,29 @@ function PeoplePicker({
     <Dialog open={mode !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{mode === "add" ? "Add people" : "New chat"}</DialogTitle>
+          <DialogTitle>{mode === "add" ? t("messages.addPeople") : t("messages.newChat")}</DialogTitle>
           <DialogDescription>
             {mode === "add"
-              ? "People in your company and on projects you share."
-              : "Pick one person for a direct chat, or several for a group."}
+              ? t("messages.peopleInYourCompanyAndOn")
+              : t("messages.pickOnePersonForADirect")}
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Search people" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8" />
+          <Input placeholder={t("messages.searchPeople")} value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8" />
         </div>
         {mode === "new" && picked.length > 1 && (
           <Input
-            placeholder={`Group name (optional): ${defaultTitle}`}
+            placeholder={t("messages.groupNameOptional", { defaultTitle: defaultTitle })}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            aria-label="Group name"
+            aria-label={t("messages.groupName")}
           />
         )}
         <div className="max-h-72 space-y-0.5 overflow-y-auto">
           {shown.length === 0 ? (
             <p className="p-4 text-center text-sm text-muted-foreground">
-              {mode === "add" ? "Everyone you work with is already in this group." : "No one to message yet."}
+              {mode === "add" ? t("messages.everyoneYouWorkWithIsAlready") : t("messages.noOneToMessageYet")}
             </p>
           ) : (
             shown.map((c) => {
@@ -572,7 +577,7 @@ function PeoplePicker({
           <>
             {error && <p className="text-xs text-destructive">{error}</p>}
             <Button disabled={busy || picked.length === 0} onClick={() => void start()}>
-              {picked.length <= 1 ? "Start chat" : `Start group chat (${picked.length + 1} people)`}
+              {picked.length <= 1 ? t("messages.startChat") : t("messages.startGroupChatPeople", { count: picked.length + 1 })}
             </Button>
           </>
         )}
@@ -584,6 +589,7 @@ function PeoplePicker({
 // ---------- page ----------
 
 export default function Messages() {
+  const { t } = useLanguage();
   const { user, hasPartialOrHigher, isMOA } = useAuth();
   // Managers see who is in a chat; the server enforces the same rule.
   const canSeeMembers = hasPartialOrHigher || isMOA;
@@ -730,18 +736,18 @@ export default function Messages() {
           <div className="space-y-3 border-b p-3">
             <div className="flex items-center justify-between">
               <h1 className="text-lg font-semibold">Chat</h1>
-              <Button size="icon" variant="ghost" onClick={() => setPicker("new")} aria-label="New chat" title="New chat">
+              <Button size="icon" variant="ghost" onClick={() => setPicker("new")} aria-label={t("messages.newChat")} title={t("messages.newChat")}>
                 <SquarePen className="h-5 w-5" />
               </Button>
             </div>
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Search chats" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 pl-8" />
+              <Input placeholder={t("messages.searchChats")} value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 pl-8" />
             </div>
             {/* The original app's picker: one list at a time, with each list's unread count. */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-full justify-between" aria-label="Choose chat list">
+                <Button variant="outline" className="w-full justify-between" aria-label={t("messages.chooseChatList")}>
                   <span className="flex items-center gap-2">
                     {FILTERS.find((f) => f.key === filter)?.label}
                     {chipUnread[filter] > 0 && <UnreadPill count={chipUnread[filter]} />}
@@ -763,21 +769,21 @@ export default function Messages() {
           <ScrollArea className="flex-1">
             <div className="px-2 pb-3">
               {loading ? (
-                <div className="p-6 text-center text-sm text-muted-foreground">Loading...</div>
+                <div className="p-6 text-center text-sm text-muted-foreground">{t("common.loading")}</div>
               ) : nothing ? (
                 <div className="p-6 text-center text-sm text-muted-foreground">
                   {q
-                      ? "No chats match that search."
+                      ? t("messages.noChatsMatchThatSearch")
                       : filter === "projects"
-                        ? "No project chats yet. They appear once a subcontractor joins a project."
-                        : "No chats yet. Start one with the pencil above."}
+                        ? t("messages.noProjectChatsYetTheyAppear")
+                        : t("messages.noChatsYetStartOneWith")}
                 </div>
               ) : (
                 <>
                   {showProjects && projectGroups.length > 0 && (
                     <>
                       <SectionHeader
-                        title="Projects"
+                        title={t("common.projects")}
                         open={!collapsed.__projects}
                         onToggle={() => toggle("__projects")}
                         unread={unreadOf(projectGroups.flatMap((g) => g.convs))}
@@ -814,7 +820,7 @@ export default function Messages() {
                                   <ConversationRow
                                     key={conv.id}
                                     conv={conv}
-                                    label={conv.subtitle ?? "Subcontractor"}
+                                    label={conv.subtitle ?? t("common.subcontractor")}
                                     kind="person"
                                     indent
                                     active={activeId === conv.id}
@@ -830,7 +836,7 @@ export default function Messages() {
                   {showChats && chats.length > 0 && (
                     <>
                       <SectionHeader
-                        title={filter === "people" ? "People" : "Group Chats"}
+                        title={filter === "people" ? t("messages.people") : t("messages.groupChats")}
                         open={!collapsed.__chats}
                         onToggle={() => toggle("__chats")}
                         unread={unreadOf(chats)}
@@ -869,9 +875,10 @@ export default function Messages() {
               <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <SquarePen className="h-6 w-6" />
               </span>
-              <p className="font-medium">Pick a chat, or start a new one</p>
+              <p className="font-medium">{t("messages.pickAChatOrStartA")}</p>
               <Button variant="outline" onClick={() => setPicker("new")}>
-                New chat
+                
+                {t("messages.newChat")}
               </Button>
             </div>
           )}

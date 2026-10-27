@@ -1,4 +1,4 @@
-import { dateLocale } from "@/i18n/runtime";
+import { dateLocale, tr } from "@/i18n/runtime";
 /** Shapes returned by the operator API (backend/src/admin/routes.ts). */
 
 export type OperatorLevel = "owner" | "main_operator" | "view_only";
@@ -144,34 +144,34 @@ export interface CompanyDetail {
 }
 
 export const LEVEL_LABEL: Record<string, string> = {
-  account_holder: "Account Holder",
-  full: "Full",
-  partial: "Partial",
-  level_1: "Level 1",
-  basic: "Basic",
+  get account_holder() { return tr("operatorApi.levelLabel.accountHolder"); },
+  get full() { return tr("operatorApi.levelLabel.full"); },
+  get partial() { return tr("operatorApi.levelLabel.partial"); },
+  get level_1() { return tr("operatorApi.levelLabel.level1"); },
+  get basic() { return tr("operatorApi.levelLabel.basic"); },
 };
-export const levelLabel = (level: string | null) => (level ? (LEVEL_LABEL[level] ?? level.replace("_", " ")) : "No role");
+export const levelLabel = (level: string | null) => (level ? (LEVEL_LABEL[level] ?? level.replace("_", " ")) : tr("operatorApi.noRole"));
 
 export const OPERATOR_LEVEL_LABEL: Record<OperatorLevel, string> = {
-  owner: "Owner",
-  main_operator: "Main Operator (Full Access)",
-  view_only: "Operator (View Only)",
+  get owner() { return tr("operatorApi.operatorLevelLabel.owner"); },
+  get main_operator() { return tr("operatorApi.operatorLevelLabel.mainOperator"); },
+  get view_only() { return tr("operatorApi.operatorLevelLabel.viewOnly"); },
 };
 
 /** Lovable's names for each event in the Correspondence screen and log. */
 export const EVENT_LABEL: Record<string, string> = {
-  schedule_created: "Schedule Requests",
-  schedule_confirmed: "Schedule Confirmed",
-  schedule_rejected: "Schedule Declined",
-  schedule_cancelled: "Schedule Cancelled",
-  schedule_edited: "Schedule Edited by Subcontractor",
-  schedule_batch_sent: "Weekly Requests from GC",
-  schedule_assigned: "Personnel: You're on the Schedule",
-  join_request: "Join Request Submitted",
-  join_approved: "Join Request Approved",
-  join_rejected: "Join Request Declined",
-  password_reset: "Password Reset Code",
-  username_reminder: "Username Reminder",
+  get schedule_created() { return tr("operatorApi.eventLabel.scheduleCreated"); },
+  get schedule_confirmed() { return tr("operatorApi.eventLabel.scheduleConfirmed"); },
+  get schedule_rejected() { return tr("operatorApi.eventLabel.scheduleRejected"); },
+  get schedule_cancelled() { return tr("operatorApi.eventLabel.scheduleCancelled"); },
+  get schedule_edited() { return tr("operatorApi.eventLabel.scheduleEdited"); },
+  get schedule_batch_sent() { return tr("operatorApi.eventLabel.scheduleBatchSent"); },
+  get schedule_assigned() { return tr("operatorApi.eventLabel.scheduleAssigned"); },
+  get join_request() { return tr("operatorApi.eventLabel.joinRequest"); },
+  get join_approved() { return tr("operatorApi.eventLabel.joinApproved"); },
+  get join_rejected() { return tr("operatorApi.eventLabel.joinRejected"); },
+  get password_reset() { return tr("operatorApi.eventLabel.passwordReset"); },
+  get username_reminder() { return tr("operatorApi.eventLabel.usernameReminder"); },
 };
 export const eventLabel = (type: string) => EVENT_LABEL[type] ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -183,10 +183,10 @@ export const STATUS_STYLE: Record<CorrespondenceEntry["status"], string> = {
 };
 
 export const STATUS_LABEL: Record<CorrespondenceEntry["status"], string> = {
-  sent: "Sent",
-  failed: "Failed",
-  skipped: "Not sent: email not set up",
-  off: "Not sent: template off",
+  get sent() { return tr("operatorApi.statusLabel.sent"); },
+  get failed() { return tr("operatorApi.statusLabel.failed"); },
+  get skipped() { return tr("operatorApi.statusLabel.skipped"); },
+  get off() { return tr("operatorApi.statusLabel.off"); },
 };
 
 export const when = (iso: string) => {

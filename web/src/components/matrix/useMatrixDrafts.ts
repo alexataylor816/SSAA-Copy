@@ -9,6 +9,7 @@
 import { useCallback, useState } from "react";
 import { freeWindows, windowOf, type TimeWindow } from "@/lib/timeWindows";
 import type { BatchBody, MatrixAvailability, MatrixData, MatrixEmployee } from "@/lib/matrixApi";
+import { tr } from "@/i18n/runtime";
 
 export type Draft =
   | {
@@ -105,7 +106,9 @@ export function buildModel(data: MatrixData, drafts: Draft[]): MatrixModel {
   for (const b of data.bookings) {
     for (const employeeId of b.employeeIds) {
       if (removed.has(`${b.requestId}|${employeeId}`)) continue;
-      const where = b.otherGc ? "with another contractor" : `on ${projectNames.get(b.projectId) ?? "another project"}`;
+      const where = b.otherGc
+        ? tr("useMatrixDrafts.withAnotherContractor")
+        : tr("useMatrixDrafts.onProject", { project: projectNames.get(b.projectId) ?? tr("useMatrixDrafts.anotherProject") });
       hold(employeeId, b.date, { span: windowOf(b.startTime, b.endTime), where, status: b.status, requestId: b.requestId });
       if (b.otherGc || !projectNames.has(b.projectId)) continue;
       placements.push({
@@ -128,7 +131,7 @@ export function buildModel(data: MatrixData, drafts: Draft[]): MatrixModel {
   }
   for (const d of drafts) {
     if (d.kind !== "place") continue;
-    hold(d.employeeId, d.date, { span: { start: d.start, end: d.end }, where: `on ${projectNames.get(d.projectId) ?? "a project"}`, status: "draft", draftId: d.id });
+    hold(d.employeeId, d.date, { span: { start: d.start, end: d.end }, where: tr("useMatrixDrafts.onProject", { project: projectNames.get(d.projectId) ?? tr("useMatrixDrafts.aProject") }), status: "draft", draftId: d.id });
     const emp = employees.get(d.employeeId);
     placements.push({
       key: d.id,

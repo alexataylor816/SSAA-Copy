@@ -2,9 +2,11 @@ import { Eye, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { currentViewAs, exitViewAs, isReadOnlyViewAs, isViewingAs } from "@/lib/viewAs";
 import { Button } from "@/components/ui/button";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 /** Luke's "Viewing as: Name (Company)" strip, on every page while an operator is viewing as someone. */
 export default function ViewAsBanner() {
+  const { t } = useLanguage();
   const { user } = useAuth();
   if (!user || !isViewingAs()) return null;
   const target = currentViewAs();
@@ -18,19 +20,21 @@ export default function ViewAsBanner() {
     >
       <Eye className="h-4 w-4 shrink-0" />
       <span className="truncate">
-        Viewing as: {name}
+        
+        {t("viewAsBanner.viewingAs")}{" "}{name}
         {company ? ` (${company})` : ""}
-        {isReadOnlyViewAs() ? " · read only" : ""}
+        {isReadOnlyViewAs() ? t("viewAsBanner.readOnly") : ""}
       </span>
       <Button
         size="sm"
         variant="secondary"
         className="h-7 shrink-0 gap-1 px-2"
         onClick={exitViewAs}
-        aria-label="Exit view as"
+        aria-label={t("viewAsBanner.exitViewAs")}
       >
         <X className="h-3.5 w-3.5" />
-        Exit
+        
+        {t("viewAsBanner.exit")}
       </Button>
     </div>
   );

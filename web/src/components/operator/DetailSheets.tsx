@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useToast } from "@/components/ui/use-toast";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 /** The operator's page for one person or one company, with the support actions (OPERATOR_DASHBOARD_PLAN.md §3). */
 
@@ -36,7 +38,8 @@ function Section({ title, children, action }: { title: string; children: React.R
 }
 
 function CorrespondenceList({ entries }: { entries: CorrespondenceEntry[] }) {
-  if (entries.length === 0) return <p className="py-4 text-center text-sm text-muted-foreground">Nothing sent yet.</p>;
+  const { t } = useLanguage();
+  if (entries.length === 0) return <p className="py-4 text-center text-sm text-muted-foreground">{t("detailSheets.nothingSentYet")}</p>;
   return (
     <ul className="divide-y rounded-md border">
       {entries.map((e) => {
@@ -51,7 +54,7 @@ function CorrespondenceList({ entries }: { entries: CorrespondenceEntry[] }) {
               </p>
             </div>
             <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLE[e.status]}`} title={e.errorMessage ?? undefined}>
-              {e.status === "sent" ? "Sent" : e.status === "failed" ? "Failed" : "Not sent"}
+              {e.status === "sent" ? t("detailSheets.sent") : e.status === "failed" ? t("detailSheets.failed") : t("detailSheets.notSent")}
             </span>
           </li>
         );
@@ -60,11 +63,14 @@ function CorrespondenceList({ entries }: { entries: CorrespondenceEntry[] }) {
   );
 }
 
-const Loading = () => (
+const Loading = () => {
+  const { t } = useLanguage();
+  return (
   <p className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-    <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+    <Loader2 className="h-4 w-4 animate-spin" /> {" "}{t("common.loading2")}
   </p>
 );
+};
 
 export function UserSheet({
   userId,
@@ -81,6 +87,7 @@ export function UserSheet({
   onOpenCompany: (companyId: string) => void;
   onChanged: () => void;
 }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [data, setData] = useState<UserDetail | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -91,10 +98,10 @@ export function UserSheet({
     try {
       setData(await api.get<UserDetail>(`/admin/users/${userId}`));
     } catch (err) {
-      toast({ title: "Couldn't load that account", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("detailSheets.couldnTLoadThatAccount"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
       onClose();
     }
-  }, [userId, toast, onClose]);
+  }, [userId, toast, onClose, t]);
 
   useEffect(() => {
     setData(null);
@@ -109,7 +116,7 @@ export function UserSheet({
       onChanged();
       toast({ title: message });
     } catch (err) {
-      toast({ title: "That didn't work", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("detailSheets.thatDidnTWork"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setBusy(null);
     }
@@ -125,8 +132,8 @@ export function UserSheet({
           {!data || !u ? (
             <>
               <SheetHeader className="sr-only">
-                <SheetTitle>Account</SheetTitle>
-                <SheetDescription>Loading</SheetDescription>
+                <SheetTitle>{t("detailSheets.account")}</SheetTitle>
+                <SheetDescription>{t("detailSheets.loading")}</SheetDescription>
               </SheetHeader>
               <Loading />
             </>
@@ -138,7 +145,7 @@ export function UserSheet({
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {u.isOperator && u.operatorLevel && <Badge>{OPERATOR_LEVEL_LABEL[u.operatorLevel]}</Badge>}
                   {data.permissionLevel && <Badge variant="outline">{levelLabel(data.permissionLevel)}</Badge>}
-                  {u.suspended && <Badge variant="destructive">Suspended</Badge>}
+                  {u.suspended && <Badge variant="destructive">{t("detailSheets.suspended")}</Badge>}
                 </div>
               </SheetHeader>
 
@@ -148,14 +155,15 @@ export function UserSheet({
                   disabled={u.isOperator || u.suspended}
                   onClick={() => onViewAs({ userId: u.userId, name: u.fullName || u.email, email: u.email, companyName: data.company?.name ?? null })}
                 >
-                  <Eye className="mr-2 h-4 w-4" /> View as
+                  <Eye className="mr-2 h-4 w-4" /> {" "}{t("detailSheets.viewAs")}
                 </Button>
                 <Button variant="outline" disabled={!canChange || busy !== null} onClick={() => void act("reset", async () => {
                   const res = await api.post<{ emailed: boolean; code?: string }>(`/admin/users/${u.userId}/password-reset`);
                   if (!res.emailed && res.code) setCode(res.code);
-                }, "Password reset code created")}>
+                }, tr("detailSheets.resetCodeCreated"))}>
                   {busy === "reset" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
-                  Reset password
+                  
+                  {t("detailSheets.resetPassword")}
                 </Button>
                 {!u.isOperator && (
                   <Button
@@ -163,59 +171,60 @@ export function UserSheet({
                     className={u.suspended ? "" : "text-destructive hover:text-destructive"}
                     disabled={!canChange || busy !== null}
                     onClick={() => {
-                      if (!u.suspended && !window.confirm(`Suspend ${u.fullName || u.email}? They're signed out and can't sign in until restored.`)) return;
-                      void act("suspend", () => api.post(`/admin/users/${u.userId}/suspend`, { suspended: !u.suspended }), u.suspended ? "Account restored" : "Account suspended");
+                      if (!u.suspended && !window.confirm(t("detailSheets.suspendTheyReSignedOutAnd", { email: u.fullName || u.email }))) return;
+                      void act("suspend", () => api.post(`/admin/users/${u.userId}/suspend`, { suspended: !u.suspended }), u.suspended ? tr("detailSheets.accountRestored") : tr("detailSheets.accountSuspended"));
                     }}
                   >
                     {u.suspended ? <ShieldCheck className="mr-2 h-4 w-4" /> : <ShieldOff className="mr-2 h-4 w-4" />}
-                    {u.suspended ? "Restore account" : "Suspend"}
+                    {u.suspended ? t("detailSheets.restoreAccount") : t("detailSheets.suspend")}
                   </Button>
                 )}
               </div>
-              {u.isOperator && <p className="text-xs text-muted-foreground">Operators can't be viewed as or suspended. Change their access under Manage SSAA → Operators.</p>}
+              {u.isOperator && <p className="text-xs text-muted-foreground">{t("detailSheets.operatorsCanTBeViewedAs")}</p>}
 
-              <Section title="Account">
+              <Section title={t("detailSheets.account")}>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border p-3 text-sm">
-                  <dt className="text-muted-foreground">Joined</dt>
+                  <dt className="text-muted-foreground">{t("detailSheets.joined")}</dt>
                   <dd>{when(u.createdAt)}</dd>
-                  <dt className="text-muted-foreground">Signs in with</dt>
-                  <dd>{u.signInMethod === "google" ? "Google" : "Email and password"}</dd>
-                  <dt className="text-muted-foreground">Phone</dt>
+                  <dt className="text-muted-foreground">{t("detailSheets.signsInWith")}</dt>
+                  <dd>{u.signInMethod === "google" ? "Google" : t("detailSheets.emailAndPassword")}</dd>
+                  <dt className="text-muted-foreground">{t("detailSheets.phone")}</dt>
                   <dd>{u.phone || "—"}</dd>
                   {u.suspendedAt && (
                     <>
-                      <dt className="text-muted-foreground">Suspended</dt>
+                      <dt className="text-muted-foreground">{t("detailSheets.suspended")}</dt>
                       <dd>{when(u.suspendedAt)}</dd>
                     </>
                   )}
                 </dl>
               </Section>
 
-              <Section title="Company">
+              <Section title={t("common.company")}>
                 {data.company ? (
                   <div className="space-y-3 rounded-md border p-3">
                     <button type="button" onClick={() => onOpenCompany(data.company!.id)} className="flex w-full items-center gap-3 text-left">
                       <Building2 className="h-5 w-5 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-medium">{data.company.name}</span>
-                        <span className="text-xs text-muted-foreground">{data.company.companyType === "gc" ? "General contractor" : "Subcontractor"}</span>
+                        <span className="text-xs text-muted-foreground">{data.company.companyType === "gc" ? t("common.generalContractor") : t("common.subcontractor")}</span>
                       </span>
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     </button>
                     <div className="flex items-center justify-between gap-3 border-t pt-3">
                       <label htmlFor="user-level" className="text-sm text-muted-foreground">
-                        Permission level
+                        
+                        {t("detailSheets.permissionLevel")}
                       </label>
                       {isHolder ? (
                         <Badge variant="outline">
-                          <Crown className="mr-1 h-3 w-3" /> Account Holder
+                          <Crown className="mr-1 h-3 w-3" /> {" "}{t("detailSheets.accountHolder")}
                         </Badge>
                       ) : (
                         <select
                           id="user-level"
                           value={data.permissionLevel ?? ""}
                           disabled={!canChange || busy !== null}
-                          onChange={(e) => void act("level", () => api.patch(`/admin/users/${u.userId}/level`, { permissionLevel: e.target.value }), "Level changed")}
+                          onChange={(e) => void act("level", () => api.patch(`/admin/users/${u.userId}/level`, { permissionLevel: e.target.value }), tr("detailSheets.levelChanged"))}
                           className="h-9 rounded-md border border-input bg-background px-2 text-sm"
                         >
                           {data.levels
@@ -228,19 +237,19 @@ export function UserSheet({
                         </select>
                       )}
                     </div>
-                    {isHolder && <p className="text-xs text-muted-foreground">To change the account holder, open the company and use Make account holder on someone else.</p>}
+                    {isHolder && <p className="text-xs text-muted-foreground">{t("detailSheets.toChangeTheAccountHolderOpen")}</p>}
                   </div>
                 ) : (
-                  <p className="rounded-md border p-3 text-sm text-muted-foreground">Not in a company yet.</p>
+                  <p className="rounded-md border p-3 text-sm text-muted-foreground">{t("detailSheets.notInACompanyYet")}</p>
                 )}
               </Section>
 
-              <Section title="Messages sent to them">
+              <Section title={t("detailSheets.messagesSentToThem")}>
                 <CorrespondenceList entries={data.correspondence} />
               </Section>
 
-              <Section title="Operator activity">
-                <AuditList entries={data.audit} empty="No operator has changed this account." />
+              <Section title={t("detailSheets.operatorActivity")}>
+                <AuditList entries={data.audit} empty={tr("detailSheets.noChangesAccount")} />
               </Section>
             </div>
           )}
@@ -250,14 +259,15 @@ export function UserSheet({
       <Dialog open={code !== null} onOpenChange={(o) => !o && setCode(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Give them this code</DialogTitle>
+            <DialogTitle>{t("detailSheets.giveThemThisCode")}</DialogTitle>
             <DialogDescription>
-              Email isn't reaching them from this server, so pass the code on yourself. They enter it on Forgot password. It works for 15 minutes.
+              
+              {t("detailSheets.emailIsnTReachingThemFrom")}
             </DialogDescription>
           </DialogHeader>
           <p className="select-all rounded-md border bg-muted/10 py-4 text-center font-mono text-3xl tracking-[0.3em]">{code}</p>
           <DialogFooter>
-            <Button onClick={() => setCode(null)}>Done</Button>
+            <Button onClick={() => setCode(null)}>{t("detailSheets.done")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -287,6 +297,7 @@ export function CompanySheet({
   onOpenUser: (userId: string) => void;
   onChanged: () => void;
 }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [data, setData] = useState<CompanyDetail | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -296,10 +307,10 @@ export function CompanySheet({
     try {
       setData(await api.get<CompanyDetail>(`/admin/companies/${companyId}`));
     } catch (err) {
-      toast({ title: "Couldn't load that company", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("detailSheets.couldnTLoadThatCompany"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
       onClose();
     }
-  }, [companyId, toast, onClose]);
+  }, [companyId, toast, onClose, t]);
 
   useEffect(() => {
     setData(null);
@@ -307,15 +318,15 @@ export function CompanySheet({
   }, [load]);
 
   async function makeHolder(userId: string, name: string) {
-    if (!data || !window.confirm(`Make ${name} the account holder of ${data.company.name}? The current account holder stays in the company at Full access.`)) return;
+    if (!data || !window.confirm(t("detailSheets.makeTheAccountHolderOfThe", { name: data.company.name }))) return;
     setBusy(userId);
     try {
       await api.post(`/admin/companies/${data.company.id}/account-holder`, { userId });
       await load();
       onChanged();
-      toast({ title: `${name} is now the account holder` });
+      toast({ title: t("detailSheets.isNowTheAccountHolder", { name: name }) });
     } catch (err) {
-      toast({ title: "That didn't work", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("detailSheets.thatDidnTWork"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setBusy(null);
     }
@@ -329,8 +340,8 @@ export function CompanySheet({
         {!data ? (
           <>
             <SheetHeader className="sr-only">
-              <SheetTitle>Company</SheetTitle>
-              <SheetDescription>Loading</SheetDescription>
+              <SheetTitle>{t("common.company")}</SheetTitle>
+              <SheetDescription>{t("detailSheets.loading")}</SheetDescription>
             </SheetHeader>
             <Loading />
           </>
@@ -339,16 +350,16 @@ export function CompanySheet({
             <SheetHeader className="space-y-1 pr-6 text-left">
               <SheetTitle className="text-xl">{data.company.name}</SheetTitle>
               <SheetDescription>
-                {data.company.companyType === "gc" ? "General contractor" : "Subcontractor"}
+                {data.company.companyType === "gc" ? t("common.generalContractor") : t("common.subcontractor")}
                 {data.company.address ? ` · ${data.company.address}` : ""}
               </SheetDescription>
             </SheetHeader>
 
             <div className="grid grid-cols-3 gap-2 text-center">
               {[
-                ["Members", data.members.length],
-                ["Projects", data.projects.length],
-                ["Crew", data.employees],
+                [t("detailSheets.members"), data.members.length],
+                [t("detailSheets.projects"), data.projects.length],
+                [t("detailSheets.crew"), data.employees],
               ].map(([label, value]) => (
                 <div key={label} className="rounded-md border p-2">
                   <div className="text-xl font-semibold">{value}</div>
@@ -363,10 +374,10 @@ export function CompanySheet({
               onClick={() => holder && onViewAs({ userId: holder.userId, name: holder.fullName || holder.email, email: holder.email, companyName: data.company.name })}
             >
               <Eye className="mr-2 h-4 w-4" />
-              {holder ? `Open as ${holder.fullName || holder.email}` : "No account holder"}
+              {holder ? t("detailSheets.openAs", { email: holder.fullName || holder.email }) : t("detailSheets.noAccountHolder")}
             </Button>
 
-            <Section title="People">
+            <Section title={t("detailSheets.people")}>
               <ul className="divide-y rounded-md border">
                 {data.members.map((m) => {
                   const isHolder = m.permissionLevel === "account_holder" || m.isCreator;
@@ -375,18 +386,18 @@ export function CompanySheet({
                       <button type="button" onClick={() => onOpenUser(m.userId)} className="min-w-0 flex-1 text-left">
                         <span className="block truncate text-sm font-medium">
                           {m.fullName || m.email}
-                          {m.suspended && <span className="ml-1 text-xs font-normal text-destructive">(suspended)</span>}
+                          {m.suspended && <span className="ml-1 text-xs font-normal text-destructive">{t("detailSheets.suspended2")}</span>}
                         </span>
                         <span className="block truncate text-xs text-muted-foreground">
                           {levelLabel(m.permissionLevel)} · {m.email}
                         </span>
                       </button>
                       {isHolder ? (
-                        <Crown className="h-4 w-4 shrink-0 text-amber-500" aria-label="Account holder" />
+                        <Crown className="h-4 w-4 shrink-0 text-amber-500" aria-label={t("detailSheets.accountHolder2")} />
                       ) : (
                         canChange && (
                           <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2 text-xs" disabled={busy !== null} onClick={() => void makeHolder(m.userId, m.fullName || m.email)}>
-                            {busy === m.userId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Make account holder"}
+                            {busy === m.userId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t("detailSheets.makeAccountHolder")}
                           </Button>
                         )
                       )}
@@ -396,24 +407,24 @@ export function CompanySheet({
               </ul>
             </Section>
 
-            <Section title={data.company.companyType === "gc" ? "Projects" : "Connected projects"}>
+            <Section title={data.company.companyType === "gc" ? t("common.projects") : t("detailSheets.connectedProjects")}>
               {data.projects.length === 0 ? (
-                <p className="rounded-md border p-3 text-sm text-muted-foreground">None yet.</p>
+                <p className="rounded-md border p-3 text-sm text-muted-foreground">{t("detailSheets.noneYet")}</p>
               ) : (
                 <ul className="divide-y rounded-md border">
                   {data.projects.map((p) => (
                     <li key={p.id} className="px-3 py-2 text-sm">
                       <p className="truncate font-medium">{p.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">{[p.ownerName, p.address].filter(Boolean).join(" · ") || "No address"}</p>
+                      <p className="truncate text-xs text-muted-foreground">{[p.ownerName, p.address].filter(Boolean).join(" · ") || t("detailSheets.noAddress")}</p>
                     </li>
                   ))}
                 </ul>
               )}
             </Section>
 
-            <Section title="Recent schedule requests">
+            <Section title={t("detailSheets.recentScheduleRequests")}>
               {data.requests.length === 0 ? (
-                <p className="rounded-md border p-3 text-sm text-muted-foreground">None yet.</p>
+                <p className="rounded-md border p-3 text-sm text-muted-foreground">{t("detailSheets.noneYet")}</p>
               ) : (
                 <ul className="divide-y rounded-md border">
                   {data.requests.map((r) => (
@@ -431,12 +442,12 @@ export function CompanySheet({
               )}
             </Section>
 
-            <Section title="Messages sent">
+            <Section title={t("detailSheets.messagesSent")}>
               <CorrespondenceList entries={data.correspondence} />
             </Section>
 
-            <Section title="Operator activity">
-              <AuditList entries={data.audit} empty="No operator has changed this company." />
+            <Section title={t("detailSheets.operatorActivity")}>
+              <AuditList entries={data.audit} empty={tr("detailSheets.noChangesCompany")} />
             </Section>
           </div>
         )}

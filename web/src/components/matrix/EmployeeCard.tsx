@@ -3,6 +3,9 @@ import { useDraggable } from "@dnd-kit/core";
 import { AlertTriangle, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { initialsOf, type Density } from "./helpers";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
+import { jobTitleLabel } from "@/i18n/labels";
 
 /**
  * A person on the Weekly grid or in the side panel. Ported from Luke's MatrixEmployeeCard: three sizes
@@ -27,11 +30,11 @@ const DOT: Record<CardLook, string> = {
   unavailable: "bg-muted-foreground",
 };
 const LABEL: Record<CardLook, string> = {
-  confirmed: "Confirmed",
-  available: "Available",
-  draft: "Newly assigned (not published)",
-  pending: "Pending confirmation",
-  unavailable: "Unavailable",
+  get confirmed() { return tr("employeeCard.label.confirmed"); },
+  get available() { return tr("employeeCard.label.available"); },
+  get draft() { return tr("employeeCard.label.draft"); },
+  get pending() { return tr("employeeCard.label.pending"); },
+  get unavailable() { return tr("employeeCard.label.unavailable"); },
 };
 
 const compactName = (name: string) => {
@@ -79,6 +82,7 @@ export default function EmployeeCard({
   onRemove,
   onTap,
 }: Props) {
+  const { t } = useLanguage();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: dragId ?? `static::${name}`,
     data: dragData,
@@ -127,7 +131,7 @@ export default function EmployeeCard({
   const removeButton = onRemove && (
     <button
       type="button"
-      aria-label={`Remove ${name}`}
+      aria-label={t("employeeCard.remove", { name: name })}
       onClick={(e) => {
         e.stopPropagation();
         onRemove();
@@ -140,13 +144,13 @@ export default function EmployeeCard({
   );
   const extras = (
     <>
-      {edited && <span className="rounded bg-amber-100 px-1 text-[9px] font-semibold text-amber-800">Edited</span>}
+      {edited && <span className="rounded bg-amber-100 px-1 text-[9px] font-semibold text-amber-800">{t("employeeCard.edited")}</span>}
       {tag && <span className="truncate rounded bg-muted/40 px-1 text-[9px] font-medium text-muted-foreground">{tag}</span>}
     </>
   );
   const warning = unassigned && (
     <span className="flex items-center gap-0.5 truncate text-[9px] font-medium text-red-600 dark:text-red-400">
-      <AlertTriangle className="h-2.5 w-2.5 shrink-0" /> Not assigned to project
+      <AlertTriangle className="h-2.5 w-2.5 shrink-0" /> {" "}{t("employeeCard.notAssignedToProject")}
     </span>
   );
 
@@ -158,7 +162,7 @@ export default function EmployeeCard({
           <TooltipTrigger asChild>
             <span className={`mr-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${unassigned ? "bg-red-500" : DOT[look]}`} />
           </TooltipTrigger>
-          <TooltipContent>{unassigned ? "Not assigned to this project" : LABEL[look]}</TooltipContent>
+          <TooltipContent>{unassigned ? t("employeeCard.notAssignedToThisProject") : LABEL[look]}</TooltipContent>
         </Tooltip>
         <span className="truncate">{name}</span>
       </div>
@@ -175,9 +179,9 @@ export default function EmployeeCard({
             {extras}
           </span>
           {look === "pending" ? (
-            <span className="truncate text-[9px] font-medium text-yellow-700 dark:text-yellow-400">Pending Confirmation</span>
+            <span className="truncate text-[9px] font-medium text-yellow-700 dark:text-yellow-400">{t("employeeCard.pendingConfirmation")}</span>
           ) : (
-            jobTitle && <span className="truncate text-[10px] text-muted-foreground">{jobTitle}</span>
+            jobTitle && <span className="truncate text-[10px] text-muted-foreground">{jobTitleLabel(jobTitle)}</span>
           )}
           {time && <span className="truncate text-[10px] text-muted-foreground">{time}</span>}
           {warning}
@@ -201,9 +205,9 @@ export default function EmployeeCard({
           {extras}
         </span>
         {look === "pending" ? (
-          <span className="truncate text-[10px] font-medium text-yellow-700 dark:text-yellow-400">Pending Confirmation</span>
+          <span className="truncate text-[10px] font-medium text-yellow-700 dark:text-yellow-400">{t("employeeCard.pendingConfirmation")}</span>
         ) : (
-          jobTitle && <span className="truncate text-xs text-muted-foreground">{jobTitle}</span>
+          jobTitle && <span className="truncate text-xs text-muted-foreground">{jobTitleLabel(jobTitle)}</span>
         )}
         {time && <span className="truncate text-[11px] text-muted-foreground">{time}</span>}
         {warning}

@@ -25,6 +25,9 @@ import AuthLayout from "@/components/AuthLayout";
 import { peekNext } from "@/lib/share";
 import { TRADES } from "@/lib/trades";
 import { Building2, Users, Loader2, ArrowLeft, CheckCircle } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tradeLabel } from "@/i18n/labels";
+import { tr } from "@/i18n/runtime";
 
 type CompanyType = "gc" | "sub";
 
@@ -47,6 +50,7 @@ interface Company {
  * Subs pick a trade (with free-text Other) during creation.
  */
 export default function Onboarding() {
+  const { t } = useLanguage();
   const [params] = useSearchParams();
   const inviteCompanyId = params.get("invite");
   const { user, refreshProfile } = useAuth();
@@ -95,7 +99,7 @@ export default function Onboarding() {
           if (!cancelled) setCompanies(res.companies);
         })
         .catch((err) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : "Could not search companies.");
+          if (!cancelled) setError(err instanceof Error ? err.message : tr("onboarding.couldNotSearch"));
         })
         .finally(() => {
           if (!cancelled) setSearching(false);
@@ -117,7 +121,7 @@ export default function Onboarding() {
         if (!cancelled) setInvitedCompany(res.company);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not find the company that invited you.");
+        if (!cancelled) setError(err instanceof Error ? err.message : tr("onboarding.couldNotFindInviter"));
       });
     return () => {
       cancelled = true;
@@ -126,10 +130,10 @@ export default function Onboarding() {
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
-    if (!companyType) return setError("Choose whether you're a general contractor or a subcontractor.");
-    if (!companyName.trim()) return setError("Company name is required.");
+    if (!companyType) return setError(tr("onboarding.chooseType"));
+    if (!companyName.trim()) return setError(tr("onboarding.companyNameRequired"));
     const trade = companyType === "sub" ? (selectedTrade === "Other" ? customTrade.trim() : selectedTrade) : "";
-    if (companyType === "sub" && !trade) return setError("Choose your trade.");
+    if (companyType === "sub" && !trade) return setError(tr("onboarding.chooseTrade"));
     setError(null);
     setBusy(true);
     try {
@@ -142,7 +146,7 @@ export default function Onboarding() {
       await refreshProfile();
       navigate(peekNext() ?? "/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create that company.");
+      setError(err instanceof Error ? err.message : tr("common.couldNotCreateCompany"));
     } finally {
       setBusy(false);
     }
@@ -156,7 +160,7 @@ export default function Onboarding() {
       setJoinTarget(companyId);
       setJoinSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send that join request.");
+      setError(err instanceof Error ? err.message : tr("onboarding.couldNotSendJoin"));
     } finally {
       setBusy(false);
     }
@@ -169,9 +173,9 @@ export default function Onboarding() {
     <AuthLayout>
       <Card className="w-full max-w-md border-primary/20 shadow-lg">
         <CardHeader className="text-center pb-2">
-          <CardTitle className="text-2xl font-bold">Set up your company</CardTitle>
+          <CardTitle className="text-2xl font-bold">{t("onboarding.setUpYourCompany")}</CardTitle>
           <p className="text-muted-foreground text-sm mt-1">
-            {mode === "join" ? "Find your company and request to join" : "Two quick steps and you're scheduling"}
+            {mode === "join" ? t("onboarding.findYourCompanyAndRequestTo") : t("onboarding.twoQuickStepsAndYouRe")}
           </p>
         </CardHeader>
         <CardContent>
@@ -179,19 +183,20 @@ export default function Onboarding() {
             <div className="space-y-4 text-center">
               <CheckCircle className="mx-auto h-10 w-10 text-primary" />
               <p className="text-sm text-muted-foreground">
-                Your request to join{joinCompany ? ` ${joinCompany.name}` : ""} has been sent. The account holder
-                needs to approve it before you can start scheduling.
+                
+                {t("onboarding.yourRequestToJoin")}{joinCompany ? ` ${joinCompany.name}` : ""} {" "}{t("onboarding.hasBeenSentTheAccountHolder")}
               </p>
               <Button
                 className="w-full"
                 onClick={() => navigate("/dashboard", { state: { pendingJoinRequest: true } })}
               >
-                Go to dashboard
+                
+                {t("onboarding.goToDashboard")}
               </Button>
             </div>
           ) : mode === null ? (
             <div className="space-y-3">
-              <p className="text-sm font-medium">What best describes your company?</p>
+              <p className="text-sm font-medium">{t("onboarding.whatBestDescribesYourCompany")}</p>
               <div className="grid grid-cols-2 gap-3">
                 <Button
                   variant={companyType === "gc" ? "default" : "outline"}
@@ -199,7 +204,8 @@ export default function Onboarding() {
                   onClick={() => setCompanyType("gc")}
                 >
                   <Building2 className="h-5 w-5" />
-                  General contractor
+                  
+                  {t("common.generalContractor")}
                 </Button>
                 <Button
                   variant={companyType === "sub" ? "default" : "outline"}
@@ -207,7 +213,8 @@ export default function Onboarding() {
                   onClick={() => setCompanyType("sub")}
                 >
                   <Users className="h-5 w-5" />
-                  Subcontractor
+                  
+                  {t("common.subcontractor")}
                 </Button>
               </div>
               {error && (
@@ -219,21 +226,23 @@ export default function Onboarding() {
                 className="w-full"
                 disabled={!companyType}
                 onClick={() => {
-                  if (!companyType) return setError("Choose whether you're a general contractor or a subcontractor.");
+                  if (!companyType) return setError(tr("onboarding.chooseType"));
                   setError(null);
                   setMode("create");
                 }}
               >
-                Continue
+                
+                {t("common.continue")}
               </Button>
               <Button variant="ghost" className="w-full" onClick={() => setMode("join")}>
-                I&apos;m joining an existing company instead
+                
+                {t("onboarding.iMJoiningAnExistingCompany")}
               </Button>
             </div>
           ) : mode === "create" ? (
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="companyName">Company name</Label>
+                <Label htmlFor="companyName">{t("onboarding.companyName")}</Label>
                 <Input
                   id="companyName"
                   value={companyName}
@@ -243,7 +252,7 @@ export default function Onboarding() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="companyAddress">Address (optional)</Label>
+                <Label htmlFor="companyAddress">{t("onboarding.addressOptional")}</Label>
                 <Input
                   id="companyAddress"
                   value={companyAddress}
@@ -253,7 +262,7 @@ export default function Onboarding() {
               </div>
               {companyType === "sub" && (
                 <div className="space-y-2">
-                  <Label htmlFor="trade">Trade</Label>
+                  <Label htmlFor="trade">{t("onboarding.trade")}</Label>
                   <Select
                     value={selectedTrade}
                     onValueChange={(val) => {
@@ -267,14 +276,14 @@ export default function Onboarding() {
                     }}
                   >
                     <SelectTrigger id="trade">
-                      <SelectValue placeholder="Select your trade">
-                        {selectedTrade === "Other" && customTrade ? `Other: ${customTrade}` : selectedTrade || undefined}
+                      <SelectValue placeholder={t("onboarding.selectYourTrade")}>
+                        {selectedTrade === "Other" && customTrade ? t("onboarding.other", { customTrade: customTrade }) : tradeLabel(selectedTrade) || undefined}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {TRADES.map((trade) => (
                         <SelectItem key={trade} value={trade}>
-                          {trade}
+                          {tradeLabel(trade)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -282,7 +291,8 @@ export default function Onboarding() {
                 </div>
               )}
               <p className="text-xs text-muted-foreground">
-                Creating as a {companyType === "gc" ? "general contractor" : "subcontractor"}.
+                
+                {t("onboarding.creatingAsA")}{" "}{companyType === "gc" ? t("onboarding.generalContractor") : "subcontractor"}.
               </p>
               {error && (
                 <p role="alert" className="text-sm text-destructive">
@@ -291,7 +301,8 @@ export default function Onboarding() {
               )}
               <Button type="submit" className="w-full" disabled={busy}>
                 {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Create company
+                
+                {t("onboarding.createCompany")}
               </Button>
               <Button
                 type="button"
@@ -303,7 +314,8 @@ export default function Onboarding() {
                 }}
               >
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
+                
+                {t("common.back")}
               </Button>
             </form>
           ) : (
@@ -311,8 +323,8 @@ export default function Onboarding() {
               {joinTarget && !joinSent ? (
                 <div className="space-y-4 text-center">
                   <p className="text-sm text-muted-foreground">
-                    You were invited to join{joinCompany ? ` ${joinCompany.name}` : " a company"}. Send a join
-                    request and the account holder will approve it.
+                    
+                    {t("onboarding.youWereInvitedToJoin")}{joinCompany ? ` ${joinCompany.name}` : t("onboarding.aCompany")}{t("onboarding.sendAJoinRequestAndThe")}
                   </p>
                   {error && (
                     <p role="alert" className="text-sm text-destructive">
@@ -321,37 +333,40 @@ export default function Onboarding() {
                   )}
                   <Button className="w-full" disabled={busy} onClick={() => void handleJoin(joinTarget)}>
                     {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Request to join
+                    
+                    {t("onboarding.requestToJoin")}
                   </Button>
                   {!inviteCompanyId && (
                     <Button variant="ghost" className="w-full" onClick={() => setJoinTarget(null)}>
                       <ArrowLeft className="mr-2 h-4 w-4" />
-                      Choose a different company
+                      
+                      {t("onboarding.chooseADifferentCompany")}
                     </Button>
                   )}
                 </div>
               ) : (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="companySearch">Search companies</Label>
+                    <Label htmlFor="companySearch">{t("onboarding.searchCompanies")}</Label>
                     <Input
                       id="companySearch"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Type your company's name"
+                      placeholder={t("onboarding.typeYourCompanySName")}
                       autoComplete="off"
                     />
                   </div>
                   {!searchReady ? (
                     <p className="text-sm text-muted-foreground">
-                      Type at least {SEARCH_MIN} letters of the company&apos;s name. The account holder approves every
-                      request, or can send you an invite link.
+                      
+                      {t("onboarding.typeAtLeast")}{" "}{SEARCH_MIN} {" "}{t("onboarding.lettersOfTheCompanySName")}
                     </p>
                   ) : searching && companies.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Searching...</p>
+                    <p className="text-sm text-muted-foreground">{t("onboarding.searching")}</p>
                   ) : companies.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      No company by that name. Check the spelling, or ask the account holder for an invite link.
+                      
+                      {t("onboarding.noCompanyByThatNameCheck")}
                     </p>
                   ) : (
                     <ul className="max-h-64 divide-y overflow-y-auto rounded-md border">
@@ -360,11 +375,12 @@ export default function Onboarding() {
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{company.name}</p>
                             <p className="text-xs text-muted-foreground">
-                              {company.companyType === "gc" ? "General contractor" : "Subcontractor"}
+                              {company.companyType === "gc" ? t("common.generalContractor") : t("common.subcontractor")}
                             </p>
                           </div>
                           <Button size="sm" disabled={busy} onClick={() => void handleJoin(company.id)}>
-                            Join
+                            
+                            {t("onboarding.join")}
                           </Button>
                         </li>
                       ))}
@@ -377,7 +393,8 @@ export default function Onboarding() {
                   )}
                   <Button variant="ghost" className="w-full" onClick={() => setMode("create")}>
                     <ArrowLeft className="mr-2 h-4 w-4" />
-                    Create a new company instead
+                    
+                    {t("onboarding.createANewCompanyInstead")}
                   </Button>
                 </>
               )}
@@ -386,7 +403,8 @@ export default function Onboarding() {
 
           <div className="mt-6 text-center">
             <Link to="/dashboard" className="text-sm text-muted-foreground hover:text-primary transition-colors">
-              Skip for now
+              
+              {t("onboarding.skipForNow")}
             </Link>
           </div>
         </CardContent>
@@ -401,14 +419,14 @@ export default function Onboarding() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Specify your trade</DialogTitle>
-            <DialogDescription>Type the trade that best describes your work.</DialogDescription>
+            <DialogTitle>{t("onboarding.specifyYourTrade")}</DialogTitle>
+            <DialogDescription>{t("onboarding.typeTheTradeThatBestDescribes")}</DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
             value={otherTradeDraft}
             onChange={(e) => setOtherTradeDraft(e.target.value)}
-            placeholder="Specify your trade"
+            placeholder={t("onboarding.specifyYourTrade")}
           />
           <DialogFooter>
             <Button
@@ -418,7 +436,8 @@ export default function Onboarding() {
                 if (!customTrade.trim()) setSelectedTrade("");
               }}
             >
-              Cancel
+              
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={!otherTradeDraft.trim()}
@@ -427,7 +446,8 @@ export default function Onboarding() {
                 setShowOtherTradeDialog(false);
               }}
             >
-              Save
+              
+              {t("onboarding.save")}
             </Button>
           </DialogFooter>
         </DialogContent>

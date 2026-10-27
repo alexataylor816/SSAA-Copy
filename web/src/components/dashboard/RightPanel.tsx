@@ -20,6 +20,9 @@ import AnchoredFirstClickTip from '@/components/onboarding/AnchoredFirstClickTip
 import { TOUR_COPY } from '@/components/onboarding/tourSteps';
 import InviteShare from '@/components/InviteShare';
 import { projectJoinUrl } from '@/lib/share';
+import { useLanguage } from "@/contexts/LanguageContext";
+import { jobTitleLabel } from "@/i18n/labels";
+import { tr } from "@/i18n/runtime";
 
 interface Project {
   id: string;
@@ -110,6 +113,7 @@ const RightPanel = ({
   isReadOnlyOperator = false,
   onTeamRefresh,
 }: RightPanelProps) => {
+  const { t } = useLanguage();
   
   const [connectOpen, setConnectOpen] = useState(false);
   const [manageTeamOpen, setManageTeamOpen] = useState(false);
@@ -175,8 +179,8 @@ const RightPanel = ({
     if (currentProject?.connection_code) {
       navigator.clipboard.writeText(currentProject.connection_code);
       toast({
-        title: "Copied!",
-        description: "Connection code copied to clipboard.",
+        title: t("rightPanel.copied"),
+        description: t("rightPanel.connectionCodeCopiedToClipboard"),
       });
     }
   };
@@ -196,8 +200,8 @@ const RightPanel = ({
 
     if (validEmails.length === 0) {
       toast({
-        title: "No valid email addresses",
-        description: "Please enter at least one valid email.",
+        title: t("rightPanel.noValidEmailAddresses"),
+        description: t("rightPanel.pleaseEnterAtLeastOneValid"),
         variant: "destructive",
       });
       return;
@@ -226,10 +230,10 @@ const RightPanel = ({
 
       const skipped = [...invalidEmails, ...failures];
       toast({
-        title: `Sent ${successCount} of ${validEmails.length} invite${validEmails.length === 1 ? '' : 's'}`,
+        title: t(validEmails.length === 1 ? "rightPanel.sentOfInvites.one" : "rightPanel.sentOfInvites.other", { sent: successCount, total: validEmails.length }),
         description: skipped.length
-          ? `Skipped: ${skipped.join(', ')}`
-          : `Project invitation${successCount === 1 ? '' : 's'} sent successfully.`,
+          ? t("rightPanel.skipped", { join: skipped.join(', ') })
+          : t(successCount === 1 ? "rightPanel.invitationsSent.one" : "rightPanel.invitationsSent.other"),
         variant: successCount === 0 ? 'destructive' : 'default',
       });
 
@@ -240,8 +244,8 @@ const RightPanel = ({
     } catch (error: any) {
       console.error('Error sending invite:', error);
       toast({
-        title: "Failed to send invite",
-        description: error.message || "Please try again later.",
+        title: t("rightPanel.failedToSendInvite"),
+        description: error.message || t("rightPanel.pleaseTryAgainLater"),
         variant: "destructive"
       });
     } finally {
@@ -255,7 +259,7 @@ const RightPanel = ({
     setSendingSubInvite(true);
     try {
       const resolvedCompanyId = companyId || profile?.company_id;
-      if (!resolvedCompanyId) throw new Error("No company ID found");
+      if (!resolvedCompanyId) throw new Error(t("rightPanel.noCompanyIdFound"));
 
       // Get or create a guest_gc_link for this sub company
       let { data: existingLink } = await supabase
@@ -302,16 +306,16 @@ const RightPanel = ({
       if (error) throw error;
 
       toast({
-        title: "Invite sent!",
-        description: `Invitation sent to ${subInviteEmail}`,
+        title: t("rightPanel.inviteSent"),
+        description: t("rightPanel.invitationSentTo", { subInviteEmail: subInviteEmail }),
       });
       setSubInviteEmail('');
       setSubInviteDialogOpen(false);
     } catch (error: any) {
       console.error('Error sending invite:', error);
       toast({
-        title: "Failed to send invite",
-        description: error.message || "Please try again later.",
+        title: t("rightPanel.failedToSendInvite"),
+        description: error.message || t("rightPanel.pleaseTryAgainLater"),
         variant: "destructive"
       });
     } finally {
@@ -332,7 +336,7 @@ const RightPanel = ({
       {/* Project Selector */}
       <Card className="border-primary/20" data-tour="master-schedule">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Projects</CardTitle>
+          <CardTitle className="text-lg">{t("common.projects")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <AnchoredFirstClickTip
@@ -344,10 +348,10 @@ const RightPanel = ({
             <div data-tour="projects-dropdown">
               <Select value={selectedProject} onValueChange={setSelectedProject}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select project" />
+                  <SelectValue placeholder={t("rightPanel.selectProject")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="master">Master Schedule</SelectItem>
+                  <SelectItem value="master">{t("rightPanel.masterSchedule")}</SelectItem>
                   {projects.map((project) => (
                     <SelectItem key={project.id} value={project.id}>
                       {project.name}
@@ -371,18 +375,19 @@ const RightPanel = ({
                 <DialogTrigger asChild>
                   <Button variant="outline" className="w-full">
                     <UserPlus className="mr-2 h-4 w-4" />
-                    Invite Subcontractor
+                    
+                    {t("rightPanel.inviteSubcontractor")}
                   </Button>
                 </DialogTrigger>
               </AnchoredFirstClickTip>
               <DialogContent className="sm:max-w-sm">
                 <DialogHeader>
-                  <DialogTitle>Invite a subcontractor</DialogTitle>
+                  <DialogTitle>{t("rightPanel.inviteASubcontractor")}</DialogTitle>
                 </DialogHeader>
                 {projects.length > 1 && (
                   <Select value={inviteProjectId} onValueChange={setInviteProjectId}>
-                    <SelectTrigger aria-label="Project">
-                      <SelectValue placeholder="Choose a project" />
+                    <SelectTrigger aria-label={t("common.project")}>
+                      <SelectValue placeholder={t("rightPanel.chooseAProject")} />
                     </SelectTrigger>
                     <SelectContent>
                       {projects.map((project) => (
@@ -399,7 +404,7 @@ const RightPanel = ({
                     <InviteShare
                       url={projectJoinUrl(project.connection_code)}
                       code={project.connection_code}
-                      caption={`Send the subcontractor this link, or give them the code to enter under Connect to Project, to join ${project.name}.`}
+                      caption={t("rightPanel.sendTheSubcontractorThisLinkOr", { name: project.name })}
                     />
                   ) : null;
                 })()}
@@ -414,13 +419,14 @@ const RightPanel = ({
                 <DialogTrigger asChild>
                   <Button variant="outline" className="w-full">
                     <Link2 className="mr-2 h-4 w-4" />
-                    Connect to Project
+                    
+                    {t("rightPanel.connectToProject")}
                   </Button>
                 </DialogTrigger>
               </AnchoredFirstClickTip>
               <DialogContent className="sm:max-w-sm">
                 <DialogHeader>
-                  <DialogTitle>Connect to a project</DialogTitle>
+                  <DialogTitle>{t("rightPanel.connectToAProject")}</DialogTitle>
                 </DialogHeader>
                 <form
                   className="space-y-4"
@@ -434,21 +440,23 @@ const RightPanel = ({
                   }}
                 >
                   <div className="space-y-2">
-                    <Label htmlFor="connectCode">Project code from the general contractor</Label>
+                    <Label htmlFor="connectCode">{t("rightPanel.projectCodeFromTheGeneralContractor")}</Label>
                     <Input
                       id="connectCode"
                       value={connectionCode}
                       onChange={(e) => setConnectionCode(e.target.value)}
-                      placeholder="e.g. 0454f7e2"
+                      placeholder={t("rightPanel.eG0454f7e2")}
                       autoComplete="off"
                       className="font-mono tracking-widest"
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Got an invite link instead? Just open it.
+                    
+                    {t("rightPanel.gotAnInviteLinkInsteadJust")}
                   </p>
                   <Button type="submit" className="w-full" disabled={!connectionCode.trim()}>
-                    Continue
+                    
+                    {t("common.continue")}
                   </Button>
                 </form>
               </DialogContent>
@@ -487,9 +495,9 @@ const RightPanel = ({
           onOverlayEnabledChange={onSubOverlayEnabledChange}
           selectedSubIds={selectedOverlaySubIds}
           onSelectedSubIdsChange={onSelectedOverlaySubIdsChange}
-          title="Subcontractor Overlay"
+          title={t("rightPanel.subcontractorOverlay")}
           tipKey="subcontractor_overlay"
-          tipCopy="Turn this on to see how many workers each connected subcontractor has available on any given day of the month."
+          tipCopy={tr("rightPanel.overlayTip")}
         />
       )}
 
@@ -500,7 +508,8 @@ const RightPanel = ({
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
               <Link2 className="h-5 w-5 text-primary" />
-              Share Project
+              
+              {t("rightPanel.shareProject")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -523,10 +532,12 @@ const RightPanel = ({
               }}
             >
               <Share2 className="mr-2 h-4 w-4" />
-              Share invite link
+              
+              {t("rightPanel.shareInviteLink")}
             </Button>
             <p className="text-xs text-muted-foreground">
-              Subcontractors enter this code under Connect to Project, or open the invite link you send them.
+              
+              {t("rightPanel.subcontractorsEnterThisCodeUnderConnect")}
             </p>
           </CardContent>
         </Card>
@@ -539,24 +550,24 @@ const RightPanel = ({
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
               <Users className="h-5 w-5 text-primary" />
-              {selectedProject === 'master' ? 'All Team Members' : 'Project Team'}
+              {selectedProject === 'master' ? t("rightPanel.allTeamMembers") : t("rightPanel.projectTeam")}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <Dialog open={manageTeamOpen} onOpenChange={setManageTeamOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" className="w-full">
-                  {selectedProject === 'master' ? `View All Team Members (${employees.length})` : `View Project Team (${employees.length})`}
+                  {selectedProject === 'master' ? t("rightPanel.viewAllTeamMembers", { length: employees.length }) : t("rightPanel.viewProjectTeam", { length: employees.length })}
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-lg max-h-[80vh]">
                 <DialogHeader>
-                  <DialogTitle>{selectedProject === 'master' ? 'All Team Members' : 'Project Team'}</DialogTitle>
+                  <DialogTitle>{selectedProject === 'master' ? t("rightPanel.allTeamMembers") : t("rightPanel.projectTeam")}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 pt-4">
                   <div className="divide-y divide-border rounded-lg border border-border bg-card max-h-[40vh] overflow-y-auto">
                     {employees.length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-6">No team members yet.</p>
+                      <p className="text-sm text-muted-foreground text-center py-6">{t("rightPanel.noTeamMembersYet")}</p>
                     )}
                     {employees.map((emp) => {
                       const initials = emp.name.split(' ').filter(Boolean).map(p => p[0]).slice(0, 2).join('').toUpperCase();
@@ -569,7 +580,7 @@ const RightPanel = ({
                             <div className="flex flex-col min-w-0 flex-1">
                               <span className="text-base font-semibold text-foreground truncate leading-tight">{emp.name}</span>
                               {emp.job_title && (
-                                <span className="text-sm text-muted-foreground truncate leading-tight mt-0.5">{emp.job_title}</span>
+                                <span className="text-sm text-muted-foreground truncate leading-tight mt-0.5">{jobTitleLabel(emp.job_title)}</span>
                               )}
                             </div>
                           </div>
@@ -580,7 +591,8 @@ const RightPanel = ({
                               className="text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0"
                               onClick={() => setEmployeeToUnassign(emp)}
                             >
-                              Remove
+                              
+                              {t("common.remove")}
                             </Button>
                           )}
                         </div>
@@ -598,7 +610,8 @@ const RightPanel = ({
                       }}
                     >
                       <UserPlus className="h-4 w-4 mr-2" />
-                      Add Team Members to Project
+                      
+                      {t("rightPanel.addTeamMembersToProject")}
                     </Button>
                   )}
                 </div>
@@ -609,7 +622,7 @@ const RightPanel = ({
               <Dialog open={addTeamMemberOpen} onOpenChange={setAddTeamMemberOpen}>
                 <DialogContent className="max-w-lg max-h-[80vh]">
                   <DialogHeader>
-                    <DialogTitle>Add Team Members to Project</DialogTitle>
+                    <DialogTitle>{t("rightPanel.addTeamMembersToProject")}</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4 pt-2">
                     {(() => {
@@ -620,7 +633,8 @@ const RightPanel = ({
                       if (available.length === 0) {
                         return (
                           <p className="text-sm text-muted-foreground text-center py-6">
-                            All team members are already assigned to this project.
+                            
+                            {t("rightPanel.allTeamMembersAreAlreadyAssigned")}
                           </p>
                         );
                       }
@@ -648,7 +662,7 @@ const RightPanel = ({
                                   <div className="flex flex-col min-w-0 flex-1">
                                     <span className="text-sm font-semibold text-foreground truncate">{emp.name}</span>
                                     {emp.job_title && (
-                                      <span className="text-xs text-muted-foreground truncate">{emp.job_title}</span>
+                                      <span className="text-xs text-muted-foreground truncate">{jobTitleLabel(emp.job_title)}</span>
                                     )}
                                   </div>
                                 </label>
@@ -678,8 +692,8 @@ const RightPanel = ({
                                   });
                                 if (error) throw error;
                                 toast({
-                                  title: 'Team members added',
-                                  description: `${rows.length} member${rows.length === 1 ? '' : 's'} added to this project.`,
+                                  title: t("rightPanel.teamMembersAdded"),
+                                  description: t(rows.length === 1 ? "rightPanel.membersAdded.one" : "rightPanel.membersAdded.other", { count: rows.length }),
                                 });
                                 setSelectedToAdd(new Set());
                                 await onTeamRefresh?.();
@@ -687,7 +701,7 @@ const RightPanel = ({
                               } catch (error: any) {
                                 toast({
                                   title: 'Error',
-                                  description: error.message || 'Failed to add team members.',
+                                  description: error.message || t("rightPanel.failedToAddTeamMembers"),
                                   variant: 'destructive',
                                 });
                               } finally {
@@ -698,10 +712,11 @@ const RightPanel = ({
                             {addingMembers ? (
                               <>
                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                Adding...
+                                
+                                {t("rightPanel.adding")}
                               </>
                             ) : (
-                              <>Add Selected ({selectedToAdd.size})</>
+                              <>{t("rightPanel.addSelected")}{selectedToAdd.size})</>
                             )}
                           </Button>
                         </>
@@ -720,16 +735,16 @@ const RightPanel = ({
       <AlertDialog open={!!employeeToUnassign} onOpenChange={(open) => !open && setEmployeeToUnassign(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove {employeeToUnassign?.name}?</AlertDialogTitle>
+            <AlertDialogTitle>{t("common.remove")}{" "}{employeeToUnassign?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
               {selectedProject === 'master'
-                ? `This will remove ${employeeToUnassign?.name || 'this employee'} from all projects and the master schedule. They will no longer appear as available for any project. Their employee profile will NOT be deleted.`
-                : `This will remove ${employeeToUnassign?.name || 'this employee'} from this project. They will no longer appear as available for this project. Their employee profile will NOT be deleted.`
+                ? t("rightPanel.thisWillRemoveFromAllProjects", { name: employeeToUnassign?.name || t("rightPanel.thisEmployee") })
+                : t("rightPanel.thisWillRemoveFromThisProject", { name: employeeToUnassign?.name || t("rightPanel.thisEmployee") })
               }
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={async () => {
@@ -741,7 +756,7 @@ const RightPanel = ({
                       .delete()
                       .eq('employee_id', employeeToUnassign.id);
                     if (error) throw error;
-                    toast({ title: "Employee removed", description: `${employeeToUnassign.name} has been removed from all projects.` });
+                    toast({ title: t("rightPanel.employeeRemoved"), description: t("rightPanel.hasBeenRemovedFromAllProjects", { name: employeeToUnassign.name }) });
                   } else {
                     const { error } = await supabase
                       .from('employee_project_assignments')
@@ -749,7 +764,7 @@ const RightPanel = ({
                       .eq('employee_id', employeeToUnassign.id)
                       .eq('project_id', selectedProject);
                     if (error) throw error;
-                    toast({ title: "Employee removed", description: `${employeeToUnassign.name} has been removed from this project.` });
+                    toast({ title: t("rightPanel.employeeRemoved"), description: t("rightPanel.hasBeenRemovedFromThisProject", { name: employeeToUnassign.name }) });
                   }
                   setEmployeeToUnassign(null);
                   onTeamRefresh?.();
@@ -758,7 +773,8 @@ const RightPanel = ({
                 }
               }}
             >
-              Remove
+              
+              {t("common.remove")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

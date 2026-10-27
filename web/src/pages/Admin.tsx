@@ -39,6 +39,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 /**
  * The SSAA Operator Dashboard (Luke's MOA view). Lovable's header tabs (Manage SSAA, Users,
@@ -55,6 +56,7 @@ type UserFilter = "all" | "operators" | "suspended" | "none";
 const matches = (q: string, ...fields: (string | null | undefined)[]) => !q || fields.some((f) => f?.toLowerCase().includes(q.toLowerCase()));
 
 export default function Admin() {
+  const { t } = useLanguage();
   const { user, isMOA, initializing, loading, signOut } = useAuth();
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
@@ -89,11 +91,11 @@ export default function Admin() {
       setUsers(u.users);
       setQueue(q.requests);
     } catch (err) {
-      toast({ title: "Could not load operator data", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("admin.couldNotLoadOperatorData"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setPageLoading(false);
     }
-  }, [toast]);
+  }, [toast, t]);
 
   useEffect(() => {
     if (!initializing && !loading && isMOA) void load();
@@ -131,16 +133,16 @@ export default function Admin() {
       await startViewAs(target);
     } catch (err) {
       setOpening(null);
-      toast({ title: "Couldn't open that account", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+      toast({ title: t("admin.couldnTOpenThatAccount"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     }
   }
 
   const tabs: { value: Tab; label: string; short: string; icon: typeof Users; dot?: boolean }[] = [
-    { value: "overview", label: "Overview", short: "Overview", icon: LayoutDashboard },
-    { value: "ssaa", label: "Manage SSAA", short: "Manage", icon: Shield, dot: queue.length > 0 },
-    { value: "users", label: "Users", short: "Users", icon: Users },
-    { value: "sub", label: "Subcontractor", short: "Subs", icon: HardHat },
-    { value: "gc", label: "General Contractor", short: "GCs", icon: Building2 },
+    { value: "overview", label: t("admin.overview"), short: "Overview", icon: LayoutDashboard },
+    { value: "ssaa", label: t("admin.manageSsaa"), short: "Manage", icon: Shield, dot: queue.length > 0 },
+    { value: "users", label: t("admin.users"), short: "Users", icon: Users },
+    { value: "sub", label: t("common.subcontractor"), short: "Subs", icon: HardHat },
+    { value: "gc", label: t("admin.generalContractor"), short: "GCs", icon: Building2 },
   ];
 
   const searchBox = (placeholder: string) => (
@@ -151,10 +153,10 @@ export default function Admin() {
   );
 
   const manageCards: { key: Exclude<Panel, null>; title: string; description: string; icon: typeof Mail; badge?: number }[] = [
-    { key: "correspondence", title: "Correspondence", description: "Manage email templates and notifications, and see everything sent", icon: Mail },
-    { key: "operators", title: "Operators", description: "Manage operator accounts and permissions", icon: UserCog },
-    { key: "cancellations", title: "Cancellation Requests", description: "Review and approve company account deletions", icon: Ban, badge: queue.length },
-    { key: "audit", title: "Audit Log", description: "Every change an operator has made", icon: History },
+    { key: "correspondence", title: t("admin.correspondence"), description: t("admin.manageEmailTemplatesAndNotificationsAnd"), icon: Mail },
+    { key: "operators", title: t("admin.operators"), description: t("admin.manageOperatorAccountsAndPermissions"), icon: UserCog },
+    { key: "cancellations", title: t("admin.cancellationRequests"), description: t("admin.reviewAndApproveCompanyAccountDeletions"), icon: Ban, badge: queue.length },
+    { key: "audit", title: t("admin.auditLog"), description: t("admin.everyChangeAnOperatorHasMade"), icon: History },
   ];
 
   return (
@@ -163,20 +165,20 @@ export default function Admin() {
         <header className="bg-primary text-primary-foreground shadow-md">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 lg:px-6">
             <div className="min-w-0">
-              <h1 className="truncate text-xl font-bold lg:text-2xl">SSAA Operator Dashboard</h1>
+              <h1 className="truncate text-xl font-bold lg:text-2xl">{t("admin.ssaaOperatorDashboard")}</h1>
               {me && <p className="truncate text-xs text-primary-foreground/80">{OPERATOR_LEVEL_LABEL[me.level]}</p>}
             </div>
             <div className="flex shrink-0 items-center gap-1 sm:gap-2">
               <span className="hidden text-sm text-primary-foreground/80 md:inline">{user?.email}</span>
               {user?.companyId && (
                 <Button variant="ghost" size="sm" asChild className="text-primary-foreground hover:bg-primary-foreground/10">
-                  <Link to="/dashboard" aria-label="My dashboard">
+                  <Link to="/dashboard" aria-label={t("admin.myDashboard")}>
                     <LayoutDashboard className="h-5 w-5 sm:mr-2 sm:h-4 sm:w-4" />
-                    <span className="hidden sm:inline">My dashboard</span>
+                    <span className="hidden sm:inline">{t("admin.myDashboard")}</span>
                   </Link>
                 </Button>
               )}
-              <Button variant="ghost" size="icon" aria-label="Sign out" className="text-primary-foreground hover:bg-primary-foreground/10" onClick={() => void signOut()}>
+              <Button variant="ghost" size="icon" aria-label={t("common.signOut")} className="text-primary-foreground hover:bg-primary-foreground/10" onClick={() => void signOut()}>
                 <LogOut className="h-5 w-5" />
               </Button>
             </div>
@@ -193,7 +195,7 @@ export default function Admin() {
                   <Icon className="h-4 w-4" />
                   <span className="sm:hidden">{short}</span>
                   <span className="hidden sm:inline">{label}</span>
-                  {dot && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-destructive" aria-label="Needs attention" />}
+                  {dot && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-destructive" aria-label={t("admin.needsAttention")} />}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -203,7 +205,7 @@ export default function Admin() {
         <main className="mx-auto max-w-6xl p-4 lg:px-6">
           {pageLoading ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+              <Loader2 className="h-4 w-4 animate-spin" /> {" "}{t("common.loading2")}
             </p>
           ) : (
             <>
@@ -225,8 +227,8 @@ export default function Admin() {
               {/* ---------- Manage SSAA (Lovable's ManageSSAAModal, as a page) ---------- */}
               <TabsContent value="ssaa" className="mt-0 space-y-4">
                 <div className="space-y-1">
-                  <h2 className="text-lg font-semibold">Manage SSAA</h2>
-                  <p className="text-sm text-muted-foreground">Platform administration tools</p>
+                  <h2 className="text-lg font-semibold">{t("admin.manageSsaa")}</h2>
+                  <p className="text-sm text-muted-foreground">{t("admin.platformAdministrationTools")}</p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   {manageCards.map((card) => (
@@ -256,28 +258,28 @@ export default function Admin() {
                       <CreditCard className="h-5 w-5" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-muted-foreground">Subscriptions</span>
-                      <span className="block text-sm text-muted-foreground">Plans and billing arrive with Stripe (not set up yet)</span>
+                      <span className="block font-medium text-muted-foreground">{t("admin.subscriptions")}</span>
+                      <span className="block text-sm text-muted-foreground">{t("admin.plansAndBillingArriveWithStripe")}</span>
                     </span>
                   </div>
                 </div>
-                {!canChange && <p className="text-sm text-muted-foreground">Your operator access is view only: you can look at everything here but not change it.</p>}
+                {!canChange && <p className="text-sm text-muted-foreground">{t("admin.yourOperatorAccessIsViewOnly")}</p>}
               </TabsContent>
 
               {/* ---------- Users ---------- */}
               <TabsContent value="users" className="mt-0 space-y-4">
                 <div className="space-y-1">
-                  <h2 className="text-lg font-semibold">All users ({users.length})</h2>
-                  <p className="text-sm text-muted-foreground">Open someone for their details and support actions, or view the app exactly as they see it.</p>
+                  <h2 className="text-lg font-semibold">{t("admin.allUsers")}{users.length})</h2>
+                  <p className="text-sm text-muted-foreground">{t("admin.openSomeoneForTheirDetailsAnd")}</p>
                 </div>
-                {searchBox("Search users by name, email or company…")}
-                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Show">
+                {searchBox(t("admin.searchUsers"))}
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("admin.show")}>
                   {(
                     [
-                      ["all", "Everyone"],
-                      ["operators", "Operators"],
-                      ["suspended", "Suspended"],
-                      ["none", "No company"],
+                      ["all", t("admin.everyone")],
+                      ["operators", t("admin.operators")],
+                      ["suspended", t("admin.suspended")],
+                      ["none", t("admin.noCompany")],
                     ] as [UserFilter, string][]
                   ).map(([value, label]) => (
                     <Button key={value} size="sm" variant={userFilter === value ? "default" : "outline"} className="h-8 rounded-full" onClick={() => setUserFilter(value)}>
@@ -286,19 +288,19 @@ export default function Admin() {
                   ))}
                 </div>
                 <ul className="divide-y rounded-md border bg-card">
-                  {visibleUsers.length === 0 && <li className="p-4 text-sm text-muted-foreground">No users found.</li>}
+                  {visibleUsers.length === 0 && <li className="p-4 text-sm text-muted-foreground">{t("admin.noUsersFound")}</li>}
                   {visibleUsers.map((u) => (
                     <li key={u.userId} className="flex items-center justify-between gap-3 px-3 py-2.5">
                       {/* Name and email get full lines; role and company share the third. */}
                       <button type="button" onClick={() => setOpenUser(u.userId)} className="min-w-0 flex-1 text-left">
                         <p className="truncate font-medium">
                           {u.fullName || u.email}
-                          {u.suspended && <span className="ml-1.5 text-xs font-normal text-destructive">Suspended</span>}
+                          {u.suspended && <span className="ml-1.5 text-xs font-normal text-destructive">{t("admin.suspended")}</span>}
                         </p>
                         <p className="truncate text-sm text-muted-foreground">{u.email}</p>
                         <div className="mt-1 flex min-w-0 items-center gap-2">
                           {u.isOperator && u.operatorLevel ? (
-                            <Badge className="shrink-0">{u.operatorLevel === "owner" ? "Owner" : u.operatorLevel === "view_only" ? "Operator (view)" : "Operator"}</Badge>
+                            <Badge className="shrink-0">{u.operatorLevel === "owner" ? t("admin.owner") : u.operatorLevel === "view_only" ? t("admin.operatorView") : t("admin.operator")}</Badge>
                           ) : null}
                           {u.permissionLevel && (
                             <Badge variant="outline" className="shrink-0">
@@ -306,7 +308,7 @@ export default function Admin() {
                             </Badge>
                           )}
                           <span className="truncate text-xs text-muted-foreground">
-                            {u.companyName ?? (u.isOperator ? "" : "No company")}
+                            {u.companyName ?? (u.isOperator ? "" : t("admin.noCompany"))}
                             {u.companyType && ` (${u.companyType.toUpperCase()})`}
                           </span>
                         </div>
@@ -319,7 +321,8 @@ export default function Admin() {
                         onClick={() => void viewAs({ userId: u.userId, name: u.fullName || u.email, email: u.email, companyName: u.companyName })}
                       >
                         {opening === u.userId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
-                        View as
+                        
+                        {t("admin.viewAs")}
                       </Button>
                     </li>
                   ))}
@@ -331,13 +334,13 @@ export default function Admin() {
                 <TabsContent key={type} value={type} className="mt-0 space-y-4">
                   <div className="space-y-1">
                     <h2 className="text-lg font-semibold">
-                      {type === "gc" ? "General contractors" : "Subcontractors"} ({companies.filter((c) => c.companyType === type).length})
+                      {type === "gc" ? t("admin.generalContractors") : t("admin.subcontractors")} ({companies.filter((c) => c.companyType === type).length})
                     </h2>
-                    <p className="text-sm text-muted-foreground">Open a company for its people, projects and requests, or see the app as its account holder.</p>
+                    <p className="text-sm text-muted-foreground">{t("admin.openACompanyForItsPeople")}</p>
                   </div>
-                  {searchBox("Search companies…")}
+                  {searchBox(t("admin.searchCompanies"))}
                   <ul className="divide-y rounded-md border bg-card">
-                    {visibleCompanies.length === 0 && <li className="p-4 text-sm text-muted-foreground">No companies found.</li>}
+                    {visibleCompanies.length === 0 && <li className="p-4 text-sm text-muted-foreground">{t("admin.noCompaniesFound")}</li>}
                     {visibleCompanies.map((c) => (
                       <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
                         <button type="button" onClick={() => setOpenCompany(c.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
@@ -345,7 +348,7 @@ export default function Admin() {
                           <span className="min-w-0">
                             <span className="block truncate font-medium">{c.name}</span>
                             <span className="block truncate text-sm text-muted-foreground">
-                              {c.members} member{c.members === 1 ? "" : "s"} · {c.projects} project{c.projects === 1 ? "" : "s"}
+                              {t(c.members === 1 ? "admin.members.one" : "admin.members.other", { count: c.members })} · {t(c.projects === 1 ? "admin.projects.one" : "admin.projects.other", { count: c.projects })}
                               {c.primaryHolder && ` · ${c.primaryHolder.fullName || c.primaryHolder.email}`}
                             </span>
                           </span>
@@ -365,7 +368,7 @@ export default function Admin() {
                           }
                         >
                           {opening === c.primaryHolder?.userId && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                          {c.primaryHolder ? "Open" : "No account holder"}
+                          {c.primaryHolder ? t("common.open") : t("admin.noAccountHolder")}
                         </Button>
                       </li>
                     ))}

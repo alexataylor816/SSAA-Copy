@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { NotifyChoice } from "@/lib/matrixApi";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 /**
  * The sub's "Notify General Contractors?" step before publishing (O10), from Luke's MatrixDraftBar.
@@ -17,6 +18,7 @@ export default function NotifyDialog({
   onCancel: () => void;
   onConfirm: (choice: NotifyChoice) => void;
 }) {
+  const { t } = useLanguage();
   const [gcEmail, setGcEmail] = useState(true);
   const [gcPush, setGcPush] = useState(true);
   const [personnelEmail, setPersonnelEmail] = useState(false);
@@ -42,28 +44,30 @@ export default function NotifyDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Notify General Contractors?</DialogTitle>
+          <DialogTitle>{t("notifyDialog.notifyGeneralContractors")}</DialogTitle>
           <DialogDescription>
-            You have newly assigned or moved employees. Do you want to notify the General Contractor(s) of these changes?
+            
+            {t("notifyDialog.youHaveNewlyAssignedOrMoved")}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
-          {box("notify-gc-email", "Email", gcEmail, setGcEmail)}
-          {box("notify-gc-push", "Push notification and message", gcPush, setGcPush)}
+          {box("notify-gc-email", t("common.email"), gcEmail, setGcEmail)}
+          {box("notify-gc-push", t("common.pushAndMessage"), gcPush, setGcPush)}
         </div>
         <div className="space-y-3 border-t py-2">
           <div>
-            <p className="text-base font-semibold">Notify Personnel or Wait for GC Confirmation?</p>
-            <p className="text-sm text-muted-foreground">Leave both unchecked to wait for GC confirmation.</p>
+            <p className="text-base font-semibold">{t("notifyDialog.notifyPersonnelOrWaitForGc")}</p>
+            <p className="text-sm text-muted-foreground">{t("notifyDialog.leaveBothUncheckedToWaitFor")}</p>
           </div>
-          {box("notify-personnel-email", "Email", personnelEmail, setPersonnelEmail)}
-          {box("notify-personnel-push", "Push notification and message", personnelPush, setPersonnelPush)}
+          {box("notify-personnel-email", t("common.email"), personnelEmail, setPersonnelEmail)}
+          {box("notify-personnel-push", t("common.pushAndMessage"), personnelPush, setPersonnelPush)}
         </div>
         <DialogFooter className="flex flex-col gap-2 sm:flex-row">
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            
+            {t("common.cancel")}
           </Button>
-          <Button onClick={() => onConfirm({ gcEmail, gcPush, personnelEmail, personnelPush })}>Edit Schedule</Button>
+          <Button onClick={() => onConfirm({ gcEmail, gcPush, personnelEmail, personnelPush })}>{t("notifyDialog.editSchedule")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

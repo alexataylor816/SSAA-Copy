@@ -29,6 +29,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Shield, Trash2, Users } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 type CompanyType = "gc" | "sub";
 type PermissionLevel = "basic" | "standard" | "level_1" | "partial" | "full" | "account_holder";
@@ -49,46 +51,38 @@ interface TeamMember {
 const DESCRIPTIONS: Record<CompanyType, Record<string, { title: string; description: string }>> = {
   gc: {
     account_holder: {
-      title: "Main Company Account Holder",
-      description:
-        "Full access including billing, subscriptions, and all company settings. Can manage team profiles and projects. Can only be transferred by the current account holder.",
+      get title() { return tr("teamProfilesDialog.mainCompanyAccountHolder"); },
+      get description() { return tr("teamProfilesDialog.fullAccessIncludingBillingSubscriptionsA"); },
     },
     full: {
-      title: "Level 2 Admin",
-      description:
-        "Can manage team profiles, projects, schedules, and requests. Cannot access billing or company info.",
+      get title() { return tr("teamProfilesDialog.level2Admin"); },
+      get description() { return tr("teamProfilesDialog.canManageTeamProfilesProjectsSchedules"); },
     },
     partial: {
-      title: "Level 1 Admin (Partial)",
-      description:
-        "Can manage schedules, view team, manage projects. Cannot change billing or company info. Cannot view Master Schedule.",
+      get title() { return tr("teamProfilesDialog.level1AdminPartial"); },
+      get description() { return tr("teamProfilesDialog.canManageSchedulesViewTeamManage"); },
     },
   },
   sub: {
     account_holder: {
-      title: "Main Company Account Holder",
-      description:
-        "Full access including billing, subscriptions, and all company settings. Can manage team profiles and projects. Can only be transferred by the current account holder.",
+      get title() { return tr("teamProfilesDialog.mainCompanyAccountHolder"); },
+      get description() { return tr("teamProfilesDialog.fullAccessIncludingBillingSubscriptionsA"); },
     },
     full: {
-      title: "Level 4 Admin",
-      description:
-        "Can manage team profiles, projects, schedules, and requests. Cannot access billing or company info.",
+      get title() { return tr("teamProfilesDialog.level4Admin"); },
+      get description() { return tr("teamProfilesDialog.canManageTeamProfilesProjectsSchedules"); },
     },
     partial: {
-      title: "Level 3 Admin (Partial)",
-      description:
-        "Can manage schedules, view team, manage projects. Cannot change billing or company info. Cannot view Master Schedule.",
+      get title() { return tr("teamProfilesDialog.level3AdminPartial"); },
+      get description() { return tr("teamProfilesDialog.canManageSchedulesViewTeamManage"); },
     },
     level_1: {
-      title: "Level 2 (Foreman Permissions)",
-      description:
-        "Can view all employees' availability on the projects they are assigned to (read-only). Can view schedules and assigned tasks. Cannot edit availability.",
+      get title() { return tr("teamProfilesDialog.level2ForemanPermissions"); },
+      get description() { return tr("teamProfilesDialog.canViewAllEmployeesAvailabilityOn"); },
     },
     basic: {
-      title: "Level 1 (Basic Permissions)",
-      description:
-        "Can only view their own availability. View schedules and assigned tasks. Cannot edit or change any availability.",
+      get title() { return tr("teamProfilesDialog.level1BasicPermissions"); },
+      get description() { return tr("teamProfilesDialog.canOnlyViewTheirOwnAvailability"); },
     },
   },
 };
@@ -125,6 +119,7 @@ export default function TeamProfilesDialog({
   canManage,
   onChanged,
 }: Props) {
+  const { t } = useLanguage();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -140,7 +135,7 @@ export default function TeamProfilesDialog({
       const res = await api.get<{ members: TeamMember[] }>(`/companies/${companyId}/members`);
       setMembers(res.members);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load team members.");
+      setError(err instanceof Error ? err.message : tr("teamProfilesDialog.couldNotLoadMembers"));
     } finally {
       setLoading(false);
     }
@@ -158,7 +153,7 @@ export default function TeamProfilesDialog({
       await load();
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update that member.");
+      setError(err instanceof Error ? err.message : tr("teamProfilesDialog.couldNotUpdateMember"));
     } finally {
       setBusy(false);
     }
@@ -177,7 +172,7 @@ export default function TeamProfilesDialog({
       await load();
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not transfer holdership.");
+      setError(err instanceof Error ? err.message : tr("teamProfilesDialog.couldNotTransfer"));
     } finally {
       setBusy(false);
     }
@@ -193,7 +188,7 @@ export default function TeamProfilesDialog({
       await load();
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not remove that member.");
+      setError(err instanceof Error ? err.message : tr("teamProfilesDialog.couldNotRemoveMember"));
     } finally {
       setBusy(false);
     }
@@ -209,10 +204,12 @@ export default function TeamProfilesDialog({
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
-              Manage Team Profiles
+              
+              {t("teamProfilesDialog.manageTeamProfiles")}
             </DialogTitle>
             <DialogDescription>
-              What each level can do, and who on your team holds which level.
+              
+              {t("teamProfilesDialog.whatEachLevelCanDoAnd")}
             </DialogDescription>
           </DialogHeader>
 
@@ -220,7 +217,7 @@ export default function TeamProfilesDialog({
             <div className="space-y-6 pb-4">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Permission Levels</CardTitle>
+                  <CardTitle className="text-base">{t("teamProfilesDialog.permissionLevels")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {visibleLevels(companyType).map((level) => (
@@ -234,11 +231,11 @@ export default function TeamProfilesDialog({
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Team Members</CardTitle>
+                  <CardTitle className="text-base">{t("teamProfilesDialog.teamMembers")}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {loading ? (
-                    <p className="text-sm text-muted-foreground">Loading...</p>
+                    <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
                   ) : (
                     <ul className="divide-y">
                       {members.map((member) => {
@@ -250,7 +247,8 @@ export default function TeamProfilesDialog({
                                 {member.fullName || member.email}
                                 {isSelf && (
                                   <Badge variant="secondary" className="ml-2">
-                                    You
+                                    
+                                    {t("teamProfilesDialog.you")}
                                   </Badge>
                                 )}
                               </p>
@@ -276,7 +274,7 @@ export default function TeamProfilesDialog({
                                 </Select>
                               ) : (
                                 <Badge variant="outline">
-                                  {member.isCompanyCreator ? "Creator" : (explain[member.permissionLevel]?.title ?? member.permissionLevel)}
+                                  {member.isCompanyCreator ? t("teamProfilesDialog.creator") : (explain[member.permissionLevel]?.title ?? member.permissionLevel)}
                                 </Badge>
                               )}
                               {canManage && !isSelf && !member.isCompanyCreator && (
@@ -285,7 +283,7 @@ export default function TeamProfilesDialog({
                                     variant="ghost"
                                     size="sm"
                                     disabled={busy}
-                                    title="Transfer account holdership to this member"
+                                    title={t("teamProfilesDialog.transferAccountHoldershipToThisMember")}
                                     onClick={() => {
                                       setTransferTarget(member);
                                       setDemoteTo("full");
@@ -297,7 +295,7 @@ export default function TeamProfilesDialog({
                                     variant="ghost"
                                     size="sm"
                                     disabled={busy}
-                                    title="Remove this member"
+                                    title={t("teamProfilesDialog.removeThisMember")}
                                     onClick={() => setRemoveTarget(member)}
                                   >
                                     <Trash2 className="h-4 w-4" />
@@ -325,15 +323,15 @@ export default function TeamProfilesDialog({
       <AlertDialog open={transferTarget !== null} onOpenChange={(isOpen) => !isOpen && setTransferTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Transfer Main Company Account Holder Status?</AlertDialogTitle>
+            <AlertDialogTitle>{t("teamProfilesDialog.transferMainCompanyAccountHolderStatus")}</AlertDialogTitle>
             <AlertDialogDescription>
               {transferTarget
-                ? `Give Main Company Account Holder status to ${transferTarget.fullName || transferTarget.email}? You will step down to ${demoteTo.replace("_", " ")} in the same move — unlike the original app, holdership here moves rather than duplicates.`
+                ? t("teamProfilesDialog.giveMainCompanyAccountHolderStatus", { email: transferTarget.fullName || transferTarget.email, replace_: demoteTo.replace("_", " ") })
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex items-center gap-2 py-2">
-            <span className="text-sm text-muted-foreground">You become:</span>
+            <span className="text-sm text-muted-foreground">{t("teamProfilesDialog.youBecome")}</span>
             <Select value={demoteTo} onValueChange={(v) => setDemoteTo(v as PermissionLevel)}>
               <SelectTrigger className="w-44">
                 <SelectValue />
@@ -348,9 +346,10 @@ export default function TeamProfilesDialog({
             </Select>
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={() => void confirmTransfer()} disabled={busy}>
-              Transfer
+              
+              {t("teamProfilesDialog.transfer")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -360,21 +359,23 @@ export default function TeamProfilesDialog({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Remove {removeTarget?.fullName || removeTarget?.email} from the team?
+              
+              {t("common.remove")}{" "}{removeTarget?.fullName || removeTarget?.email} {" "}{t("teamProfilesDialog.fromTheTeam")}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Their login keeps working but will belong to no company, and their roster entries become unlinked.
-              Their availability history is preserved. This cannot be undone except by re-inviting them.
+              
+              {t("teamProfilesDialog.theirLoginKeepsWorkingButWill")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => void confirmRemove()}
               disabled={busy}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Remove
+              
+              {t("common.remove")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Bold, Code2, Heading2, Italic, Link2, List, ListOrdered, Pilcrow, Plus, Underline } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 /**
  * The Correspondence email editor (Lovable used TipTap). Visual mode edits the email as it will look,
@@ -16,6 +18,7 @@ export default function EmailEditor({
   onChange: (html: string) => void;
   placeholders: string[];
 }) {
+  const { t } = useLanguage();
   const [mode, setMode] = useState<"visual" | "html">("visual");
   const box = useRef<HTMLDivElement>(null);
   const source = useRef<HTMLTextAreaElement>(null);
@@ -87,10 +90,10 @@ export default function EmailEditor({
         <span className="mx-1 h-5 w-px bg-border" />
         {tool("Heading", Heading2, () => command("formatBlock", "h2"))}
         {tool("Paragraph", Pilcrow, () => command("formatBlock", "p"))}
-        {tool("Bulleted list", List, () => command("insertUnorderedList"))}
-        {tool("Numbered list", ListOrdered, () => command("insertOrderedList"))}
+        {tool(tr("emailEditor.bulletedList"), List, () => command("insertUnorderedList"))}
+        {tool(tr("emailEditor.numberedList"), ListOrdered, () => command("insertOrderedList"))}
         {tool("Link", Link2, () => {
-          const url = window.prompt("Link address (https://…)");
+          const url = window.prompt(tr("emailEditor.linkAddress"));
           if (url) command("createLink", url);
         })}
         <div className="ml-auto flex items-center">
@@ -115,7 +118,8 @@ export default function EmailEditor({
         <div className="flex flex-wrap items-center gap-1.5 border-b px-2 py-2">
           <span className="mr-1 flex items-center gap-1 text-xs text-muted-foreground">
             <Plus className="h-3 w-3" />
-            Insert:
+            
+            {t("emailEditor.insert")}
           </span>
           {placeholders.map((p) => (
             <button
@@ -140,7 +144,7 @@ export default function EmailEditor({
           onBlur={sync}
           role="textbox"
           aria-multiline="true"
-          aria-label="Email body"
+          aria-label={t("emailEditor.emailBody")}
           className="min-h-[180px] max-h-[360px] overflow-y-auto bg-white px-4 py-3 text-sm text-neutral-900 outline-none [&_a]:text-blue-700 [&_a]:underline [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-2 [&_ul]:list-disc"
         />
       ) : (
@@ -150,7 +154,7 @@ export default function EmailEditor({
           onChange={(e) => onChange(e.target.value)}
           rows={12}
           spellCheck={false}
-          aria-label="Email HTML"
+          aria-label={t("emailEditor.emailHtml")}
           className="block w-full resize-y bg-background px-3 py-2 font-mono text-xs outline-none"
         />
       )}

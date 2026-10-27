@@ -7,8 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import AuthLayout from "@/components/AuthLayout";
 import { Loader2 } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 export default function ForgotPassword() {
+  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
@@ -31,28 +33,29 @@ export default function ForgotPassword() {
     <AuthLayout>
       <Card className="w-full max-w-md border-primary/20 shadow-lg">
         <CardHeader className="text-center pb-2">
-          <CardTitle className="text-2xl font-bold">Reset your password</CardTitle>
+          <CardTitle className="text-2xl font-bold">{t("forgotPassword.resetYourPassword")}</CardTitle>
         </CardHeader>
         <CardContent>
           {sent ? (
             <div className="space-y-4 text-center">
               <p className="text-sm text-muted-foreground">
-                If that email is registered, we&apos;ve sent a reset code. Check your inbox.
+                
+                {t("forgotPassword.ifThatEmailIsRegisteredWe")}
               </p>
               {devCode && (
                 <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                  Development only: the email couldn&apos;t be sent, so here is the code:{" "}
+                  {t("forgotPassword.devOnlyCode")}{" "}
                   <span className="font-mono">{devCode}</span>
                 </p>
               )}
               <Button asChild variant="outline" className="w-full">
-                <Link to="/reset-password">Enter the code</Link>
+                <Link to="/reset-password">{t("forgotPassword.enterTheCode")}</Link>
               </Button>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t("common.email")}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -64,14 +67,16 @@ export default function ForgotPassword() {
               </div>
               <Button type="submit" className="w-full" disabled={submitting}>
                 {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Send reset code
+                
+                {t("forgotPassword.sendResetCode")}
               </Button>
             </form>
           )}
 
           <div className="mt-6 text-center">
             <Link to="/signin" className="text-sm text-muted-foreground hover:text-primary transition-colors">
-              Back to sign in
+              
+              {t("common.backToSignIn")}
             </Link>
           </div>
         </CardContent>

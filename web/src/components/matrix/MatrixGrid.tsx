@@ -10,6 +10,7 @@ import { DAY_COL, PROJECT_COL, cardDragId, densityFor } from "./helpers";
 import { isLockedDate } from "./canDrop";
 import { cellKey, type MatrixModel, type Placement } from "./useMatrixDrafts";
 import { dateLocale } from "@/i18n/runtime";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 /**
  * Projects down the side, days across the top (O5), from the desktop table in Luke's ResourceMatrix.
@@ -81,6 +82,7 @@ export default function MatrixGrid({
   onRemove,
   onScroll,
 }: Props) {
+  const { t } = useLanguage();
   const [collapsedSubs, setCollapsedSubs] = useState<Set<string>>(new Set());
   // Slide through weeks with a normal mouse wheel too: when the grid has nothing to scroll vertically,
   // turn vertical wheel movement into sideways movement. (Native listener: React's wheel events are passive.)
@@ -150,7 +152,7 @@ export default function MatrixGrid({
     return (
       <EmployeeCard
         key={p.key}
-        name={emp?.name ?? "Unknown"}
+        name={emp?.name ?? t("matrixGrid.unknown")}
         jobTitle={emp?.jobTitle}
         density={densityFor(count)}
         look={p.status}
@@ -195,7 +197,7 @@ export default function MatrixGrid({
                 className="flex w-full items-center gap-1 px-0.5 text-left text-[9px] font-semibold uppercase text-muted-foreground hover:text-foreground"
               >
                 {closed ? <ChevronRight className="h-2.5 w-2.5 shrink-0" /> : <ChevronDown className="h-2.5 w-2.5 shrink-0" />}
-                <span className="truncate">{crewName.get(subId) ?? "Subcontractor"}</span>
+                <span className="truncate">{crewName.get(subId) ?? t("common.subcontractor")}</span>
                 {closed && <span className="ml-auto font-normal normal-case">({items.length})</span>}
               </button>
               {!closed && <div className={wrap}>{items.map((p) => card(p, list.length))}</div>}
@@ -216,10 +218,11 @@ export default function MatrixGrid({
               style={{ minWidth: PROJECT_COL, width: PROJECT_COL, maxWidth: PROJECT_COL }}
             >
               <div className="flex flex-col gap-1">
-                <span>Projects</span>
+                <span>{t("common.projects")}</span>
                 <label className="flex cursor-pointer items-center gap-1 text-[10px] font-normal">
-                  <Checkbox checked={overlay} onCheckedChange={(v) => onToggleOverlay(!!v)} className="h-3 w-3" aria-label="Schedule Overlay" />
-                  Schedule Overlay
+                  <Checkbox checked={overlay} onCheckedChange={(v) => onToggleOverlay(!!v)} className="h-3 w-3" aria-label={t("matrixGrid.scheduleOverlay")} />
+                  
+                  {t("matrixGrid.scheduleOverlay")}
                 </label>
               </div>
             </th>
@@ -235,7 +238,7 @@ export default function MatrixGrid({
                   style={{ minWidth: COL, width: COL }}
                   data-day-header={date}
                   aria-selected={selected}
-                  title={copying ? "Paste the copied schedule here" : "Show this day in the side panel"}
+                  title={copying ? t("matrixGrid.pasteTheCopiedScheduleHere") : t("matrixGrid.showThisDayInTheSide")}
                   className={`cursor-pointer select-none border px-2 py-2 text-center text-xs font-medium transition-colors hover:bg-primary/15 ${
                     selected
                       ? "bg-primary/20 text-primary ring-2 ring-inset ring-primary/40"
@@ -247,7 +250,7 @@ export default function MatrixGrid({
                   } ${copying ? "outline-dashed outline-1 -outline-offset-4 outline-primary/50" : ""}`}
                 >
                   <div className="flex items-center justify-center gap-1 font-semibold">
-                    {locked && <Lock className="h-3 w-3" aria-label="Locked" />}
+                    {locked && <Lock className="h-3 w-3" aria-label={t("matrixGrid.locked")} />}
                     {weekday}
                   </div>
                   <div className="text-[10px]">{day}</div>
@@ -278,7 +281,7 @@ export default function MatrixGrid({
                     <button
                       type="button"
                       aria-expanded={!closed}
-                      aria-label={closed ? `Expand ${project.name}` : `Collapse ${project.name}`}
+                      aria-label={closed ? t("matrixGrid.expand", { name: project.name }) : t("matrixGrid.collapse", { name: project.name })}
                       onClick={() => onToggleProject(project.id)}
                       className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
@@ -336,7 +339,8 @@ export default function MatrixGrid({
           {data.projects.length === 0 && (
             <tr>
               <td colSpan={days.length + 1} className="py-12 text-center text-muted-foreground">
-                No projects to schedule yet.
+                
+                {t("matrixGrid.noProjectsToScheduleYet")}
               </td>
             </tr>
           )}

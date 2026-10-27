@@ -2,11 +2,13 @@ import type { ReactNode } from "react";
 import { Building2, Calendar, Users } from "lucide-react";
 import heroImage from "@/assets/hero-construction.jpg";
 import LanguageToggle from "@/components/LanguageToggle";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 const features = [
-  { icon: Calendar, label: "Smart Scheduling" },
-  { icon: Users, label: "Team Management" },
-  { icon: Building2, label: "Project Tracking" },
+  { icon: Calendar, get label() { return tr("authLayout.smartScheduling"); } },
+  { icon: Users, get label() { return tr("authLayout.teamManagement"); } },
+  { icon: Building2, get label() { return tr("authLayout.projectTracking"); } },
 ];
 
 /**
@@ -16,6 +18,7 @@ const features = [
  * invite banner lives there; everything else funnels through here.
  */
 export default function AuthLayout({ children, inviteNote }: { children: ReactNode; inviteNote?: string }) {
+  const { t } = useLanguage();
   return (
     <div className="relative min-h-dvh flex flex-col lg:flex-row">
       <LanguageToggle tone="onPrimary" className="absolute right-3 top-3 z-20 lg:hidden" />
@@ -32,7 +35,8 @@ export default function AuthLayout({ children, inviteNote }: { children: ReactNo
             {"Schedule Someone,\nAnytime, Anywhere"}
           </p>
           <p className="hidden lg:block text-lg text-primary-foreground/80 mb-8">
-            The complete construction scheduling platform for General Contractors and Subcontractors.
+            
+            {t("authLayout.theCompleteConstructionSchedulingPlatfor")}
           </p>
 
           {inviteNote && (

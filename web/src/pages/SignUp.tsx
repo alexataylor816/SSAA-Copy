@@ -11,8 +11,11 @@ import AuthLayout from "@/components/AuthLayout";
 import { peekNext } from "@/lib/share";
 import GoogleSignInButton, { googleSignInEnabled } from "@/components/GoogleSignInButton";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 export default function SignUp() {
+  const { t } = useLanguage();
   const [params] = useSearchParams();
   // A link like /signup?invite=<companyId> skips onboarding and sends a join
   // request to that company instead, pending the account holder's approval.
@@ -31,8 +34,8 @@ export default function SignUp() {
     event.preventDefault();
     setError(null);
 
-    if (!fullName.trim()) return setError("Full name is required.");
-    if (password.length < 6) return setError("Password must be at least 6 characters.");
+    if (!fullName.trim()) return setError(tr("signUp.fullNameRequired"));
+    if (password.length < 6) return setError(tr("common.passwordMin6"));
 
     setSubmitting(true);
     try {
@@ -46,7 +49,7 @@ export default function SignUp() {
         navigate(peekNext() ?? "/onboarding");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create that account.");
+      setError(err instanceof Error ? err.message : tr("auth.couldNotCreateAccount"));
     } finally {
       setSubmitting(false);
     }
@@ -68,41 +71,42 @@ export default function SignUp() {
         navigate(peekNext() ?? "/onboarding");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not continue with Google.");
+      setError(err instanceof Error ? err.message : tr("signUp.couldNotContinueGoogle"));
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <AuthLayout inviteNote={inviteCompanyId ? "You've been invited to join a company on SSAA." : undefined}>
+    <AuthLayout inviteNote={inviteCompanyId ? t("signUp.youVeBeenInvitedToJoin") : undefined}>
       <Card className="w-full max-w-md border-primary/20 shadow-lg">
         <CardHeader className="text-center pb-2">
-          <CardTitle className="text-2xl font-bold">Create your account</CardTitle>
+          <CardTitle className="text-2xl font-bold">{t("signUp.createYourAccount")}</CardTitle>
           <p className="text-muted-foreground text-sm mt-1">
-            {inviteCompanyId ? "You're joining an existing company" : "Start by setting up your company"}
+            {inviteCompanyId ? t("signUp.youReJoiningAnExistingCompany") : t("signUp.startBySettingUpYourCompany")}
           </p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="fullName">Full name</Label>
-              <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" required />
+              <Label htmlFor="fullName">{t("signUp.fullName")}</Label>
+              <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder={t("signUp.johnSmith")} required />
             </div>
 
             {!inviteCompanyId && (
               <p className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                After creating your account, you&apos;ll set up your company or join an existing one.
+                
+                {t("signUp.afterCreatingYourAccountYouLl")}
               </p>
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("common.email")}</Label>
               <Input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("signUp.password")}</Label>
               <div className="relative">
                 <Input
                   id="password"
@@ -117,7 +121,7 @@ export default function SignUp() {
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? t("signUp.hidePassword") : t("signUp.showPassword")}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -132,7 +136,8 @@ export default function SignUp() {
 
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create account
+              
+              {t("signUp.createAccount")}
             </Button>
 
             {googleSignInEnabled && (
@@ -155,7 +160,8 @@ export default function SignUp() {
 
           <div className="mt-6 text-center">
             <Link to="/signin" className="text-sm font-medium text-primary hover:text-primary/80">
-              Already have an account? Sign in
+              
+              {t("signUp.alreadyHaveAnAccountSignIn")}
             </Link>
           </div>
         </CardContent>

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { dateFnsLocale } from "@/i18n/runtime";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 /** Port of Lovable's NotificationBell. Push-notification opt-in is not ported. */
 
@@ -23,6 +24,7 @@ interface Notification {
 }
 
 export default function NotificationBell() {
+  const { t } = useLanguage();
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const navigate = useNavigate();
@@ -67,7 +69,7 @@ export default function NotificationBell() {
           variant="ghost"
           size="sm"
           className="relative h-10 w-10 p-0 text-primary-foreground hover:bg-primary-foreground/10"
-          aria-label="Notifications"
+          aria-label={t("notificationBell.notifications")}
         >
           <Bell className="h-5 w-5" />
           {unread > 0 && (
@@ -79,11 +81,11 @@ export default function NotificationBell() {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[min(20rem,calc(100vw-1rem))] bg-card p-0">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="text-sm font-semibold">Notifications</span>
+          <span className="text-sm font-semibold">{t("notificationBell.notifications")}</span>
         </div>
         <ScrollArea className="max-h-80">
           {items.length === 0 ? (
-            <div className="px-3 py-8 text-center text-sm text-muted-foreground">No notifications yet</div>
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">{t("notificationBell.noNotificationsYet")}</div>
           ) : (
             <div className="divide-y">
               {items.map((item) => (
@@ -95,7 +97,7 @@ export default function NotificationBell() {
                     if (item.link) navigate(item.link);
                   }}
                 >
-                  {!item.readAt && <span className="absolute left-2.5 top-[1.05rem] h-2 w-2 rounded-full bg-primary" aria-label="Unread" />}
+                  {!item.readAt && <span className="absolute left-2.5 top-[1.05rem] h-2 w-2 rounded-full bg-primary" aria-label={t("notificationBell.unread")} />}
                   <div className="truncate text-sm font-medium">{item.title}</div>
                   {item.body && (
                     <div className="line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">{item.body}</div>
