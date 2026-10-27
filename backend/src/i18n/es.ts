@@ -194,6 +194,9 @@ export const ES: Record<string, string> = {
   "You can't message yourself.": "No puede enviarse mensajes a usted mismo.",
   "You can only message people in your company or on a shared project.": "Solo puede enviar mensajes a personas de su empresa o de un proyecto compartido.",
   "You do not have permission to do that.": "No tiene permiso para hacer eso.",
+  "Message not found.": "No se encontró el mensaje.",
+  "Translation isn't set up on this server yet.": "La traducción aún no está configurada en este servidor.",
+  "Couldn't translate that message. Try again in a moment.": "No se pudo traducir ese mensaje. Inténtelo de nuevo en un momento.",
 
   // ---- AI schedule helper
   "Reading schedules needs the AI helper, which isn't set up on this server yet.": "Para leer programas se necesita el asistente de IA, que aún no está configurado en este servidor.",

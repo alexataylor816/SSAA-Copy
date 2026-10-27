@@ -120,3 +120,68 @@ describe("Spanish: the AI helper recognises Spanish task names", async () => {
     expect(matchTaskToTrade("Plumbing rough-in").trade).toBe("Plumbing");
   });
 });
+
+describe("Translate button on chat messages", async () => {
+  const { setTranslatorForTests, setTranslationConfiguredForTests } = await import("../src/messaging/translate.js");
+
+  async function projectChat() {
+    const gc = await signUp("tgc", "Greg GC");
+    await company(gc.token, "Translate GC", "gc");
+    const project = await request(server).post("/projects").set(authed(gc.token)).send({ name: "Bridge Job" });
+    const sub = await signUp("tsub", "Steve Sub");
+    await company(sub.token, "Translate Sub", "sub");
+    await setLanguage(sub.token, "es");
+    await request(server).post("/projects/connect").set(authed(sub.token)).send({ code: project.body.connectionCode });
+    const convs = await request(server).get("/conversations").set(authed(gc.token));
+    const conv = (convs.body.conversations as { id: string; projectId: string | null }[]).find((c) => c.projectId === project.body.id)!;
+    const sent = await request(server).post(`/conversations/${conv.id}/messages`).set(authed(gc.token)).send({ body: "Can your crew come in at 7?" });
+    return { gc, sub, messageId: sent.body.message.id as string };
+  }
+
+  it("says so when the server has no AI key", async () => {
+    setTranslationConfiguredForTests(() => false);
+    const { sub, messageId } = await projectChat();
+    const res = await request(server).post(`/messages/${messageId}/translate`).set(authed(sub.token)).set("Accept-Language", "es");
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("La traducción aún no está configurada en este servidor.");
+    expect((await request(server).get("/messages/translation").set(authed(sub.token))).body.available).toBe(false);
+    setTranslationConfiguredForTests(null);
+  });
+
+  it("translates into the reader's language once, then reuses it", async () => {
+    let calls = 0;
+    setTranslationConfiguredForTests(() => true);
+    setTranslatorForTests(async (text, to) => {
+      calls++;
+      return to === "es" ? "¿Puede venir su cuadrilla a las 7?" : text;
+    });
+    const { sub, gc, messageId } = await projectChat();
+
+    const first = await request(server).post(`/messages/${messageId}/translate`).set(authed(sub.token));
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ lang: "es", body: "¿Puede venir su cuadrilla a las 7?", cached: false });
+    const again = await request(server).post(`/messages/${messageId}/translate`).set(authed(sub.token));
+    expect(again.body).toMatchObject({ body: "¿Puede venir su cuadrilla a las 7?", cached: true });
+    expect(calls).toBe(1);
+
+    // an English reader can ask for Spanish explicitly
+    const forced = await request(server).post(`/messages/${messageId}/translate`).set(authed(gc.token)).send({ to: "es" });
+    expect(forced.body.cached).toBe(true);
+    const bad = await request(server).post(`/messages/${messageId}/translate`).set(authed(gc.token)).send({ to: "fr" });
+    expect(bad.status).toBe(400);
+
+    setTranslatorForTests(null);
+    setTranslationConfiguredForTests(null);
+  });
+
+  it("only people in the chat can translate its messages", async () => {
+    setTranslationConfiguredForTests(() => true);
+    setTranslatorForTests(async () => "x");
+    const { messageId } = await projectChat();
+    const stranger = await signUp("stranger");
+    const res = await request(server).post(`/messages/${messageId}/translate`).set(authed(stranger.token));
+    expect(res.status).toBe(404);
+    setTranslatorForTests(null);
+    setTranslationConfiguredForTests(null);
+  });
+});

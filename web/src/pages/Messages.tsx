@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { format, isSameDay, isToday, isYesterday, differenceInCalendarDays } from "date-fns";
-import { ArrowLeft, Building2, ChevronDown, Search, Send, SquarePen, UserPlus, Users } from "lucide-react";
+import { ArrowLeft, Building2, ChevronDown, Languages, Search, Send, SquarePen, UserPlus, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   messagingApi,
@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatDate, formatTime, tr } from "@/i18n/runtime";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useMessageTranslation } from "@/hooks/useMessageTranslation";
 
 /**
  * Messages: a Projects / People / Group Chats picker at the top of the list
@@ -89,6 +90,15 @@ function Avatar({
       {initialsOf(name)}
     </span>
   );
+}
+
+/** The two automatic chat lines the server writes in English, shown in the reader's language. */
+function systemText(body: string, t: (key: string, vars?: Record<string, string>) => string): string {
+  const created = body.match(/^(.+) created the group "(.+)"$/);
+  if (created) return t("messages.systemCreatedGroup", { name: created[1], group: created[2] });
+  const added = body.match(/^(.+) added (.+)$/);
+  if (added) return t("messages.systemAdded", { name: added[1], other: added[2] });
+  return body;
 }
 
 /** Teams-style list time: 2:15 PM today, "Yesterday", weekday this week, else Oct 12. */
@@ -275,6 +285,7 @@ function Thread({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const translation = useMessageTranslation();
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -355,7 +366,7 @@ function Thread({
               return (
                 <div key={m.id}>
                   {separator}
-                  <p className="py-1 text-center text-xs text-muted-foreground">{m.body}</p>
+                  <p className="py-1 text-center text-xs text-muted-foreground">{systemText(m.body, t)}</p>
                 </div>
               );
             }
@@ -397,7 +408,26 @@ function Thread({
                         <span className="text-muted-foreground">{formatTime(at)}</span>
                       </div>
                     )}
-                    <div className="whitespace-pre-wrap break-words text-sm">{m.body}</div>
+                    <div className="whitespace-pre-wrap break-words text-sm">{translation.shown(m.id) ?? m.body}</div>
+                    {translation.available && (
+                      <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
+                        {translation.shown(m.id) && <span>{t("messages.translatedAutomatically")} ·</span>}
+                        <button
+                          type="button"
+                          onClick={() => void translation.toggle(m.id)}
+                          disabled={translation.isBusy(m.id)}
+                          className="inline-flex items-center gap-1 font-medium text-primary hover:underline disabled:opacity-60"
+                        >
+                          {!translation.shown(m.id) && <Languages className="h-3 w-3" aria-hidden />}
+                          {translation.isBusy(m.id)
+                            ? t("messages.translating")
+                            : translation.shown(m.id)
+                              ? t("messages.showOriginal")
+                              : t("messages.translate")}
+                        </button>
+                        {translation.error(m.id) && <span className="text-destructive">{translation.error(m.id)}</span>}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

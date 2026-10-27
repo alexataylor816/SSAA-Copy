@@ -127,3 +127,33 @@ export async function readScheduleFile(data: Buffer, mediaType: string, today: s
   if (response.stop_reason === "refusal" || !response.parsed_output) return null;
   return response.parsed_output;
 }
+
+/**
+ * Translates one chat message between English and Spanish for the Translate button in Messages. Written
+ * for job-site chat between US general contractors and (mostly Mexican) subcontractor crews: everyday
+ * construction words the way crews say them, names and numbers untouched, same tone as the original.
+ */
+export async function translateChat(text: string, to: "en" | "es"): Promise<string> {
+  if (!claudeConfigured()) throw new Error("Claude is not configured.");
+  const target =
+    to === "es"
+      ? "Spanish as spoken by Mexican construction crews in the US (obra, cuadrilla, maestro de obra, tablaroca, concreto, colado). Use usted unless the original is clearly casual."
+      : "plain American English as used on US construction job sites.";
+  const response = await anthropic().beta.messages.create({
+    model: MODEL,
+    max_tokens: 2000,
+    ...FALLBACK,
+    output_config: { effort: "low" },
+    system:
+      `You translate chat messages between a general contractor and a subcontractor in a construction scheduling app. ` +
+      `Translate the user's message into ${target} Keep people's names, company names, project names, addresses, ` +
+      `dates, times and numbers exactly as written. Keep the same tone and length. If the message is already in the ` +
+      `target language, return it unchanged. Reply with the translation only: no quotes, notes or explanations.`,
+    messages: [{ role: "user", content: text }],
+  });
+  return response.content
+    .filter((b) => b.type === "text")
+    .map((b) => ("text" in b ? b.text : ""))
+    .join("")
+    .trim();
+}

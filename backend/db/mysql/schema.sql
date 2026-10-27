@@ -315,6 +315,16 @@ CREATE TABLE IF NOT EXISTS messages (
   CONSTRAINT fk_messages_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- Chat messages translated with the Translate button, one row per message and language.
+CREATE TABLE IF NOT EXISTS message_translations (
+  message_id VARCHAR(36) NOT NULL,
+  lang       VARCHAR(5)  NOT NULL,
+  body       TEXT        NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  PRIMARY KEY (message_id, lang),
+  CONSTRAINT fk_message_translations_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS message_reads (
   conversation_id VARCHAR(36) NOT NULL,
   user_id         VARCHAR(36) NOT NULL,
