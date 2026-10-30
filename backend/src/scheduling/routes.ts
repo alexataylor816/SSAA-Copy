@@ -3,7 +3,8 @@ import { requireAuth } from "../middleware/requireAuth.js";
 import { HttpError } from "../rbac/errors.js";
 import { emit, emitProject } from "../realtime/index.js";
 import { EVENT, ROOM } from "../realtime/events.js";
-import { notifyScheduleRequestCreated, notifyScheduleRequestUpdated } from "../notifications/service.js";
+import { notifyMatrixPublish, notifyScheduleRequestCreated, notifyScheduleRequestUpdated } from "../notifications/service.js";
+import { acknowledgeEdit, applyBatch, getMatrix, getProjectAssignments, setProjectAssignments, type BatchBody } from "./matrix.js";
 import { findUserById } from "../models/users.js";
 import {
   connectProjectByCode,
@@ -204,5 +205,68 @@ schedulingRouter.patch(
     );
     await notifyScheduleRequestUpdated(req.userId!, request);
     res.json(request);
+  }),
+);
+
+// --- Weekly view (docs/WEEKLY_VIEW_REBUILD.md) ---
+
+schedulingRouter.get(
+  "/matrix",
+  route(async (req, res) => {
+    const { start, days, projectId } = req.query;
+    res.json(
+      await getMatrix(req.userId!, {
+        start: typeof start === "string" ? start : undefined,
+        days: typeof days === "string" ? days : undefined,
+        projectId: typeof projectId === "string" && projectId ? projectId : undefined,
+      }),
+    );
+  }),
+);
+
+schedulingRouter.post(
+  "/schedule-requests/batch",
+  route(async (req, res) => {
+    const body = (req.body ?? {}) as BatchBody;
+    const { result, touched } = await applyBatch(req.userId!, body);
+    if (!body.dryRun && touched.length > 0) {
+      for (const request of touched) {
+        emitProject(EVENT.scheduleRequestUpdated, { request }, request.projectId, [request.requestingCompanyId, request.subCompanyId]);
+      }
+      // No choice sent: a GC's requests still ping the sub in the app (as before); a sub's own changes stay silent.
+      const actorCompanyId = (await callerCompanyId(req.userId!)) ?? "";
+      const isGcSend = touched.some((r) => r.requestingCompanyId === actorCompanyId && r.subCompanyId !== actorCompanyId);
+      const n = body.notify;
+      result.notified = await notifyMatrixPublish(req.userId!, actorCompanyId, touched, {
+        toCompanyEmail: !!n?.gcEmail,
+        toCompanyPush: n ? !!n.gcPush : isGcSend,
+        toPersonnelEmail: !!n?.personnelEmail,
+        toPersonnelPush: !!n?.personnelPush,
+      });
+    }
+    res.json(result);
+  }),
+);
+
+schedulingRouter.post(
+  "/schedule-requests/:id/acknowledge-edit",
+  route(async (req, res) => {
+    const request = await acknowledgeEdit(req.userId!, req.params.id);
+    emitProject(EVENT.scheduleRequestUpdated, { request }, request.projectId, [request.requestingCompanyId, request.subCompanyId]);
+    res.json(request);
+  }),
+);
+
+schedulingRouter.get(
+  "/projects/:id/assignments",
+  route(async (req, res) => {
+    res.json(await getProjectAssignments(req.userId!, req.params.id));
+  }),
+);
+
+schedulingRouter.put(
+  "/projects/:id/assignments",
+  route(async (req, res) => {
+    res.json(await setProjectAssignments(req.userId!, req.params.id, req.body ?? {}));
   }),
 );

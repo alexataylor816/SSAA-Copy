@@ -1,5 +1,7 @@
 # SSAA — Sprint Scheduling Suite
 
+> New to the project? Start with [docs/HANDOFF.md](docs/HANDOFF.md).
+
 Monorepo for the SSAA scheduling platform. Browser-first; the mobile client is
 a paused port of the same backend.
 
@@ -94,7 +96,7 @@ dump, an export tool for moving an existing database onto MySQL, and setup steps
 ## Checks
 
 ```powershell
-cd backend;  npm test            # 81 tests
+cd backend;  npm test            # 25 test files
 cd backend;  npx tsc --noEmit
 cd web;      npm run typecheck   # tsc -b --force (plain `tsc --noEmit` checks nothing here)
 cd web;      npm run build
@@ -103,25 +105,4 @@ cd frontend; npm run lint        # only while the Expo port is active
 
 ## Status
 
-Working end to end: signup → company → project → share connection code → sub
-joins → employees → availability → schedule request → sub confirms → both
-sides read it back live (realtime wired client-side, not just emitting into
-a void).
-
-Known gaps, in rough priority order:
-
-- **Tasks/Gantt** has a table + registry rule on the backend, and a working
-  UI — but currently only in `frontend/` (Expo), built there during a
-  direction mix-up before `web/` was reconfirmed primary. Porting it into
-  `web/` is the next priority.
-- **Resource matrix** is read-only for other people's rows. The API only
-  writes availability for the employee record linked to the caller
-  (`setAvailability` in `backend/src/scheduling/service.ts`). Letting account
-  holders edit a crew's hours is a backend change first.
-- **Multi-stop scheduling** (`availability.stop_number`, `employee_stops`),
-  project aliases, guest-GC companies, and sub-of-sub routing are not ported.
-- **Chat, notifications, billing** are not started.
-- **Realtime** covers availability, schedule requests, join requests, and
-  project connections. Other tables have no live updates yet.
-- The remaining shadcn components in `web/src/components/ui/` are copied from
-  `SSAA/` and unused; prune as needed.
+See **[docs/HANDOFF.md](docs/HANDOFF.md)**: what works, what's in progress, how the code is laid out, and what to do next.

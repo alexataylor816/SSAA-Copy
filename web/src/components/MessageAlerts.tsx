@@ -4,6 +4,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getOpenConversation, useConversations, type ChatMessage } from "@/hooks/useMessaging";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 const BASE_TITLE = "SSAA";
 
@@ -39,6 +41,7 @@ function playPing() {
  * Mounted once (App.tsx) so it works on every page.
  */
 export default function MessageAlerts() {
+  const { t } = useLanguage();
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -51,16 +54,17 @@ export default function MessageAlerts() {
       playPing();
       const preview = message.body.length > 90 ? `${message.body.slice(0, 90)}…` : message.body;
       toast({
-        title: `New message from ${message.senderName ?? "someone"}`,
+        title: t("messageAlerts.newMessageFrom", { name: message.senderName ?? t("messageAlerts.someone") }),
         description: preview,
         action: (
-          <ToastAction altText="Open the conversation" onClick={() => navigate(`/messages?c=${message.conversationId}`)}>
-            Open
+          <ToastAction altText={tr("messageAlerts.openTheConversation")} onClick={() => navigate(`/messages?c=${message.conversationId}`)}>
+            
+            {t("common.open")}
           </ToastAction>
         ),
       });
     },
-    [userId, navigate],
+    [userId, navigate, t],
   );
   const { totalUnread } = useConversations(onMessage);
 

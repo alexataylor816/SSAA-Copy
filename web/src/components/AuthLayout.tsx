@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 import { Building2, Calendar, Users } from "lucide-react";
 import heroImage from "@/assets/hero-construction.jpg";
+import LanguageToggle from "@/components/LanguageToggle";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 const features = [
-  { icon: Calendar, label: "Smart Scheduling" },
-  { icon: Users, label: "Team Management" },
-  { icon: Building2, label: "Project Tracking" },
+  { icon: Calendar, get label() { return tr("authLayout.smartScheduling"); } },
+  { icon: Users, get label() { return tr("authLayout.teamManagement"); } },
+  { icon: Building2, get label() { return tr("authLayout.projectTracking"); } },
 ];
 
 /**
@@ -15,8 +18,11 @@ const features = [
  * invite banner lives there; everything else funnels through here.
  */
 export default function AuthLayout({ children, inviteNote }: { children: ReactNode; inviteNote?: string }) {
+  const { t } = useLanguage();
   return (
-    <div className="min-h-dvh flex flex-col lg:flex-row">
+    <div className="relative min-h-dvh flex flex-col lg:flex-row">
+      <LanguageToggle tone="onPrimary" className="absolute right-3 top-3 z-20 lg:hidden" />
+      <LanguageToggle className="absolute right-4 top-4 z-20 hidden lg:flex" />
       {/* Phones get a slim banner (name + tagline) so the form fits on one screen. */}
       <div className="lg:w-1/2 bg-primary relative flex items-center justify-center px-6 py-5 lg:p-16">
         <div
@@ -29,7 +35,8 @@ export default function AuthLayout({ children, inviteNote }: { children: ReactNo
             {"Schedule Someone,\nAnytime, Anywhere"}
           </p>
           <p className="hidden lg:block text-lg text-primary-foreground/80 mb-8">
-            The complete construction scheduling platform for General Contractors and Subcontractors.
+            
+            {t("authLayout.theCompleteConstructionSchedulingPlatfor")}
           </p>
 
           {inviteNote && (

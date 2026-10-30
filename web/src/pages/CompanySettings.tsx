@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
@@ -31,9 +31,13 @@ import TeamProfilesDialog from "@/components/TeamProfilesDialog";
 import ConnectedCompaniesCard from "@/components/ConnectedCompaniesCard";
 import MobileTabBar from "@/components/dashboard/MobileTabBar";
 import TimesheetDownloadCard from "@/components/TimesheetDownloadCard";
+import ProjectAssignmentsCard from "@/components/ProjectAssignmentsCard";
 import { ArrowLeft, RefreshCw, UserPlus } from "lucide-react";
 import InviteShare from "@/components/InviteShare";
 import { companyJoinUrl } from "@/lib/share";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tradeLabel } from "@/i18n/labels";
+import { tr } from "@/i18n/runtime";
 
 const PERMISSION_LEVELS = ["basic", "standard", "level_1", "partial", "full", "account_holder"] as const;
 
@@ -73,7 +77,8 @@ interface Employee {
 }
 
 export default function CompanySettings() {
-  const { user, isAccountHolder, permissionLevel, isMOA } = useAuth();
+  const { t } = useLanguage();
+  const { user, isAccountHolder, permissionLevel, isMOA, hasPartialOrHigher } = useAuth();
   const { toast } = useToast();
   const companyId = user?.companyId ?? null;
 
@@ -86,11 +91,22 @@ export default function CompanySettings() {
   const [loading, setLoading] = useState(true);
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  // Other companies' projects we're connected to (a sub's view), with the GC's name.
+  const [joinedProjects, setJoinedProjects] = useState<(Project & { gcName: string })[]>([]);
   const [aliases, setAliases] = useState<Record<string, { name: string; address: string }>>({});
   const [joinCode, setJoinCode] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  // Which project's display-name form is open (closed by default: it made the page very long on phones).
+  const [editingAlias, setEditingAlias] = useState<string | null>(null);
 
   const canManageProjects = isMOA || permissionLevel === "full" || permissionLevel === "account_holder";
+  const assignmentProjects = useMemo(
+    () => [
+      ...projects.map((p) => ({ id: p.id, name: p.name, detail: p.address })),
+      ...joinedProjects.map((p) => ({ id: p.id, name: p.name, detail: p.gcName })),
+    ],
+    [projects, joinedProjects],
+  );
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -111,6 +127,19 @@ export default function CompanySettings() {
       setMembers(membersRes.members);
       setEmployees(employeesRes.employees);
       setProjects(projectsRes.projects.filter((p) => p.companyId === companyId));
+      const joined = projectsRes.projects.filter((p) => p.companyId !== companyId);
+      const gcNames = new Map<string, string>();
+      await Promise.all(
+        [...new Set(joined.map((p) => p.companyId))].map(async (gcId) => {
+          try {
+            const res = await api.get<{ company: { name: string } }>(`/companies/${gcId}/summary`);
+            gcNames.set(gcId, res.company.name);
+          } catch {
+            // Name is a nicety; the project still lists without it.
+          }
+        }),
+      );
+      setJoinedProjects(joined.map((p) => ({ ...p, gcName: gcNames.get(p.companyId) ?? tr("common.generalContractor") })));
       const aliasMap: Record<string, { name: string; address: string }> = {};
       for (const a of (aliasesRes.data ?? []) as { project_id: string; name: string | null; address: string | null }[]) {
         aliasMap[a.project_id] = { name: a.name ?? "", address: a.address ?? "" };
@@ -118,14 +147,14 @@ export default function CompanySettings() {
       setAliases(aliasMap);
     } catch (err) {
       toast({
-        title: "Could not load company settings",
+        title: t("companySettings.couldNotLoadCompanySettings"),
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  }, [companyId, toast]);
+  }, [companyId, toast, t]);
 
   useEffect(() => {
     void load();
@@ -136,10 +165,10 @@ export default function CompanySettings() {
     try {
       await api.patch(`/companies/${companyId}/members/${userId}`, { permissionLevel });
       await load();
-      toast({ title: "Permissions updated" });
+      toast({ title: t("companySettings.permissionsUpdated") });
     } catch (err) {
       toast({
-        title: "Could not update permissions",
+        title: t("companySettings.couldNotUpdatePermissions"),
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
@@ -164,10 +193,10 @@ export default function CompanySettings() {
       setNewEmployeeName("");
       setNewEmployeeEmail("");
       await load();
-      toast({ title: "Employee added" });
+      toast({ title: t("companySettings.employeeAdded") });
     } catch (err) {
       toast({
-        title: "Could not add that employee",
+        title: t("companySettings.couldNotAddThatEmployee"),
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
@@ -184,10 +213,10 @@ export default function CompanySettings() {
       await api.post("/projects/connect", { code: joinCode.trim() });
       setJoinCode("");
       await load();
-      toast({ title: "Project connected" });
+      toast({ title: t("companySettings.projectConnected") });
     } catch (err) {
       toast({
-        title: "Could not connect to that project",
+        title: t("companySettings.couldNotConnectToThatProject"),
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
@@ -203,10 +232,10 @@ export default function CompanySettings() {
       await api.delete(`/projects/${deleteTarget.id}`);
       setDeleteTarget(null);
       await load();
-      toast({ title: "Project deleted" });
+      toast({ title: t("companySettings.projectDeleted") });
     } catch (err) {
       toast({
-        title: "Could not delete that project",
+        title: t("companySettings.couldNotDeleteThatProject"),
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
@@ -230,10 +259,10 @@ export default function CompanySettings() {
       );
       if (error) throw new Error(error.message);
       await load();
-      toast({ title: "Display name saved" });
+      toast({ title: t("companySettings.displayNameSaved") });
     } catch (err) {
       toast({
-        title: "Could not save that name",
+        title: t("companySettings.couldNotSaveThatName"),
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
@@ -247,10 +276,10 @@ export default function CompanySettings() {
       const { error } = await supabase.from("employees").delete().eq("id", id);
       if (error) throw new Error(error.message);
       await load();
-      toast({ title: "Employee removed" });
+      toast({ title: t("companySettings.employeeRemoved") });
     } catch (err) {
       toast({
-        title: "Could not remove that employee",
+        title: t("companySettings.couldNotRemoveThatEmployee"),
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
@@ -262,19 +291,20 @@ export default function CompanySettings() {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <header className="border-b">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 p-4">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/dashboard">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Dashboard
+        {/* Phone: icon-only back and refresh so the title fits on one line. */}
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-2 py-3 sm:gap-4 sm:p-4">
+          <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+            <Button variant="ghost" size="sm" className="h-10 px-2 sm:px-3" asChild>
+              <Link to="/dashboard" aria-label={t("companySettings.backToDashboard")}>
+                <ArrowLeft className="h-5 w-5 sm:mr-2 sm:h-4 sm:w-4" />
+                <span className="hidden sm:inline">{t("companySettings.dashboard")}</span>
               </Link>
             </Button>
-            <h1 className="text-lg font-bold">Company settings</h1>
+            <h1 className="truncate text-lg font-bold">{t("companySettings.companySettings")}</h1>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
+          <Button variant="outline" size="sm" className="h-10 shrink-0 px-3" onClick={() => void load()} aria-label={t("companySettings.refresh")}>
+            <RefreshCw className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">{t("companySettings.refresh")}</span>
           </Button>
         </div>
       </header>
@@ -283,23 +313,24 @@ export default function CompanySettings() {
         {!companyId ? (
           <Card>
             <CardContent className="p-6 text-sm text-muted-foreground">
-              You are not part of a company yet.
+              
+              {t("companySettings.youAreNotPartOfA")}
             </CardContent>
           </Card>
         ) : (
           <>
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Company</CardTitle>
+                <CardTitle className="text-lg">{t("common.company")}</CardTitle>
               </CardHeader>
               <CardContent>
                 {loading ? (
-                  <p className="text-sm text-muted-foreground">Loading...</p>
+                  <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
                 ) : (
                   <div className="flex items-center gap-3">
-                    <p className="font-medium">{company?.name ?? "Unknown"}</p>
-                    <Badge variant="secondary">{company?.companyType === "gc" ? "General contractor" : "Subcontractor"}</Badge>
-                    {company?.trade && <Badge variant="outline">{company.trade}</Badge>}
+                    <p className="font-medium">{company?.name ?? t("companySettings.unknown")}</p>
+                    <Badge variant="secondary">{company?.companyType === "gc" ? t("common.generalContractor") : t("common.subcontractor")}</Badge>
+                    {company?.trade && <Badge variant="outline">{tradeLabel(company.trade)}</Badge>}
                   </div>
                 )}
               </CardContent>
@@ -307,22 +338,48 @@ export default function CompanySettings() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Projects</CardTitle>
+                <CardTitle className="text-lg">{t("common.projects")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {projects.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No projects yet. Create one from the dashboard.</p>
-                ) : (
+                {projects.length === 0 && joinedProjects.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    {company?.companyType === "sub"
+                      ? t("companySettings.notOnAnyProjectsYetEnter")
+                      : t("companySettings.noProjectsYetCreateOneFrom")}
+                  </p>
+                )}
+                {joinedProjects.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">{t("companySettings.projectsYouReOn")}</p>
+                    <ul className="divide-y rounded-md border">
+                      {joinedProjects.map((project) => (
+                        <li key={project.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{project.name}</p>
+                            <p className="truncate text-sm text-muted-foreground">
+                              {project.gcName}
+                              {project.address ? ` · ${project.address}` : ""}
+                            </p>
+                          </div>
+                          <Button asChild size="sm" variant="outline">
+                            <Link to={`/dashboard?project=${project.id}`}>{t("common.open")}</Link>
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {projects.length === 0 ? null : (
                   <ul className="divide-y">
                     {projects.map((project) => {
                       const draft = aliases[project.id] ?? { name: "", address: "" };
                       return (
                         <li key={project.id} className="space-y-2 py-3">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
                               <p className="font-medium">{draft.name || project.name}</p>
                               <p className="text-sm text-muted-foreground">
-                                {draft.address || project.address || "No address"}
+                                {draft.address || project.address || t("companySettings.noAddress")}
                                 {" · "}
                                 <span className="font-mono">{project.connectionCode}</span>
                               </p>
@@ -331,16 +388,18 @@ export default function CompanySettings() {
                               <Button
                                 variant="outline"
                                 size="sm"
+                                className="shrink-0"
                                 disabled={busy}
                                 onClick={() => setDeleteTarget(project)}
                               >
-                                Delete
+                                {t("common.delete")}
                               </Button>
                             )}
                           </div>
+                          {editingAlias === project.id ? (
                           <div className="flex flex-wrap items-end gap-2">
                             <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-1">
-                              <Label htmlFor={`alias-name-${project.id}`}>Display name (optional)</Label>
+                              <Label htmlFor={`alias-name-${project.id}`}>{t("companySettings.displayNameOptional")}</Label>
                               <Input
                                 id={`alias-name-${project.id}`}
                                 value={draft.name}
@@ -354,7 +413,7 @@ export default function CompanySettings() {
                               />
                             </div>
                             <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-1">
-                              <Label htmlFor={`alias-address-${project.id}`}>Display address (optional)</Label>
+                              <Label htmlFor={`alias-address-${project.id}`}>{t("companySettings.displayAddressOptional")}</Label>
                               <Input
                                 id={`alias-address-${project.id}`}
                                 value={draft.address}
@@ -367,10 +426,26 @@ export default function CompanySettings() {
                                 placeholder={project.address ?? ""}
                               />
                             </div>
-                            <Button size="sm" variant="secondary" disabled={busy} onClick={() => void saveAlias(project.id)}>
-                              Save name
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={busy}
+                              onClick={() => void saveAlias(project.id).then(() => setEditingAlias(null))}
+                            >
+                              
+                              {t("companySettings.saveName")}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setEditingAlias(null)}>
+                              
+                              {t("common.cancel")}
                             </Button>
                           </div>
+                          ) : (
+                            <Button size="sm" variant="link" className="h-auto px-0 text-xs" onClick={() => setEditingAlias(project.id)}>
+                              
+                              {t("companySettings.editDisplayName")}
+                            </Button>
+                          )}
                         </li>
                       );
                     })}
@@ -379,16 +454,17 @@ export default function CompanySettings() {
 
                 <form onSubmit={joinByCode} className="flex flex-wrap items-end gap-2 border-t pt-4">
                   <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
-                    <Label htmlFor="joinCode">Connect to a project with its code</Label>
+                    <Label htmlFor="joinCode">{t("companySettings.connectToAProjectWithIts")}</Label>
                     <Input
                       id="joinCode"
                       value={joinCode}
                       onChange={(e) => setJoinCode(e.target.value)}
-                      placeholder="Paste the code a GC gave you"
+                      placeholder={t("companySettings.pasteTheCodeAGcGave")}
                     />
                   </div>
                   <Button type="submit" variant="secondary" disabled={busy}>
-                    Connect
+                    
+                    {t("common.connect")}
                   </Button>
                 </form>
               </CardContent>
@@ -402,13 +478,14 @@ export default function CompanySettings() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <UserPlus className="h-5 w-5 text-primary" />
-                    Invite your team
+                    
+                    {t("companySettings.inviteYourTeam")}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <InviteShare
                     url={companyJoinUrl(companyId)}
-                    caption={`Send new ${company?.companyType === "gc" ? "staff" : "crew members"} this link so they can ask to join ${company?.name ?? "your company"}. You approve each one and choose what they can do.`}
+                    caption={t("companySettings.sendNewThisLinkSoThey", { who: t(company?.companyType === "gc" ? "companySettings.newStaff" : "companySettings.newCrewMembers"), company: company?.name ?? t("companySettings.yourCompany") })}
                   />
                 </CardContent>
               </Card>
@@ -416,10 +493,11 @@ export default function CompanySettings() {
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-lg">Members</CardTitle>
+                <CardTitle className="text-lg">{t("companySettings.members")}</CardTitle>
                 {companyId && (
                   <Button variant="outline" size="sm" onClick={() => setTeamDialogOpen(true)}>
-                    Manage team
+                    
+                    {t("companySettings.manageTeam")}
                   </Button>
                 )}
               </CardHeader>
@@ -450,7 +528,7 @@ export default function CompanySettings() {
                         </Select>
                       ) : (
                         <Badge variant="outline">
-                          {member.isCompanyCreator ? "Creator" : member.permissionLevel.replace("_", " ")}
+                          {member.isCompanyCreator ? t("companySettings.creator") : member.permissionLevel.replace("_", " ")}
                         </Badge>
                       )}
                     </li>
@@ -461,11 +539,11 @@ export default function CompanySettings() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Employees</CardTitle>
+                <CardTitle className="text-lg">{t("companySettings.employees")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 {employees.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No employees yet. Add the crews you schedule.</p>
+                  <p className="text-sm text-muted-foreground">{t("companySettings.noEmployeesYetAddTheCrews")}</p>
                 ) : (
                   <ul className="divide-y">
                     {employees.map((employee) => (
@@ -473,13 +551,14 @@ export default function CompanySettings() {
                         <div>
                           <p className="font-medium">{employee.name}</p>
                           <p className="text-sm text-muted-foreground">
-                            {employee.email ?? employee.phone ?? "No contact details"}
-                            {employee.linkedUserId ? " · linked to an account" : ""}
+                            {employee.email ?? employee.phone ?? t("companySettings.noContactDetails")}
+                            {employee.linkedUserId ? t("companySettings.linkedToAnAccount") : ""}
                           </p>
                         </div>
                         {isAccountHolder && (
                           <Button variant="outline" size="sm" disabled={busy} onClick={() => void removeEmployee(employee.id)}>
-                            Remove
+                            
+                            {t("common.remove")}
                           </Button>
                         )}
                       </li>
@@ -490,7 +569,7 @@ export default function CompanySettings() {
                 {isAccountHolder && (
                   <form onSubmit={addEmployee} className="flex flex-wrap items-end gap-2 border-t pt-4">
                     <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
-                      <Label htmlFor="employeeName">Name</Label>
+                      <Label htmlFor="employeeName">{t("companySettings.name")}</Label>
                       <Input
                         id="employeeName"
                         value={newEmployeeName}
@@ -499,23 +578,35 @@ export default function CompanySettings() {
                       />
                     </div>
                     <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
-                      <Label htmlFor="employeeEmail">Email</Label>
+                      <Label htmlFor="employeeEmail">{t("common.email")}</Label>
                       <Input
                         id="employeeEmail"
                         type="email"
                         value={newEmployeeEmail}
                         onChange={(e) => setNewEmployeeEmail(e.target.value)}
-                        placeholder="Optional, used to link their account"
+                        placeholder={t("companySettings.optionalUsedToLinkTheirAccount")}
                       />
                     </div>
                     <Button type="submit" disabled={busy}>
-                      Add
+                      
+                      {t("common.add")}
                     </Button>
                   </form>
                 )}
               </CardContent>
             </Card>
           </>
+        )}
+
+        {companyId && (
+          <ProjectAssignmentsCard
+            projects={assignmentProjects}
+            employees={employees.map((e) => ({ id: e.id, name: e.name }))}
+            staff={members
+              .filter((m) => m.isCompanyCreator || ["partial", "full", "account_holder"].includes(m.permissionLevel))
+              .map((m) => ({ id: m.userId, name: m.fullName ?? m.email }))}
+            canEdit={hasPartialOrHigher}
+          />
         )}
 
         {company?.companyType === "sub" && (
@@ -527,20 +618,21 @@ export default function CompanySettings() {
       <AlertDialog open={deleteTarget !== null} onOpenChange={(isOpen) => !isOpen && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {deleteTarget?.name}?</AlertDialogTitle>
+            <AlertDialogTitle>{t("companySettings.deleteName", { name: deleteTarget?.name ?? "" })}</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently removes the project and everything attached to it: tasks, availability, schedule
-              requests, connections, aliases, and its message channel. This cannot be undone.
+              
+              {t("companySettings.thisPermanentlyRemovesTheProjectAnd")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => void confirmDeleteProject()}
               disabled={busy}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete project
+              
+              {t("companySettings.deleteProject")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

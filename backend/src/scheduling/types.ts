@@ -58,6 +58,16 @@ export interface ScheduleRequest {
   statusReason: string | null;
   requestingCompanyName: string | null;
   subCompanyName: string | null;
+  /** Changed by the other side since it was last acknowledged (the GC's "Edited" tag). */
+  edited: boolean;
+  lastEditedByCompanyId: string | null;
+  /** The sub booked its own crew here (created already confirmed). */
+  subAssigned: boolean;
+  /** Published without notifying anyone; it only shows up in the app. */
+  silentAssignment: boolean;
+  /** Every request written by one Weekly-view publish shares this id. */
+  groupId: string | null;
+  editReason: string | null;
   createdAt: string;
   updatedAt: string;
 }

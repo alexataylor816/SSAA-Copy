@@ -11,9 +11,15 @@ export interface User {
   profilePictureUrl: string | null;
   companyId: string | null;
   isAdmin: boolean;
+  /** Only for operators: owner (Luke, manages operators), main_operator (full access) or view_only. */
+  operatorLevel: OperatorLevel | null;
+  /** Set by an operator; a suspended account can't sign in or use an existing session. */
+  suspendedAt: string | null;
   googleSub: string | null;
   createdAt: string;
 }
+
+export type OperatorLevel = "owner" | "main_operator" | "view_only";
 
 interface UserRow {
   id: string;
@@ -25,6 +31,8 @@ interface UserRow {
   profile_picture_url: string | null;
   company_id: string | null;
   is_admin: 0 | 1;
+  operator_level: string | null;
+  suspended_at: string | null;
   google_sub: string | null;
   created_at: string;
 }
@@ -71,6 +79,12 @@ export async function ensureUsersTable(): Promise<void> {
     }
     if (!columns.has("profile_picture_url")) {
       await database.exec("ALTER TABLE users ADD COLUMN profile_picture_url TEXT");
+    }
+    if (!columns.has("operator_level")) {
+      await database.exec("ALTER TABLE users ADD COLUMN operator_level TEXT");
+    }
+    if (!columns.has("suspended_at")) {
+      await database.exec("ALTER TABLE users ADD COLUMN suspended_at TEXT");
     }
   }
 }
@@ -142,8 +156,13 @@ export async function setUserCompany(userId: string, companyId: string | null) {
   await database.run("UPDATE users SET company_id = ? WHERE id = ?", [companyId, userId]);
 }
 
-export async function setUserIsAdmin(userId: string, isAdmin: boolean) {
-  await database.run("UPDATE users SET is_admin = ? WHERE id = ?", [isAdmin ? 1 : 0, userId]);
+/** Granting without a level gives full access; revoking clears the level too. */
+export async function setUserIsAdmin(userId: string, isAdmin: boolean, level: OperatorLevel = "main_operator") {
+  await database.run("UPDATE users SET is_admin = ?, operator_level = ? WHERE id = ?", [isAdmin ? 1 : 0, isAdmin ? level : null, userId]);
+}
+
+export async function setUserSuspended(userId: string, suspended: boolean) {
+  await database.run("UPDATE users SET suspended_at = ? WHERE id = ?", [suspended ? new Date().toISOString() : null, userId]);
 }
 
 function mapRow(row: UserRow): User {
@@ -156,7 +175,10 @@ function mapRow(row: UserRow): User {
     language: row.language ?? "en",
     profilePictureUrl: row.profile_picture_url,
     companyId: row.company_id,
-    isAdmin: row.is_admin === 1,
+    isAdmin: Number(row.is_admin) === 1,
+    // Operators from before levels existed have full access.
+    operatorLevel: Number(row.is_admin) === 1 ? ((row.operator_level as OperatorLevel | null) ?? "main_operator") : null,
+    suspendedAt: row.suspended_at ?? null,
     googleSub: row.google_sub,
     createdAt: row.created_at,
   };

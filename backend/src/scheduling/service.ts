@@ -11,6 +11,7 @@ import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from ".
 import { findUserById, type User } from "../models/users.js";
 import { isDateLocked } from "./historicalLock.js";
 import {
+  clearScheduleRequestEdited,
   createAvailabilityRow,
   createProjectConnection,
   createProjectRow,
@@ -22,6 +23,7 @@ import {
   findProjectConnection,
   findProjectById,
   findScheduleRequestById,
+  listActiveScheduleRequestsOnDate,
   listAvailabilityForCompany,
   listConnectedProjects,
   listOwnedProjects,
@@ -30,11 +32,12 @@ import {
   updateScheduleRequestStatusRow,
 } from "./models.js";
 import type { Availability, Project, ScheduleRequest, ScheduleRequestStatus } from "./types.js";
+import { clockLabel, say } from "../i18n/index.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
 
-async function requireUserWithCompany(userId: string) {
+export async function requireUserWithCompany(userId: string) {
   const user = await findUserById(userId);
   if (!user) throw new NotFoundError("User not found.");
   if (!user.companyId) throw new ConflictError("You need to be part of a company first.");
@@ -135,12 +138,12 @@ export interface ProjectPreview {
  */
 async function connectBlocker(user: User): Promise<string | null> {
   const company = user.companyId ? await findCompanyById(user.companyId) : undefined;
-  if (!company) return "Set up or join your company first.";
+  if (!company) return say("Set up or join your company first.");
   if (company.companyType !== "sub" && !user.isAdmin) {
-    return "Only subcontractor companies join a GC's project. To work with another GC, use Connected companies.";
+    return say("Only subcontractor companies join a GC's project. To work with another GC, use Connected companies.");
   }
   if (!(await actorHasPartialOrHigher(user))) {
-    return "Ask your company's owner or office manager to connect the company to this project.";
+    return say("Ask your company's owner or office manager to connect the company to this project.");
   }
   return null;
 }
@@ -188,7 +191,7 @@ export async function connectProjectByCode(userId: string, code: string): Promis
   return project;
 }
 
-async function canSeeProject(companyId: string, projectId: string): Promise<boolean> {
+export async function canSeeProject(companyId: string, projectId: string): Promise<boolean> {
   const project = await findProjectById(projectId);
   if (!project) return false;
   if (project.companyId === companyId) return true;
@@ -410,6 +413,12 @@ export async function createScheduleRequest(userId: string, params: CreateSchedu
     }
   }
 
+  const clash = await bookingConflict(
+    { employeeIds: params.employeeIds, date: params.date, startTime: params.startTime ?? null, endTime: params.endTime ?? null },
+    { statuses: ["pending", "confirmed"] },
+  );
+  if (clash) throw new ConflictError(clash);
+
   return await createScheduleRequestRow({
     projectId: params.projectId,
     requestingCompanyId: user.companyId!,
@@ -429,6 +438,36 @@ export async function listScheduleRequests(userId: string, startDate: string, en
     throw new BadRequestError("start/end must be formatted YYYY-MM-DD.");
   }
   return await listScheduleRequestsForCompany(user.companyId!, startDate, endDate);
+}
+
+/** "07:00" → "7:00 AM" (or "7:00 a.m." for a Spanish request). */
+export const toLabel = (t: string) => clockLabel(t);
+
+/**
+ * Someone can't be in two places at once: a request clashes with any other
+ * request that already holds one of the same people for an overlapping time
+ * that day. A request with no times holds the whole day.
+ */
+async function bookingConflict(
+  params: { employeeIds: string[]; date: string; startTime: string | null; endTime: string | null },
+  options: { excludeId?: string; statuses: ScheduleRequestStatus[] },
+): Promise<string | null> {
+  const start = params.startTime ?? "00:00";
+  const end = params.endTime ?? "24:00";
+  for (const other of await listActiveScheduleRequestsOnDate(params.date)) {
+    if (other.id === options.excludeId || !options.statuses.includes(other.status)) continue;
+    const otherStart = other.startTime ?? "00:00";
+    const otherEnd = other.endTime ?? "24:00";
+    if (!(start < otherEnd && otherStart < end)) continue;
+    const clash = params.employeeIds.find((id) => other.employeeIds.includes(id));
+    if (!clash) continue;
+    const name = other.employeeNames[other.employeeIds.indexOf(clash)] ?? say("That person");
+    const when = other.startTime && other.endTime ? `${toLabel(other.startTime)}–${toLabel(other.endTime)}` : say("all day");
+    const project = (await findProjectById(other.projectId))?.name ?? say("another project");
+    const verb = say(other.status === "confirmed" ? "booked" : "already requested");
+    return say("{name} is {verb} {when} that day ({project}). Pick a time outside it.", { name, verb, when, project });
+  }
+  return null;
 }
 
 export async function updateScheduleRequestStatus(
@@ -453,6 +492,10 @@ export async function updateScheduleRequestStatus(
     if (req.status !== "pending") {
       throw new ConflictError("This request has already been handled.");
     }
+    if (status === "confirmed") {
+      const clash = await bookingConflict(req, { excludeId: req.id, statuses: ["confirmed"] });
+      if (clash) throw new ConflictError(clash);
+    }
   } else if (status === "cancelled") {
     if (user.companyId !== req.requestingCompanyId && user.companyId !== req.subCompanyId) {
       throw new ForbiddenError("You are not part of this request.");
@@ -470,5 +513,9 @@ export async function updateScheduleRequestStatus(
   }
 
   await updateScheduleRequestStatusRow(requestId, status, trimmed || null);
+  // Confirming the other company's edit is also seeing it: the "Edited" tag goes.
+  if (status === "confirmed" && req.edited && req.lastEditedByCompanyId !== user.companyId) {
+    await clearScheduleRequestEdited(requestId);
+  }
   return (await findScheduleRequestById(requestId))!;
 }

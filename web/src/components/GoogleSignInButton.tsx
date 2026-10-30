@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
@@ -55,6 +57,7 @@ interface Props {
  * button renders disabled with an honest caption instead of failing vaguely.
  */
 export default function GoogleSignInButton({ onCredential, onError, disabled }: Props) {
+  const { t } = useLanguage();
   const slotRef = useRef<HTMLDivElement>(null);
   const renderedRef = useRef(false);
   const [scriptFailed, setScriptFailed] = useState(false);
@@ -118,10 +121,12 @@ export default function GoogleSignInButton({ onCredential, onError, disabled }: 
       <div className="space-y-2">
         <Button variant="outline" className="w-full" disabled title="Set VITE_GOOGLE_CLIENT_ID to enable this">
           <GoogleIcon className="h-4 w-4 mr-2" />
-          Continue with Google
+          
+          {t("googleSignInButton.continueWithGoogle")}
         </Button>
         <p className="text-center text-xs text-muted-foreground">
-          Google sign-in isn&apos;t configured yet — ask your admin for a client ID.
+          
+          {t("googleSignInButton.googleSignInIsnTConfigured")}
         </p>
       </div>
     );
@@ -133,10 +138,11 @@ export default function GoogleSignInButton({ onCredential, onError, disabled }: 
         variant="outline"
         className="w-full"
         disabled={disabled}
-        onClick={() => errorRef.current("Could not load Google sign-in. Check your connection and try again.")}
+        onClick={() => errorRef.current(tr("googleSignInButton.couldNotLoad"))}
       >
         <GoogleIcon className="h-4 w-4 mr-2" />
-        Continue with Google
+        
+        {t("googleSignInButton.continueWithGoogle")}
       </Button>
     );
   }

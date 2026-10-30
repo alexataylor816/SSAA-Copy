@@ -3,6 +3,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tr } from "@/i18n/runtime";
 
 interface RejectRequestDialogProps {
   open: boolean;
@@ -17,6 +19,7 @@ export default function RejectRequestDialog({
   onConfirm,
   mode = "reject",
 }: RejectRequestDialogProps) {
+  const { t } = useLanguage();
   const [reason, setReason] = useState("");
 
   useEffect(() => {
@@ -29,12 +32,12 @@ export default function RejectRequestDialog({
   }
 
   const isRemove = mode === "remove-cancel";
-  const title = isRemove ? "Remove & Cancel Schedule Request" : "Reject Schedule Request";
+  const title = isRemove ? t("rejectRequestDialog.removeCancelScheduleRequest") : t("rejectRequestDialog.rejectScheduleRequest");
   const description = isRemove
-    ? "This cancels the pending request entirely. The other party will be notified. You can include an optional note."
-    : "Optionally let the other party know why you're rejecting this request. You can leave it blank.";
-  const confirmLabel = isRemove ? "Remove & Cancel Request" : "Reject Request";
-  const placeholder = isRemove ? "Reason for cancellation (optional)…" : "Reason for rejection (optional)…";
+    ? t("rejectRequestDialog.thisCancelsThePendingRequestEntirely")
+    : t("rejectRequestDialog.optionallyLetTheOtherPartyKnow");
+  const confirmLabel = isRemove ? t("rejectRequestDialog.removeCancelRequest") : t("rejectRequestDialog.rejectRequest");
+  const placeholder = isRemove ? tr("rejectRequestDialog.reasonForCancellation") : tr("rejectRequestDialog.reasonForRejection");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -45,7 +48,7 @@ export default function RejectRequestDialog({
         </DialogHeader>
 
         <div className="space-y-2">
-          <Label htmlFor="rejection-reason">Reason (optional)</Label>
+          <Label htmlFor="rejection-reason">{t("rejectRequestDialog.reasonOptional")}</Label>
           <Textarea
             id="rejection-reason"
             placeholder={placeholder}
@@ -57,7 +60,8 @@ export default function RejectRequestDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            
+            {t("common.cancel")}
           </Button>
           <Button variant="destructive" onClick={handleConfirm}>
             {confirmLabel}

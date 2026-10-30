@@ -4,6 +4,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
+import { useLanguage } from "@/contexts/LanguageContext";
+import { jobTitleLabel } from "@/i18n/labels";
 
 export type CardStatus = 'confirmed' | 'available' | 'draft' | 'cancelled' | 'pending';
 
@@ -63,6 +65,7 @@ const statusDotColor: Record<CardStatus, string> = {
 };
 
 const MatrixEmployeeCard = ({ employee, density, status, dragId, draggable = true, onAssign, onCancelClick, onRemove, timeLabel, stopLabel, selected, onToggleSelect, unassignedWarning }: MatrixEmployeeCardProps) => {
+  const { t } = useLanguage();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: dragId || employee.id,
     data: { employee },
@@ -131,7 +134,7 @@ const MatrixEmployeeCard = ({ employee, density, status, dragId, draggable = tru
             <TooltipTrigger asChild>
               <span className={`inline-block w-1.5 h-1.5 rounded-full ${statusDotColor[status]} mr-1 flex-shrink-0`} />
             </TooltipTrigger>
-            <TooltipContent>{status === 'confirmed' ? 'Confirmed' : status === 'available' ? 'Available' : status === 'draft' ? 'Newly Assigned' : 'Cancelled'}</TooltipContent>
+            <TooltipContent>{status === 'confirmed' ? t("matrixEmployeeCard.confirmed") : status === 'available' ? t("matrixEmployeeCard.available") : status === 'draft' ? t("matrixEmployeeCard.newlyAssigned") : t("matrixEmployeeCard.cancelled")}</TooltipContent>
           </Tooltip>
         )}
         <span className="truncate">{employee.name}</span>
@@ -161,9 +164,9 @@ const MatrixEmployeeCard = ({ employee, density, status, dragId, draggable = tru
         <div className="flex flex-col min-w-0 flex-1">
           <span className="text-xs font-medium truncate">{getCompactName(employee.name)}</span>
           {status === 'pending' ? (
-            <span className="text-[9px] font-medium text-yellow-700 dark:text-yellow-400 truncate">Pending Confirmation</span>
+            <span className="text-[9px] font-medium text-yellow-700 dark:text-yellow-400 truncate">{t("matrixEmployeeCard.pendingConfirmation")}</span>
           ) : (
-            employee.job_title && <span className="text-[10px] text-muted-foreground truncate">{employee.job_title}</span>
+            employee.job_title && <span className="text-[10px] text-muted-foreground truncate">{jobTitleLabel(employee.job_title)}</span>
           )}
           {timeLabel && (
             <span className="text-[10px] text-muted-foreground truncate">
@@ -172,7 +175,8 @@ const MatrixEmployeeCard = ({ employee, density, status, dragId, draggable = tru
           )}
           {unassignedWarning && (
             <span className="text-[9px] font-medium text-red-600 dark:text-red-400 truncate">
-              Not assigned to project
+              
+              {t("matrixEmployeeCard.notAssignedToProject")}
             </span>
           )}
         </div>
@@ -208,7 +212,7 @@ const MatrixEmployeeCard = ({ employee, density, status, dragId, draggable = tru
       )}
       <div className="flex flex-col min-w-0 flex-1">
         <span className="text-sm font-medium truncate">{employee.name}</span>
-        {employee.job_title && <span className="text-xs text-muted-foreground truncate">{employee.job_title}</span>}
+        {employee.job_title && <span className="text-xs text-muted-foreground truncate">{jobTitleLabel(employee.job_title)}</span>}
         {timeLabel && (
           <span className="text-[11px] text-muted-foreground truncate">
             {stopLabel ? `${stopLabel} · ` : ''}{timeLabel}
@@ -216,7 +220,8 @@ const MatrixEmployeeCard = ({ employee, density, status, dragId, draggable = tru
         )}
         {unassignedWarning && (
           <span className="text-[10px] font-medium text-red-600 dark:text-red-400 truncate">
-            Not assigned to project
+            
+            {t("matrixEmployeeCard.notAssignedToProject")}
           </span>
         )}
       </div>
