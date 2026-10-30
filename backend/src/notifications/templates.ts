@@ -418,3 +418,8 @@ export const SPANISH_TEMPLATES: Record<string, { subject: string; bodyHtml: stri
       "<p>Hola, {user_name}:</p><p>Su usuario de SSAA (el correo con el que inicia sesión) es: <strong>{email}</strong></p><p>Si usted no lo pidió, puede ignorar este correo.</p>",
   },
 };
+
+/** The default English push (bell) wording per event, for translating notifications stored in English. */
+export const ENGLISH_PUSH: Record<string, { title: string; body: string }> = Object.fromEntries(
+  SEEDS.filter((s) => s.push).map((s) => [s.eventType, s.push!]),
+);

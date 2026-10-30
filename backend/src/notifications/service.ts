@@ -12,7 +12,8 @@ import { findUserById } from "../models/users.js";
 import { findCompanyById, findEmployeeById, findJoinRequestById } from "../rbac/models.js";
 import { logCorrespondence, renderPush, sendTemplatedEmail } from "./correspondence.js";
 import type { ScheduleRequest } from "../scheduling/types.js";
-import { asLang, clockLabel, dayLabel, say, type Lang } from "../i18n/index.js";
+import { asLang, clockLabel, dayLabel, requestedLang, say, type Lang } from "../i18n/index.js";
+import { translateStoredNotification } from "./translateStored.js";
 
 export async function ensureNotificationTables(): Promise<void> {
   await database.exec(`
@@ -29,6 +30,10 @@ export async function ensureNotificationTables(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_user_notifications_user ON user_notifications(user_id, created_at);
   `);
+  // Spanish copy of each notification, so the bell follows the reader's current language.
+  const columns = new Set((await database.all<{ name: string }>("PRAGMA table_info(user_notifications)")).map((c) => c.name));
+  if (!columns.has("title_es")) await database.exec("ALTER TABLE user_notifications ADD COLUMN title_es TEXT");
+  if (!columns.has("body_es")) await database.exec("ALTER TABLE user_notifications ADD COLUMN body_es TEXT");
 }
 
 export interface Notification {
@@ -47,29 +52,41 @@ interface Row {
   event_type: string;
   title: string;
   body: string | null;
+  title_es?: string | null;
+  body_es?: string | null;
   project_id: string | null;
   link: string | null;
   read_at: string | null;
   created_at: string;
 }
 
-const toNotification = (r: Row): Notification => ({
+const toNotification = (r: Row, lang: Lang): Notification => {
+  // Spanish when the reader is in Spanish: the stored copy, or for notifications from before both
+  // languages were kept, a translation rebuilt from the standard template.
+  const es = lang === "es" ? (r.title_es ? { title: r.title_es, body: r.body_es ?? null } : translateStoredNotification(r.event_type, r.title, r.body)) : null;
+  return {
   id: r.id,
   eventType: r.event_type,
-  title: r.title,
-  body: r.body,
+  title: es?.title ?? r.title,
+  body: es ? es.body : r.body,
   projectId: r.project_id,
   link: r.link,
   readAt: r.read_at,
   createdAt: r.created_at,
-});
+  };
+};
 
-export async function listNotifications(userId: string): Promise<Notification[]> {
+/**
+ * The reader's latest notifications, in the language the app asked for (its EN/ES toggle), or the
+ * reader's saved language when the request didn't say.
+ */
+export async function listNotifications(userId: string, lang?: Lang): Promise<Notification[]> {
+  lang ??= requestedLang() ?? (await languageOf(userId));
   const rows = await database.all<Row>(
     "SELECT * FROM user_notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 30",
     [userId],
   );
-  return rows.map(toNotification);
+  return rows.map((r) => toNotification(r, lang));
 }
 
 /** Marks the given ids (or everything unread when none are given) as read — only ever the caller's own. */
@@ -114,9 +131,12 @@ async function notify(
   if (recipients.length === 0) return false;
   try {
     let active = true;
+    // Both languages are kept with each notification; the bell shows whichever the reader is using.
+    const en = await renderPush(message.eventType, message.vars("en"), message.fallback, "en");
+    const es = await renderPush(message.eventType, message.vars("es"), message.fallback, "es");
     for (const userId of recipients) {
       const lang = await languageOf(userId);
-      const push = await renderPush(message.eventType, message.vars(lang), message.fallback, lang);
+      const push = lang === "es" ? es : en;
       active = push.active;
       if (!push.active) {
         await logCorrespondence({ eventType: message.eventType, channel: "push", recipientUserId: userId, subject: push.title, body: push.body, status: "off", errorMessage: "Template is switched off.", actorUserId: message.actorUserId });
@@ -124,9 +144,9 @@ async function notify(
       }
       const id = crypto.randomUUID();
       await database.run(
-        `INSERT INTO user_notifications (id, user_id, event_type, title, body, project_id, link, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, userId, message.eventType, push.title, push.body, message.projectId ?? null, message.link ?? null, new Date().toISOString()],
+        `INSERT INTO user_notifications (id, user_id, event_type, title, body, title_es, body_es, project_id, link, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, userId, message.eventType, en.title, en.body, es.title, es.body, message.projectId ?? null, message.link ?? null, new Date().toISOString()],
       );
       emit(EVENT.notificationCreated, { id }, ROOM.notifications, userId);
       await logCorrespondence({ eventType: message.eventType, channel: "push", recipientUserId: userId, subject: push.title, body: push.body, status: "sent", actorUserId: message.actorUserId });

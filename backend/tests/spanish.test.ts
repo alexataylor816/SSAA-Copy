@@ -185,3 +185,46 @@ describe("Translate button on chat messages", async () => {
     setTranslationConfiguredForTests(null);
   });
 });
+
+describe("Spanish: the bell follows the reader's current language", async () => {
+  const { translateStoredNotification } = await import("../src/notifications/translateStored.js");
+
+  it("shows the same notification in English or Spanish depending on the app's language", async () => {
+    const gc = await signUp("bgc", "Gale GC");
+    await company(gc.token, "Bell GC", "gc");
+    const project = await request(server).post("/projects").set(authed(gc.token)).send({ name: "Bell Tower" });
+    const sub = await signUp("bsub", "Bea Sub");
+    const subCompanyId = await company(sub.token, "Bell Sub", "sub");
+    await request(server).post("/projects/connect").set(authed(sub.token)).send({ code: project.body.connectionCode });
+    const crew = await request(server).get(`/companies/${subCompanyId}/connected-employees`).set(authed(gc.token));
+    await request(server).post("/schedule-requests").set(authed(gc.token)).send({
+      projectId: project.body.id, subCompanyId, employeeIds: [crew.body.employees[0].id], date: "2099-05-08", startTime: "07:00", endTime: "15:00",
+    });
+
+    const read = async (lang?: string) => {
+      const req = request(server).get("/notifications").set(authed(sub.token));
+      if (lang) req.set("Accept-Language", lang);
+      return ((await req).body.notifications as { eventType: string; title: string; body: string }[]).find((n) => n.eventType === "schedule_created")!;
+    };
+    expect((await read()).title).toBe("New schedule request");
+    const es = await read("es-MX");
+    expect(es.title).toBe("Nueva solicitud de programación");
+    expect(es.body).toContain("Bell GC solicitó 1 persona");
+  });
+
+  it("translates notifications saved in English before both languages were kept", () => {
+    expect(translateStoredNotification("schedule_created", "New schedule request", "Terrapin Builders requested 2 people for Mon, Nov 2 on Riverside Office Build.")).toEqual({
+      title: "Nueva solicitud de programación",
+      body: "Terrapin Builders solicitó 2 personas para el lun, 2 nov en Riverside Office Build.",
+    });
+    expect(translateStoredNotification("join_request", "New join request", "Sam Okafor asked to join Bao Plumbing.")).toEqual({
+      title: "Nueva solicitud de ingreso",
+      body: "Sam Okafor pidió unirse a Bao Plumbing.",
+    });
+    expect(translateStoredNotification("schedule_rejected", "Request declined", "Keystone declined Fri, Nov 13 on Clinic. Reason: Crew is out")?.body).toBe(
+      "Keystone rechazó el vie, 13 nov en Clinic. Motivo: Crew is out",
+    );
+    // Customised wording that doesn't match is left as it was.
+    expect(translateStoredNotification("join_request", "Heads up", "Something custom")).toEqual({ title: "Heads up", body: "Something custom" });
+  });
+});

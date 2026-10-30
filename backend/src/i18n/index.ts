@@ -16,7 +16,7 @@ import { ES } from "./es.js";
 
 export type Lang = "en" | "es";
 
-const store = new AsyncLocalStorage<{ lang: Lang }>();
+const store = new AsyncLocalStorage<{ lang: Lang; explicit: boolean }>();
 
 /** "es", "es-MX", "es-MX,es;q=0.9,en;q=0.8" → "es"; anything else → "en". */
 export function parseLang(value: unknown): Lang {
@@ -30,7 +30,14 @@ export function asLang(value: unknown): Lang {
 }
 
 export function languageMiddleware(req: Request, _res: Response, next: NextFunction): void {
-  store.run({ lang: parseLang(req.headers["accept-language"]) }, next);
+  const header = req.headers["accept-language"];
+  store.run({ lang: parseLang(header), explicit: typeof header === "string" && header.trim() !== "" }, next);
+}
+
+/** The language the request asked for, or null when it didn't say (no Accept-Language header). */
+export function requestedLang(): Lang | null {
+  const s = store.getStore();
+  return s?.explicit ? s.lang : null;
 }
 
 /** The language of the request being handled ("en" outside a request). */

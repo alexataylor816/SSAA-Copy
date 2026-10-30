@@ -24,7 +24,7 @@ interface Notification {
 }
 
 export default function NotificationBell() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const navigate = useNavigate();
@@ -40,6 +40,11 @@ export default function NotificationBell() {
       // Keep whatever is already showing.
     }
   }, [userId]);
+
+  // The server answers in the app's language, so reload the list when EN/ES is switched.
+  useEffect(() => {
+    if (language) void fetchItems();
+  }, [language, fetchItems]);
 
   useEffect(() => {
     void fetchItems();
