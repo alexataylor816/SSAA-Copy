@@ -118,6 +118,7 @@ export default function Dashboard() {
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [scheduleRequests, setScheduleRequests] = useState<Record<string, unknown>[]>([]);
   const [projectName, setProjectName] = useState("");
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [newCompanyType, setNewCompanyType] = useState<"gc" | "sub">("gc");
   const [error, setError] = useState<string | null>(null);
@@ -283,6 +284,7 @@ export default function Dashboard() {
     try {
       await api.post("/projects", { name: projectName.trim(), address: null });
       setProjectName("");
+      setNewProjectOpen(false);
       await loadProjects();
     } catch (err) {
       setError(err instanceof Error ? err.message : tr("dashboard.couldNotCreateProject"));
@@ -669,7 +671,7 @@ const handleReorderTasks = useCallback(
                 />
 
                 {canManageProjects && (
-                      <Dialog>
+                      <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
                         <DialogTrigger asChild>
                           <Button variant="outline" className="w-full border-primary/20 bg-card">
                             <Plus className="mr-2 h-4 w-4" />
