@@ -2689,45 +2689,57 @@ const Dashboard = () => {
     if (!companyId) return;
 
     let recommendationsGenerated = 0;
+    // Prevent multiple overlapping tasks from creating duplicate requests for
+    // the same subcontractor on the same day during one generation run.
+    const suggestedSubDates = new Set<string>();
+
+    const tradeTerms: Record<string, string[]> = {
+      electrical: ['electrical', 'electric', 'wiring', 'lighting'],
+      plumbing: ['plumbing', 'plumb', 'pipefitting', 'piping'],
+      hvac: ['hvac', 'heating', 'cooling', 'air conditioning', 'mechanical'],
+      drywall: ['drywall', 'sheetrock', 'wallboard'],
+      flooring: ['flooring', 'floor installation', 'tile'],
+      sprinkler: ['sprinkler', 'fire protection', 'fire suppression'],
+      masonry: ['masonry', 'brick', 'concrete block'],
+      security: ['security', 'access control', 'cctv'],
+      'structural steel': ['structural steel', 'steel framing', 'metal framing'],
+      'air balancer': ['air balance', 'air balancing', 'testing and balancing'],
+    };
     
     for (const currentDate of daysToCheck) {
       const dateStr = format(currentDate, 'yyyy-MM-dd');
       
-      const tasksForDate = relevantTasks.filter(t => {
-        const start = new Date(t.start_date);
-        const end = new Date(t.end_date);
-        return currentDate >= start && currentDate <= end;
-      });
+      const tasksForDate = relevantTasks.filter(t =>
+        dateStr >= t.start_date.slice(0, 10) && dateStr <= t.end_date.slice(0, 10)
+      );
 
       for (const task of tasksForDate) {
         for (const sub of data.selectedSubs) {
-          const tradeLower = sub.trade.toLowerCase();
-          const taskNameLower = task.name.toLowerCase();
-          
-          const isMatch = taskNameLower.includes(tradeLower) || 
-                          tradeLower.includes(taskNameLower.split(' ')[0]) ||
-                          (tradeLower === 'electrical' && taskNameLower.includes('electric')) ||
-                          (tradeLower === 'plumbing' && taskNameLower.includes('plumb')) ||
-                          (tradeLower === 'hvac' && (taskNameLower.includes('hvac') || taskNameLower.includes('heating') || taskNameLower.includes('cooling'))) ||
-                          (tradeLower === 'drywall' && taskNameLower.includes('drywall'));
+          const tradeLower = sub.trade.trim().toLowerCase();
+          const taskNameLower = task.name.trim().toLowerCase();
+          const terms = tradeTerms[tradeLower] || [tradeLower];
+          const isMatch = !!tradeLower && tradeLower !== 'other' && terms.some(term => taskNameLower.includes(term));
           
           if (!isMatch) continue;
 
           const subEmployees = employees.filter(e => e.company_id === sub.id);
-          const hasAvailability = subEmployees.some(emp => 
-            availabilities.some(a => {
-        const _d = new Date(a.start_time);
-              const availDate = `${_d.getUTCFullYear()}-${String(_d.getUTCMonth() + 1).padStart(2, '0')}-${String(_d.getUTCDate()).padStart(2, '0')}`;
+          const availableEmployeeIds = subEmployees
+            .filter(emp => availabilities.some(a => {
+              const availabilityDate = new Date(a.start_time);
+              const availDate = `${availabilityDate.getUTCFullYear()}-${String(availabilityDate.getUTCMonth() + 1).padStart(2, '0')}-${String(availabilityDate.getUTCDate()).padStart(2, '0')}`;
               return availDate === dateStr && a.employee_id === emp.id;
-            })
-          );
+            }))
+            .map(emp => emp.id);
 
-          if (hasAvailability) {
+          if (availableEmployeeIds.length > 0) {
+            const suggestionKey = `${sub.id}:${dateStr}`;
             const existingRequest = scheduleRequests.find(r => 
-              r.sub_company_id === sub.id && r.scheduled_date === dateStr
+              r.sub_company_id === sub.id &&
+              r.scheduled_date === dateStr &&
+              ['draft', 'pending', 'confirmed'].includes(r.status || '')
             );
 
-            if (!existingRequest) {
+            if (!existingRequest && !suggestedSubDates.has(suggestionKey)) {
               const { error } = await supabase.from('schedule_requests').insert({
                 project_id: task.project_id,
                 sub_company_id: sub.id,
@@ -2739,6 +2751,7 @@ const Dashboard = () => {
 
               if (!error) {
                 recommendationsGenerated++;
+                suggestedSubDates.add(suggestionKey);
               }
             }
           }
@@ -2755,7 +2768,7 @@ const Dashboard = () => {
     } else {
       toast({ 
         title: "No recommendations", 
-        description: "Could not match tasks to available subcontractors. Ensure subs have set their availability." 
+        description: "No trade-matched tasks with available employees were found, or a request already exists for that subcontractor and date."
       });
     }
   };

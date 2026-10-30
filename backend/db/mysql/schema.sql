@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   start_date          VARCHAR(10)  NOT NULL,
   end_date            VARCHAR(10)  NOT NULL,
   color               VARCHAR(50)  NULL,
+  trade               VARCHAR(100) NULL,
   status              VARCHAR(20)  NOT NULL DEFAULT 'pending',
   sort_order          INT          NOT NULL DEFAULT 0,
   created_at          VARCHAR(32)  NOT NULL DEFAULT (DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%d %H:%i:%s')),
@@ -343,6 +344,10 @@ CREATE TABLE IF NOT EXISTS user_notifications (
 -- this keeps the file safe to run repeatedly and also upgrades a database
 -- loaded from the earlier version of this file.
 -- ---------------------------------------------------------------------------
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'trade') = 0,
+  'ALTER TABLE tasks ADD COLUMN trade VARCHAR(100) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'phone') = 0,
   'ALTER TABLE users ADD COLUMN phone VARCHAR(50) NULL', 'DO 0');

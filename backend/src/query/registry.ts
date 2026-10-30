@@ -105,6 +105,7 @@ const TASKS: TableRule = {
     "start_date",
     "end_date",
     "color",
+    "trade",
     "status",
     "sort_order",
     "created_at",
