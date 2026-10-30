@@ -2,6 +2,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { authApi } from "@/lib/api";
 import { isViewingAs } from "@/lib/viewAs";
+import { markLanguageChosenBeforeSignIn } from "@/i18n/runtime";
 import type { Language } from "@/i18n/translations";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,8 @@ export default function LanguageToggle({
     setLanguage(lang);
     // Saved quietly; a failed save still switches this screen.
     if (user && !isViewingAs()) void authApi.updateProfile({ language: lang }).catch(() => undefined);
+    // Before sign-in there's no account yet: remember the tap so signing in keeps it.
+    if (!user) markLanguageChosenBeforeSignIn();
   };
 
   const options: { value: Language; label: string; name: string }[] = [

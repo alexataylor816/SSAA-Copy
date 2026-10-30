@@ -84,3 +84,27 @@ export function dayPeriod(p: "am" | "pm"): string {
   if (current === "es") return p === "am" ? "a.m." : "p.m.";
   return p === "am" ? "AM" : "PM";
 }
+
+/*
+ * A language tapped on the sign-in / sign-up screens is a fresh, deliberate choice, so it beats the
+ * language saved on the account (and gets saved to it). Without a tap, the account's language wins,
+ * which is what makes a crew member's phone open in Spanish after signing in.
+ */
+const CHOSEN_KEY = "ssaa-language-chosen";
+export function markLanguageChosenBeforeSignIn(): void {
+  try {
+    window.sessionStorage.setItem(CHOSEN_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+/** True once if the person tapped EN/ES before signing in (and clears it). */
+export function takeLanguageChosenBeforeSignIn(): boolean {
+  try {
+    const chosen = window.sessionStorage.getItem(CHOSEN_KEY) === "1";
+    window.sessionStorage.removeItem(CHOSEN_KEY);
+    return chosen;
+  } catch {
+    return false;
+  }
+}
