@@ -11,6 +11,7 @@ import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { TASK_TRADES, tradeColor } from '@/lib/taskTrades';
 
 const parseLocalDate = (dateStr: string): Date => {
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -24,13 +25,14 @@ interface Task {
   end_date: string;
   color: string;
   status?: string;
+  trade?: string | null;
 }
 
 interface EditTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   task: Task | null;
-  onUpdateTask: (id: string, name: string, startDate: Date, endDate: Date, status: string, color: string, sharedWithSubs?: boolean) => void;
+  onUpdateTask: (id: string, name: string, startDate: Date, endDate: Date, status: string, color: string, trade: string | null, sharedWithSubs?: boolean) => void;
   onDeleteTask?: (id: string) => void;
   isGCView?: boolean;
 }
@@ -42,6 +44,7 @@ const EditTaskModal = ({ isOpen, onClose, task, onUpdateTask, onDeleteTask, isGC
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
   const [status, setStatus] = useState('not_started');
   const [color, setColor] = useState('#0284c7');
+  const [trade, setTrade] = useState('');
   const [showShareDialog, setShowShareDialog] = useState(false);
 
   const COLOR_OPTIONS: { value: string; labelKey: string }[] = [
@@ -64,18 +67,19 @@ const EditTaskModal = ({ isOpen, onClose, task, onUpdateTask, onDeleteTask, isGC
       setEndDate(parseLocalDate(task.end_date));
       setStatus(task.status || 'not_started');
       setColor(task.color || '#0284c7');
+      setTrade(task.trade || '');
     }
   }, [task]);
 
   const handleSubmit = () => {
     if (!task || !taskName.trim() || !startDate || !endDate) return;
-    onUpdateTask(task.id, taskName, startDate, endDate, status, color, true);
+    onUpdateTask(task.id, taskName, startDate, endDate, status, color, trade || null, true);
     onClose();
   };
 
   const handleShareDecision = (share: boolean) => {
     if (!task || !startDate || !endDate) return;
-    onUpdateTask(task.id, taskName, startDate, endDate, status, color, share);
+    onUpdateTask(task.id, taskName, startDate, endDate, status, color, trade || null, share);
     setShowShareDialog(false);
     onClose();
   };
@@ -88,6 +92,18 @@ const EditTaskModal = ({ isOpen, onClose, task, onUpdateTask, onDeleteTask, isGC
         </DialogHeader>
         
         <div className="space-y-4 pt-4">
+          <div className="space-y-2">
+            <Label>Trade</Label>
+            <Select value={trade || 'unassigned'} onValueChange={(value) => {
+              const next = value === 'unassigned' ? '' : value;
+              setTrade(next);
+              setColor(tradeColor(next));
+            }}>
+              <SelectTrigger><SelectValue placeholder="Choose trade" /></SelectTrigger>
+              <SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{TASK_TRADES.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="taskName">{t('task.nameOfTask')}</Label>
             <Input

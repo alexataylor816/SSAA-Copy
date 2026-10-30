@@ -343,6 +343,9 @@ const LeftPanel = ({
                           </div>
                         </div>
                         <div className="text-muted-foreground italic">{rec.taskName}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          Suggested because the trade matches and an employee marked availability.
+                        </div>
                         <div className="flex gap-1 pt-1">
                           <Button 
                             size="sm" 
