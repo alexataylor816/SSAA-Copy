@@ -27,7 +27,7 @@ export default function UploadScheduleModal({ open, onOpenChange, onImport }: Up
     if (!file) return;
     setError(""); setTasks([]); setFileName(file.name);
     if (!file.name.toLowerCase().endsWith(".csv")) {
-      setError("For this first version, upload a CSV file. PDF and spreadsheet parsing are not supported yet.");
+      setError("Upload a CSV file. For Microsoft Project (.mpp), export Task Name, Start, Finish, Duration, and Predecessors to CSV first. Excel files must also be saved as CSV. Direct .mpp and Excel parsing are not supported.");
       return;
     }
     try {
@@ -52,7 +52,7 @@ export default function UploadScheduleModal({ open, onOpenChange, onImport }: Up
     <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
       <DialogHeader>
         <DialogTitle>Upload schedule tasks</DialogTitle>
-        <DialogDescription>Choose a CSV with Task, Start Date, and End Date columns. Review every trade before saving tasks.</DialogDescription>
+        <DialogDescription>Choose a CSV with Task, Start Date, and End Date columns. Microsoft Project and Excel schedules must be exported as CSV first. Duration and Predecessors are retained when present. Unclear trades can be saved as Needs review.</DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
         <div className="space-y-2">
@@ -62,7 +62,7 @@ export default function UploadScheduleModal({ open, onOpenChange, onImport }: Up
         </div>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {tasks.length > 0 && <>
-          <p className="text-sm font-medium">Review {tasks.length} task{tasks.length === 1 ? "" : "s"}. Unclear trades need your choice.</p>
+          <p className="text-sm font-medium">Review {tasks.length} task{tasks.length === 1 ? "" : "s"}. Unclear trades stay marked Needs review until you choose a trade.</p>
           <div className="space-y-3">
             {tasks.map((task, i) => <div key={`${i}-${task.name}`} className="grid gap-2 rounded-md border p-3 md:grid-cols-[minmax(0,1.5fr)_1fr_1fr_1fr] md:items-end">
               <div className="space-y-1"><Label>Task</Label><Input value={task.name} onChange={(e) => {
@@ -76,12 +76,13 @@ export default function UploadScheduleModal({ open, onOpenChange, onImport }: Up
                   <SelectItem value="unassigned">Choose trade</SelectItem>
                   {TASK_TRADES.map((trade) => <SelectItem key={trade} value={trade}>{trade}</SelectItem>)}
                 </SelectContent>
-              </Select><p className="text-[11px] text-muted-foreground">{task.trade ? task.status === "classified" ? "Suggested; change if needed." : "Please confirm." : task.status === "ambiguous" ? "Ambiguous task." : "Trade required."}</p></div>
+              </Select><p className="text-[11px] text-muted-foreground">{task.trade ? 'Trade identified' : 'Needs review'}</p></div>
+              {(task.duration || task.predecessors) && <p className="text-xs text-muted-foreground md:col-span-4">Duration: {task.duration || "—"} · Predecessors: {task.predecessors || "—"}. Retained for reference; dependencies do not change staffing dates automatically.</p>}
             </div>)}
           </div>
           <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
             <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>Choose another CSV</Button>
-            <Button onClick={() => void importTasks()} disabled={busy || tasks.some((t) => !t.name.trim() || !t.trade || !t.start_date || !t.end_date || t.end_date < t.start_date)}>{busy ? "Saving…" : "Save tasks"}</Button>
+            <Button onClick={() => void importTasks()} disabled={busy || tasks.some((t) => !t.name.trim() || !t.start_date || !t.end_date || t.end_date < t.start_date)}>{busy ? "Saving…" : "Save tasks"}</Button>
           </div>
         </>}
       </div>

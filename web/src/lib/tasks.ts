@@ -1,3 +1,4 @@
+import { tradeColor } from "./taskTrades";
 import { supabase } from "./supabase";
 
 /**
@@ -16,6 +17,8 @@ export interface Task {
   end_date: string;
   color: string | null;
   trade: string | null;
+  duration?: string | null;
+  predecessors?: string | null;
   status: string;
   sort_order: number;
 }
@@ -46,7 +49,7 @@ export function toCalendarTask(task: Task): CalendarTask {
     end_date: task.end_date,
     // The column is nullable in the schema; Lovable's bars are styled with an
     // inline background, so fall back rather than rendering a transparent bar.
-    color: task.color || "#0284c7",
+    color: task.trade ? tradeColor(task.trade) : task.color || "#0284c7",
     status: task.status,
     project_id: task.project_id,
     trade: task.trade ?? null,
@@ -84,7 +87,7 @@ export async function listTasksForProjects(projectIds: string[]): Promise<Task[]
 
 export async function createTask(
   projectId: string,
-  input: { name: string; start_date: string; end_date: string; color?: string | null; trade?: string | null },
+  input: { name: string; start_date: string; end_date: string; color?: string | null; trade?: string | null; duration?: string; predecessors?: string },
 ): Promise<void> {
   unwrap(
     await supabase.from("tasks").insert({
@@ -94,6 +97,8 @@ export async function createTask(
       end_date: input.end_date,
       color: input.color ?? "#0284c7",
       trade: input.trade ?? null,
+      duration: input.duration ?? null,
+      predecessors: input.predecessors ?? null,
     }),
   );
 }

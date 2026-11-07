@@ -106,6 +106,8 @@ const TASKS: TableRule = {
     "end_date",
     "color",
     "trade",
+    "duration",
+    "predecessors",
     "status",
     "sort_order",
     "created_at",
@@ -394,6 +396,7 @@ export const TABLE_RULES: Record<string, TableRule> = {
     columns: [
       "id",
       "project_id",
+      "task_id",
       "requesting_company_id",
       "sub_company_id",
       "employee_ids",
@@ -412,10 +415,8 @@ export const TABLE_RULES: Record<string, TableRule> = {
             sql: "(requesting_company_id = @__own OR sub_company_id = @__own)",
             params: { __own: caller.companyId },
           },
-    canWrite: (caller) => {
-      if (!hasPartialOrHigher(caller)) {
-        throw new ForbiddenError("You need Partial-level access or higher to act on schedule requests.");
-      }
+    canWrite: () => {
+      throw new ForbiddenError("Use the schedule request workflow to send or respond to requests.");
     },
     readonlyColumns: ["project_id", "requesting_company_id", "sub_company_id", "created_at"],
   },

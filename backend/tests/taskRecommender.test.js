@@ -1,138 +1,125 @@
 import { describe, expect, it } from "vitest";
-import { classifyTaskTrade, normalizeTrade, tradeColor } from "../../web/src/lib/taskTrades.ts";
+import { classifyTaskTrade, normalizeTrade, tradeColor } from "../src/scheduling/taskTrades.ts";
 import { parseScheduleCsv } from "../../web/src/lib/scheduleCsv.ts";
-import { assertRecommendationTradeMatch, buildScheduleRecommendations, recommendationWindow } from "../../web/src/lib/scheduleRecommendations.ts";
+import { assertRecommendationTradeMatch, buildScheduleRecommendations, eligibleEmployees, recommendationWindow, validDate, validTime } from "../src/scheduling/recommendationRules.ts";
 
-describe("schedule task trade classification", () => {
-  it.each([
-    ["Layout", "Drywall"],
-    ["Electrical Layout", "Electrical"],
-    ["HVAC Layout", "HVAC"],
-    ["Framing", "Drywall"],
-    ["Plumbing Rough-In", "Plumbing"],
-    ["Duct Install", "HVAC"],
-    ["VAV Install", "HVAC"],
-    ["Electrical", "Electrical"],
-    ["Sprinklers", "Fire Sprinkler"],
-  ])("maps %s to %s", (name, trade) => {
-    expect(classifyTaskTrade(name).trade).toBe(trade);
-    expect(classifyTaskTrade(name).status).toBe("classified");
+const examples = [
+  ["Demo", null], ["Layout", "Drywall"], ["Framing", "Drywall"],
+  ["Electrical Rough In", "Electrical"], ["Plumbing Rough In", "Plumbing"],
+  ["Duct Install", "HVAC"], ["Drywall One Siding", "Drywall"], ["Wall Close In Inspection", null],
+  ["Drywall Install", "Drywall"], ["VAV Install", "HVAC"], ["Sprinkler Install", "Fire Sprinkler"],
+  ["Electrical Ceiling Rough In", "Electrical"], ["Low Voltage Install", "Low Voltage Telecommunication Services"],
+  ["Drywall Finishing", "Drywall"], ["Light Fixture Install", "Electrical"], ["Ceiling Close In Inspection", null],
+  ["Painting", "Painting"], ["Flooring Install", "Flooring"], ["Millwork Install", "Millworkers"],
+  ["Plumbing Fixture Install", "Plumbing"], ["Electrical Trim Out", "Electrical"],
+  ["Low Voltage Trim Out", "Low Voltage Telecommunication Services"], ["Final Inspections", null],
+];
+describe("rule-based task classification", () => {
+  it.each(examples)("reviews client example %s", (name, trade) => {
+    expect(classifyTaskTrade(name)).toEqual({ trade, status: trade ? "classified" : "ambiguous" });
   });
-
-  it("leaves Demo ambiguous and unknown activities unresolved", () => {
-    expect(classifyTaskTrade("Demo")).toEqual({ trade: null, status: "ambiguous" });
-    expect(classifyTaskTrade("Owner walk-through")).toEqual({ trade: null, status: "unresolved" });
+  it.each(["HVAC and Electrical Layout", "Electrical and Plumbing Rough In", "Drywall Demo"])("requires review for %s", (name) => {
+    expect(classifyTaskTrade(name)).toEqual({ trade: null, status: "ambiguous" });
   });
-
-  it("uses stable trade colors and normalizes sprinkler aliases", () => {
+  it("leaves unknown tasks unresolved", () => expect(classifyTaskTrade("Owner walk-through")).toEqual({ trade: null, status: "unresolved" }));
+  it("normalizes company trade aliases and uses consistent colors", () => {
     expect(normalizeTrade("Sprinkler")).toBe(normalizeTrade("Fire Sprinkler"));
+    expect(normalizeTrade("Duct Installation")).toBe(normalizeTrade("HVAC"));
     expect(tradeColor("Electrical")).toBe("#ca8a04");
-    expect(tradeColor(null)).toBe("#0284c7");
+    expect(tradeColor("Painting")).not.toBe(tradeColor("Drywall"));
   });
 });
-
 describe("schedule CSV review parser", () => {
-  it("accepts common task/date headers and quoted commas", () => {
-    expect(parseScheduleCsv('Task Name,Start Date,End Date\n"Level 1, east",11/03/2026,2026-11-04')).toEqual([
-      { name: "Level 1, east", start_date: "2026-11-03", end_date: "2026-11-04" },
-    ]);
+  it("accepts common headers and quoted commas", () => expect(parseScheduleCsv('Task Name,Start Date,Finish\n"Level 1, east",11/10/2026,2026-11-11')).toEqual([{ name: "Level 1, east", start_date: "2026-11-10", end_date: "2026-11-11" }]));
+  it("retains Project duration/predecessors and handles export dates", () => {
+    expect(parseScheduleCsv('ID,Name,Duration,Start,Finish,Predecessors\n2,Demo,2 days,Tue 11/10/26,Wed 11/11/26,1FS')).toEqual([{ name: "Demo", start_date: "2026-11-10", end_date: "2026-11-11", duration: "2 days", predecessors: "1FS" }]);
   });
-
-  it("rejects missing columns and invalid or reversed dates", () => {
-    expect(() => parseScheduleCsv("Task,Start\nDemo,2026-11-01")).toThrow(/columns/i);
-    expect(() => parseScheduleCsv("Task,Start Date,End Date\nDemo,2026-02-30,2026-03-01")).toThrow(/Row 2/);
-    expect(() => parseScheduleCsv("Task,Start Date,End Date\nDemo,2026-11-03,2026-11-02")).toThrow(/Row 2/);
-  });
-});
-
-const task = (name, trade, start = "2026-11-03", end = "2026-11-05") => ({
-  id: name, project_id: "project-1", assigned_company_id: null, name, description: null,
-  start_date: start, end_date: end, color: tradeColor(trade), trade, status: "pending", sort_order: 0,
-});
-
-describe("schedule recommendations", () => {
-  const now = new Date(2026, 10, 2);
-  const subs = [
-    { id: "sub-elec", name: "Electrical Co", trade: "Electrical" },
-    { id: "sub-drywall", name: "Drywall Co", trade: "Drywall" },
-  ];
-  const availability = [
-    { employeeId: "e1", companyId: "sub-elec", date: "2026-11-03", startTime: "08:00", endTime: "16:00", projectId: null, allProjects: true },
-    { employeeId: "e2", companyId: "sub-elec", date: "2026-11-03", startTime: "08:00", endTime: "16:00", projectId: "project-1", allProjects: false },
-    { employeeId: "e3", companyId: "sub-elec", date: "2026-11-03", startTime: "07:00", endTime: "15:00", projectId: "project-1", allProjects: false },
-    { employeeId: "d1", companyId: "sub-drywall", date: "2026-11-03", startTime: "08:00", endTime: "16:00", projectId: "project-1", allProjects: false },
-  ];
-
   it.each([
-    ["Drywall", "sub-drywall", "sub-elec"],
-    ["HVAC", "sub-hvac", "sub-drywall"],
-    ["Electrical", "sub-elec", "sub-drywall"],
-  ])("only considers %s subcontractors even when a different trade has availability", (trade, matchingId, otherId) => {
-    const choices = [
-      { id: "sub-drywall", name: "Drywall Co", trade: "Drywall" },
-      { id: "sub-hvac", name: "HVAC Co", trade: "HVAC" },
-      { id: "sub-elec", name: "Electrical Co", trade: "Electrical" },
-    ];
-    const result = buildScheduleRecommendations({
-      tasks: [task(`${trade} task`, trade)], subs: choices, selectedSubs: choices, weeks: [1],
-      employeesByCompany: { "sub-drywall": ["d1"], "sub-hvac": ["h1"], "sub-elec": ["e1"] },
-      availability: ["d1", "h1", "e1"].map((employeeId) => ({ employeeId, date: "2026-11-03", startTime: "08:00", endTime: "16:00", projectId: "project-1", allProjects: false })),
-      requests: [], now,
-    })[0];
-    expect(result.subId).toBe(matchingId);
-    expect(result.candidates.map((candidate) => candidate.id)).toEqual([matchingId]);
-    expect(result.candidates.map((candidate) => candidate.id)).not.toContain(otherId);
+    "Task,Start\nDemo,2026-11-10",
+    "Task,Start,Finish\nDemo,2026-02-30,2026-03-01",
+    "Task,Start,Finish\nDemo,2026-11-11,2026-11-10",
+    'Task,Start,Finish\n"Demo,2026-11-10,2026-11-11',
+  ])("rejects malformed import %s", (csv) => expect(() => parseScheduleCsv(csv)).toThrow());
+});
+const now = new Date(2026, 10, 9);
+const date = "2026-11-10";
+const task = (trade = "Electrical") => ({ id: "task", project_id: "project", name: "Electrical Layout", trade, start_date: date, end_date: "2026-11-13" });
+const subs = [{ id: "e", name: "Electrical Co", trade: "Electrical" }, { id: "d", name: "Drywall Co", trade: "Drywall" }, { id: "e2", name: "Other Electric", trade: "Electrical" }];
+const slot = (employeeId, changes = {}) => ({ employeeId, date, startTime: "08:00", endTime: "16:00", projectId: "project", allProjects: false, ...changes });
+const base = () => ({ tasks: [task()], subs, selectedSubs: subs, weeks: [1], now, headcount: 3, employeesByCompany: { e: ["a", "b", "c"], e2: ["x"], d: ["z"] }, availability: [slot("a"), slot("b"), slot("c"), slot("x"), slot("z")], requests: [] });
+describe("recommendation rules", () => {
+  it("matches connected trades, supports multiple companies, and explains its choice", () => {
+    const rec = buildScheduleRecommendations(base())[0];
+    expect(rec.candidates.map((c) => c.id)).toEqual(["e", "e2"]);
+    expect(rec).toMatchObject({ subId: "e", headcount: 3, availableCount: 3, reason: null });
+    expect(rec.explanation).toMatch(/matches the Electrical trade/);
   });
-
-  it("offers available headcount for selected trades in selected week", () => {
-    const result = buildScheduleRecommendations({
-      tasks: [task("Electrical Layout", "Electrical")], subs, selectedSubs: subs, weeks: [1],
-      employeesByCompany: { "sub-elec": ["e1", "e2", "e3"], "sub-drywall": ["d1"] },
-      availability, requests: [], now,
-    });
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ date: "2026-11-03", trade: "Electrical", subId: "sub-elec", headcount: 2, startTime: "08:00", endTime: "16:00", reason: null });
+  it("never trusts an unconnected stale selection", () => {
+    const args = base(); args.selectedSubs = [{ id: "outsider", trade: "Electrical" }];
+    expect(buildScheduleRecommendations(args)[0].candidates).toEqual([]);
   });
-
-  it("reports missing trade, unmatched subcontractor, and no availability instead of guessing", () => {
-    const result = buildScheduleRecommendations({
-      tasks: [task("Demo", null), task("Electrical", "Electrical")], subs,
-      selectedSubs: [subs[1]], weeks: [1], employeesByCompany: { "sub-drywall": ["d1"] },
-      availability, requests: [], now,
-    });
-    expect(result[0].reason).toMatch(/choose a trade/i);
-    expect(result[1].reason).toMatch(/no matching subcontractor/i);
-    const none = buildScheduleRecommendations({
-      tasks: [task("Electrical", "Electrical")], subs, selectedSubs: [subs[0]], weeks: [1],
-      employeesByCompany: { "sub-elec": ["e1", "e2"] }, availability: [], requests: [], now,
-    });
-    expect(none[0].headcount).toBe(0);
-    expect(none[0].reason).toMatch(/no availability/i);
+  it("ranks ability to meet crew size then available count", () => {
+    const args = base(); args.availability = [slot("a"), slot("x"), slot("y")]; args.employeesByCompany.e2.push("y"); args.headcount = 2;
+    expect(buildScheduleRecommendations(args)[0].subId).toBe("e2");
   });
-
-  it("blocks Send when the task trade and selected subcontractor trade differ", () => {
-    expect(() => assertRecommendationTradeMatch("Electrical", "Drywall")).toThrow(/does not match the task trade/i);
-    expect(() => assertRecommendationTradeMatch("HVAC", null)).toThrow(/does not match the task trade/i);
+  it("requires review for unresolved trades and accepts manual correction", () => {
+    const args = base(); args.tasks = [task(null)];
+    expect(buildScheduleRecommendations(args)[0].reason).toMatch(/Needs review/);
+    args.tasks[0].trade = "Electrical";
+    expect(buildScheduleRecommendations(args)[0].reason).toBeNull();
   });
-
-  it("allows Send validation for a matching trade and keeps a valid draft", () => {
-    expect(() => assertRecommendationTradeMatch("Electrical", "Electrical")).not.toThrow();
-    const result = buildScheduleRecommendations({
-      tasks: [task("Electrical Layout", "Electrical")], subs, selectedSubs: subs, weeks: [1],
-      employeesByCompany: { "sub-elec": ["e1", "e2", "e3"], "sub-drywall": ["d1"] },
-      availability, requests: [], now,
-    })[0];
-    expect(result).toMatchObject({ trade: "Electrical", subId: "sub-elec", headcount: 2, reason: null });
+  it("distinguishes no connection from no selected company", () => {
+    const args = base(); args.tasks = [task("HVAC")];
+    expect(buildScheduleRecommendations(args)[0].reason).toMatch(/No HVAC subcontractor is connected/);
+    args.tasks = [task()]; args.selectedSubs = [];
+    expect(buildScheduleRecommendations(args)[0].reason).toMatch(/No Electrical subcontractor is selected/);
   });
-
-  it("excludes already requested crew and bounds week selection to 21 days", () => {
-    const window = recommendationWindow([1, 3], now);
-    expect(window.selectedDays.size).toBe(14);
-    const result = buildScheduleRecommendations({
-      tasks: [task("Electrical", "Electrical")], subs, selectedSubs: [subs[0]], weeks: [1],
-      employeesByCompany: { "sub-elec": ["e1", "e2", "e3"] }, availability,
-      requests: [{ date: "2026-11-03", employeeIds: ["e1", "e2", "e3"], status: "pending" }], now,
-    });
-    expect(result[0].headcount).toBe(0);
+  it("shows zero availability and the next observed date without moving the request", () => {
+    const args = base(); args.availability = [slot("a", { date: "2026-11-11" })];
+    expect(buildScheduleRecommendations(args)[0]).toMatchObject({ date, availableCount: 0, headcount: 3, nextAvailability: { date: "2026-11-11", count: 1 } });
+  });
+  it("preserves an excessive requested crew and explains partial availability", () => {
+    const args = base(); args.headcount = 5;
+    const rec = buildScheduleRecommendations(args)[0];
+    expect(rec.headcount).toBe(5); expect(rec.reason).toMatch(/3 of 5 requested workers/);
+  });
+  it.each(["pending", "confirmed"])("recognizes an existing %s task request after refresh", (status) => {
+    const args = base(); args.requests = [{ taskId: "task", date, employeeIds: ["a"], status }];
+    expect(buildScheduleRecommendations(args)[0]).toMatchObject({ existingStatus: status });
+    expect(buildScheduleRecommendations(args)[0].reason).toMatch(new RegExp(`Already ${status}`));
+  });
+  it("only produces drafts and leaves inputs unchanged", () => {
+    const args = base(), before = JSON.stringify(args); buildScheduleRecommendations(args);
+    expect(JSON.stringify(args)).toBe(before);
+  });
+  it("bounds weeks to the supported range", () => expect(recommendationWindow([0, 1, 1, 3, 4], now).selectedDays.size).toBe(14));
+  it("blocks wrong-trade validation", () => {
+    expect(() => assertRecommendationTradeMatch("Electrical", "Drywall")).toThrow(/does not match/);
+    expect(() => assertRecommendationTradeMatch("HVAC", "Duct Installation")).not.toThrow();
+  });
+});
+describe("employee eligibility", () => {
+  const args = () => ({ employeeIds: ["a"], projectId: "project", date, startTime: "08:00", endTime: "16:00", availability: [slot("a")], requests: [] });
+  it.each(["pending", "confirmed"])("blocks a cross-project %s overlapping booking", (status) => {
+    const a = args(); a.requests = [{ date, projectId: "private-project", employeeIds: ["a"], status, startTime: "12:00", endTime: "17:00" }];
+    expect(eligibleEmployees(a)).toEqual([]);
+  });
+  it("allows separate stops but never fills gaps in availability", () => {
+    const a = args(); a.requests = [{ date, employeeIds: ["a"], status: "confirmed", startTime: "16:00", endTime: "18:00" }];
+    expect(eligibleEmployees(a)).toEqual(["a"]);
+    a.availability = [slot("a", { endTime: "12:00" }), slot("a", { startTime: "13:00" })];
+    expect(eligibleEmployees(a)).toEqual([]);
+    a.availability[1].startTime = "12:00"; expect(eligibleEmployees(a)).toEqual(["a"]);
+  });
+  it("does not count partial hours, another project's availability, or repeated rows twice", () => {
+    const a = args(); a.availability = [slot("a", { endTime: "15:00" })]; expect(eligibleEmployees(a)).toEqual([]);
+    a.availability = [slot("a", { projectId: "other" })]; expect(eligibleEmployees(a)).toEqual([]);
+    a.availability = [slot("a", { allProjects: true }), slot("a")]; expect(eligibleEmployees(a)).toEqual(["a"]);
+  });
+  it.each(["rejected", "cancelled"])("releases %s bookings", (status) => {
+    const a = args(); a.requests = [{ date, employeeIds: ["a"], status }]; expect(eligibleEmployees(a)).toEqual(["a"]);
+  });
+  it("validates real dates and clock times", () => {
+    expect(validDate("2026-02-30")).toBe(false); expect(validTime("25:00")).toBe(false); expect(validTime("08:60")).toBe(false);
   });
 });

@@ -13,8 +13,8 @@ import {
   type CalendarTask,
   type Task,
 } from "@/lib/tasks";
-import { classifyTaskTrade, normalizeTrade, tradeColor } from "@/lib/taskTrades";
-import { assertRecommendationTradeMatch, buildScheduleRecommendations, recommendationCandidatesForTrade, recommendationWindow, type RecommendationSub, type ScheduleRecommendation } from "@/lib/scheduleRecommendations";
+import { classifyTaskTrade, tradeColor } from "@/lib/taskTrades";
+import { recommendationReason, type RecommendationSub, type ScheduleRecommendation } from "@/lib/scheduleRecommendations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,7 +74,6 @@ interface JoinRequest {
 }
 
 interface ConnectedSub extends RecommendationSub { companyType?: string }
-interface RecommendationEmployee { id: string; name: string; companyId?: string }
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
@@ -424,86 +423,56 @@ const handleReorderTasks = useCallback(
   const handleImportSchedule = useCallback(async (rows: ReviewedScheduleTask[]) => {
     if (!selectedProjectId) throw new Error("Choose a project before uploading its schedule.");
     for (const row of rows) {
-      await createTask(selectedProjectId, { name: row.name, start_date: row.start_date, end_date: row.end_date, trade: row.trade, color: row.color });
+      await createTask(selectedProjectId, { name: row.name, start_date: row.start_date, end_date: row.end_date, trade: row.trade || null, color: row.color, duration: row.duration, predecessors: row.predecessors });
     }
     await reloadTasks();
   }, [selectedProjectId, reloadTasks]);
 
-  const handleGenerateRecommendations = useCallback(async (input: { selectedSubs: RecommendationSub[]; selectedWeeks: number[] }) => {
+  const handleGenerateRecommendations = useCallback(async (input: { selectedSubs: { id: string }[]; selectedWeeks: number[]; taskIds: string[]; headcount: number; startTime: string; endTime: string }) => {
     if (!selectedProjectId) return { message: "Select one project to generate recommendations." };
-    if (input.selectedWeeks.length === 0) return { message: "Choose at least one week." };
-    const { start, end, selectedDays } = recommendationWindow(input.selectedWeeks);
-    const projectTasks = tasks.filter((task) => task.project_id === selectedProjectId && task.end_date >= start && [...selectedDays].some((day) => day >= task.start_date && day <= task.end_date));
-    if (projectTasks.length === 0) { setDraftRecommendations([]); return { message: "No scheduled tasks in the selected weeks. Upload or add tasks first." }; }
-    if (input.selectedSubs.length === 0) return { message: "Select at least one applicable subcontractor." };
-    const rosters = await Promise.all(input.selectedSubs.map(async (sub) => {
-      const result = await api.get<{ employees: RecommendationEmployee[] }>(`/companies/${sub.id}/connected-employees`);
-      return [sub.id, result.employees.map((employee) => employee.id)] as const;
-    }));
-    const employeesByCompany = Object.fromEntries(rosters);
-    const employeeIds = [...new Set(rosters.flatMap(([, ids]) => ids))];
-    let availability: Array<{ employeeId: string; date: string; startTime: string; endTime: string; projectId: string | null; allProjects: boolean }> = [];
-    if (employeeIds.length > 0) {
-      const result = await supabase.from("availability").select("*").in("employee_id", employeeIds).gte("date", start).lte("date", end);
-      if (result.error) throw new Error(result.error.message);
-      availability = ((result.data ?? []) as Array<{ employee_id: string; project_id: string | null; date: string; start_time: string; end_time: string; all_projects: number | boolean }>).map((slot) => ({ employeeId: slot.employee_id, date: slot.date, startTime: slot.start_time, endTime: slot.end_time, projectId: slot.project_id, allProjects: slot.all_projects === true || slot.all_projects === 1 }));
-    }
-    let requests: Array<{ date: string; employeeIds: string[]; status: string }> = [];
-    try {
-      const result = await api.get<{ requests: Array<{ date: string; employeeIds: string[]; status: string; projectId: string }> }>(`/schedule-requests?start=${start}&end=${end}`);
-      requests = result.requests.filter((request) => request.projectId === selectedProjectId);
-    } catch { /* Availability still supports a useful recommendation if request history is unavailable. */ }
-    const recs = buildScheduleRecommendations({ tasks: projectTasks, subs: connectedSubs, selectedSubs: input.selectedSubs, weeks: input.selectedWeeks, employeesByCompany, availability, requests });
-    setDraftRecommendations(recs);
-    return { message: recs.length ? `${recs.length} draft recommendation${recs.length === 1 ? "" : "s"} created. Review and edit before sending.` : "No scheduled tasks fall within the selected weeks." };
-  }, [connectedSubs, selectedProjectId, tasks]);
+    const result = await api.post<{ recommendations: ScheduleRecommendation[] }>(`/projects/${selectedProjectId}/recommendations`, {
+      taskIds: input.taskIds, subIds: input.selectedSubs.map((s) => s.id), weeks: input.selectedWeeks,
+      headcount: input.headcount, startTime: input.startTime, endTime: input.endTime,
+    });
+    setDraftRecommendations(result.recommendations);
+    return { message: result.recommendations.length ? `${result.recommendations.length} drafts ready. Close this window to review and send. Nothing has been sent.` : "No selected tasks fall within these weeks. Choose another week or update the task dates." };
+  }, [selectedProjectId]);
 
-  const handleUpdateRecommendation = useCallback((id: string, updates: Partial<Pick<ScheduleRecommendation, "trade" | "subId" | "date" | "headcount" | "startTime" | "endTime">>) => {
+  const handleUpdateRecommendation = useCallback(async (id: string, updates: Partial<Pick<ScheduleRecommendation, "trade" | "subId" | "date" | "headcount" | "startTime" | "endTime">>) => {
     const previous = draftRecommendations.find((rec) => rec.id === id);
-    setDraftRecommendations((current) => current.map((rec) => {
-      if (rec.id !== id) return rec;
-      const next = { ...rec, ...updates };
-      const matched = recommendationCandidatesForTrade(next, next.trade);
-      const chosen = matched.find((candidate) => candidate.id === next.subId) ?? matched[0];
-      next.subId = chosen?.id ?? "";
-      next.subName = chosen?.name ?? "";
-      next.headcount = Math.min(Math.max(0, next.headcount), chosen?.employeeIds.length ?? 0);
-      next.startTime = chosen?.startTime ?? next.startTime;
-      next.endTime = chosen?.endTime ?? next.endTime;
-      next.reason = !next.trade ? "Choose a trade for this task before sending." : matched.length === 0 ? `No matching subcontractor for ${next.trade}.` : !chosen?.employeeIds.length ? "No availability for matching subcontractors on this task date." : null;
-      return next;
-    }));
-    if (previous && updates.trade !== undefined && previous.trade !== updates.trade) {
-      void updateTask(previous.taskId, { trade: updates.trade, color: tradeColor(updates.trade) })
-        .then(reloadTasks)
-        .catch((err) => setError(err instanceof Error ? err.message : "Could not update the task trade."));
+    if (!previous || !selectedProjectId) return;
+    const next = { ...previous, ...updates };
+    if (updates.trade !== undefined && previous.trade !== updates.trade) {
+      await updateTask(previous.taskId, { trade: updates.trade, color: tradeColor(updates.trade) });
+      await reloadTasks();
     }
-  }, [draftRecommendations, reloadTasks]);
+    const result = await api.post<{ recommendations: ScheduleRecommendation[] }>(`/projects/${selectedProjectId}/recommendations`, {
+      taskIds: [previous.taskId], subIds: connectedSubs.map((s) => s.id), weeks: [1, 2, 3],
+      date: next.date, startTime: next.startTime, endTime: next.endTime, headcount: next.headcount,
+    });
+    const refreshed = result.recommendations[0];
+    if (!refreshed) throw new Error("Choose a date within this task's schedule. Completed tasks cannot be staffed.");
+    const chosen = refreshed.candidates.find((c) => c.id === next.subId) ?? refreshed.candidates[0];
+    refreshed.subId = chosen?.id ?? "";
+    refreshed.subName = chosen?.name ?? "";
+    refreshed.availableCount = chosen?.employeeIds.length ?? 0;
+    if (!refreshed.existingStatus) refreshed.reason = recommendationReason(refreshed.trade, refreshed.candidates, refreshed.subId, refreshed.headcount);
+    refreshed.explanation = chosen ? `${chosen.name} matches ${refreshed.trade} and has ${chosen.employeeIds.length} workers available for the full requested time with no overlapping pending or confirmed requests.` : refreshed.explanation;
+    setDraftRecommendations((current) => current.map((rec) => rec.id === id ? refreshed : rec));
+  }, [connectedSubs, draftRecommendations, reloadTasks, selectedProjectId]);
 
   const handleSendRecommendation = useCallback(async (id: string) => {
     const rec = draftRecommendations.find((item) => item.id === id);
-    if (!rec || !selectedProjectId || !rec.trade || !rec.subId || rec.headcount < 1) throw new Error("This recommendation needs a trade, a matching subcontractor, and at least one available employee.");
-    const candidate = rec.candidates.find((item) => item.id === rec.subId);
-    if (!candidate || rec.headcount > candidate.employeeIds.length) throw new Error("The selected headcount exceeds current availability. Generate recommendations again.");
-    const taskResult = await supabase.from("tasks").select("trade").eq("id", rec.taskId).maybeSingle();
-    if (taskResult.error) throw new Error(taskResult.error.message);
-    const currentTaskTrade = (taskResult.data as { trade: string | null } | null)?.trade ?? null;
-    if (!currentTaskTrade || normalizeTrade(currentTaskTrade) !== normalizeTrade(rec.trade)) throw new Error("The task trade changed since this draft was generated. Generate recommendations again.");
-    assertRecommendationTradeMatch(currentTaskTrade, candidate.trade);
-    const connections = await api.get<{ companies: Array<{ id: string; trade: string | null }> }>(`/projects/${selectedProjectId}/connections`);
-    const currentSub = connections.companies.find((sub) => sub.id === rec.subId);
-    if (!currentSub) throw new Error("This subcontractor is no longer connected to the project. Generate recommendations again.");
-    assertRecommendationTradeMatch(currentTaskTrade, currentSub.trade);
-    const result = await supabase.from("availability").select("*").eq("date", rec.date).in("employee_id", candidate.employeeIds);
-    if (result.error) throw new Error(result.error.message);
-    const currentSlots = (result.data ?? []) as Array<{ employee_id: string; project_id: string | null; all_projects: number | boolean; start_time: string; end_time: string }>;
-    const freshIds = new Set(currentSlots.filter((slot) => (slot.all_projects === true || slot.all_projects === 1 || slot.project_id === selectedProjectId) && slot.start_time === rec.startTime && slot.end_time === rec.endTime).map((slot) => slot.employee_id));
-    const employeeIds = candidate.employeeIds.filter((employeeId) => freshIds.has(employeeId));
-    if (employeeIds.length < rec.headcount) throw new Error("Availability changed since this draft was generated. Generate recommendations again before sending.");
-    const currentRequests = await api.get<{ requests: Array<{ employeeIds: string[]; status: string }> }>(`/schedule-requests?start=${rec.date}&end=${rec.date}`);
-    const booked = new Set(currentRequests.requests.filter((request) => ["pending", "confirmed"].includes(request.status)).flatMap((request) => request.employeeIds));
-    if (employeeIds.filter((employeeId) => !booked.has(employeeId)).length < rec.headcount) throw new Error("One or more selected employees already have a schedule request for this date. Generate recommendations again.");
-    await api.post("/schedule-requests", { projectId: selectedProjectId, subCompanyId: rec.subId, employeeIds: employeeIds.filter((employeeId) => !booked.has(employeeId)).slice(0, rec.headcount), date: rec.date, startTime: rec.startTime ?? undefined, endTime: rec.endTime ?? undefined, description: `${rec.taskName} · ${rec.trade}` });
+    if (!rec || !selectedProjectId || rec.reason || !Number.isInteger(rec.headcount) || rec.headcount < 1) throw new Error("Review the trade, subcontractor, time, and crew size before sending.");
+    const candidate = rec.candidates.find((c) => c.id === rec.subId);
+    if (!candidate || rec.headcount > candidate.employeeIds.length) throw new Error("Review the available crew before sending.");
+    // The normal workflow validates fresh task/trade/connection/availability and
+    // bookings inside a transaction, then emits its usual events/notifications.
+    await api.post("/schedule-requests", {
+      taskId: rec.taskId, taskTrade: rec.trade, projectId: selectedProjectId, subCompanyId: rec.subId,
+      employeeIds: candidate.employeeIds.slice(0, rec.headcount), date: rec.date,
+      startTime: rec.startTime, endTime: rec.endTime, description: `${rec.taskName} · ${rec.trade}`,
+    });
     setDraftRecommendations((current) => current.filter((item) => item.id !== id));
     await loadScheduleRequests();
   }, [draftRecommendations, loadScheduleRequests, selectedProjectId]);
@@ -704,7 +673,7 @@ const handleReorderTasks = useCallback(
                 connectedSubs={connectedSubs}
                 draftRecommendations={draftRecommendations}
                 onGenerateSchedule={handleGenerateRecommendations}
-                onApproveDraft={(id) => void handleSendRecommendation(id)}
+                onApproveDraft={handleSendRecommendation}
                 onDeleteDraft={(id) => setDraftRecommendations((current) => current.filter((rec) => rec.id !== id))}
                 onUpdateDraft={handleUpdateRecommendation}
                 onUploadSchedule={() => setUploadScheduleOpen(true)}

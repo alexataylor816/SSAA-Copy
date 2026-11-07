@@ -66,7 +66,7 @@ const EditTaskModal = ({ isOpen, onClose, task, onUpdateTask, onDeleteTask, isGC
       setStartDate(parseLocalDate(task.start_date));
       setEndDate(parseLocalDate(task.end_date));
       setStatus(task.status || 'not_started');
-      setColor(task.color || '#0284c7');
+      setColor(task.trade ? tradeColor(task.trade) : task.color || '#0284c7');
       setTrade(task.trade || '');
     }
   }, [task]);
@@ -184,7 +184,7 @@ const EditTaskModal = ({ isOpen, onClose, task, onUpdateTask, onDeleteTask, isGC
 
           <div className="space-y-2">
             <Label>{t('task.taskColor')}</Label>
-            <Select value={color} onValueChange={setColor}>
+            <Select value={color} onValueChange={setColor} disabled={!!trade}>
               <SelectTrigger>
                 <SelectValue placeholder={t('task.selectColor')}>
                   <div className="flex items-center justify-between w-full">
@@ -210,6 +210,7 @@ const EditTaskModal = ({ isOpen, onClose, task, onUpdateTask, onDeleteTask, isGC
                 ))}
               </SelectContent>
             </Select>
+            {trade && <p className="text-xs text-muted-foreground">Color follows the selected trade across schedule views.</p>}
           </div>
 
           <div className="flex gap-2 pt-4">
@@ -232,7 +233,7 @@ const EditTaskModal = ({ isOpen, onClose, task, onUpdateTask, onDeleteTask, isGC
             <Button 
               className="flex-1" 
               onClick={handleSubmit}
-              disabled={!taskName.trim() || !startDate || !endDate}
+              disabled={!taskName.trim() || !startDate || !endDate || endDate < startDate}
             >
               {t('profile.saveChanges')}
             </Button>

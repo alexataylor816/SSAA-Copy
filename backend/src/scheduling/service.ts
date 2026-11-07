@@ -1,3 +1,6 @@
+import { database } from "../db.js";
+import { buildScheduleRecommendations, eligibleEmployees, overlaps, validDate, validTime, type RecommendationTask, type ExistingScheduleRequest } from "./recommendationRules.js";
+import { normalizeTrade } from "./taskTrades.js";
 import {
   findCompanyById,
   findEmployeeById,
@@ -354,6 +357,8 @@ export async function deleteAvailability(userId: string, availabilityId: string)
 }
 
 export interface CreateScheduleRequestParams {
+  taskId?: string;
+  taskTrade?: string;
   projectId: string;
   subCompanyId: string;
   employeeIds: string[];
@@ -366,18 +371,23 @@ export interface CreateScheduleRequestParams {
 }
 
 export async function createScheduleRequest(userId: string, params: CreateScheduleRequestParams): Promise<ScheduleRequest> {
+  if (typeof params.projectId !== "string" || !params.projectId || typeof params.subCompanyId !== "string" || !params.subCompanyId) throw new BadRequestError("Choose a project and subcontractor.");
+  if (params.taskTrade !== undefined && typeof params.taskTrade !== "string") throw new BadRequestError("Review the task trade.");
+  return scheduleWrite(params.projectId, params.subCompanyId, () => createValidatedScheduleRequest(userId, params));
+}
+async function createValidatedScheduleRequest(userId: string, params: CreateScheduleRequestParams): Promise<ScheduleRequest> {
   const user = await requireUserWithCompany(userId);
 
   if (!(await actorHasPartialOrHigher(user))) {
     throw new ForbiddenError("You need Partial-level access or higher to schedule people.");
   }
-  if (!DATE_RE.test(params.date)) throw new BadRequestError("date must be formatted YYYY-MM-DD.");
-  if (params.startTime && !TIME_RE.test(params.startTime)) throw new BadRequestError("startTime must be formatted HH:MM.");
-  if (params.endTime && !TIME_RE.test(params.endTime)) throw new BadRequestError("endTime must be formatted HH:MM.");
+  if (!validDate(params.date)) throw new BadRequestError("Choose a valid schedule date (YYYY-MM-DD).");
+  if ((params.startTime != null && !validTime(params.startTime)) || (params.endTime != null && !validTime(params.endTime))) throw new BadRequestError("Choose valid start and end times (HH:MM).");
+  if (!!params.startTime !== !!params.endTime) throw new BadRequestError("Choose both start and end times.");
   if (params.startTime && params.endTime && params.startTime >= params.endTime) {
     throw new BadRequestError("startTime must be before endTime.");
   }
-  if (!Array.isArray(params.employeeIds) || params.employeeIds.length === 0) {
+  if (!Array.isArray(params.employeeIds) || params.employeeIds.length === 0 || params.employeeIds.length > 500) {
     throw new BadRequestError("Pick at least one employee.");
   }
   if (!(await canSeeProject(user.companyId!, params.projectId))) {
@@ -385,6 +395,7 @@ export async function createScheduleRequest(userId: string, params: CreateSchedu
   }
   assertDateUnlocked(params.date, user);
 
+  if (new Set(params.employeeIds).size !== params.employeeIds.length || params.employeeIds.some((id) => typeof id !== "string" || !id)) throw new BadRequestError("Choose each worker only once.");
   const sameCompany = params.subCompanyId === user.companyId;
   const connected = !!(await findProjectConnection(params.projectId, params.subCompanyId));
   if (!sameCompany && !connected) {
@@ -398,6 +409,27 @@ export async function createScheduleRequest(userId: string, params: CreateSchedu
     }
   }
 
+  if (params.taskId !== undefined) {
+    if (typeof params.taskId !== "string" || !params.taskId) throw new BadRequestError("Choose a valid schedule task.");
+    const project = await findProjectById(params.projectId);
+    if (project?.companyId !== user.companyId) throw new ForbiddenError("Only the project's GC can send a task recommendation.");
+    const task = await database.get<RecommendationTask>("SELECT * FROM tasks WHERE id = ? AND project_id = ?", [params.taskId, params.projectId]);
+    if (!task) throw new ConflictError("This task no longer exists. Review the schedule before sending.");
+    if (!task.trade) throw new ConflictError("This task needs review. Choose its trade before sending.");
+    if (task.status === "complete") throw new ConflictError("This task is already complete.");
+    if (params.taskTrade && normalizeTrade(params.taskTrade) !== normalizeTrade(task.trade)) throw new ConflictError("The task trade changed. Review the recommendation before sending.");
+    const sub = await findCompanyById(params.subCompanyId);
+    if (!connected || sub?.companyType !== "sub") throw new ConflictError("This subcontractor is no longer connected to the project.");
+    if (normalizeTrade(sub.trade) !== normalizeTrade(task.trade)) throw new ConflictError(`This subcontractor does not match the task trade (${task.trade}). Choose a matching subcontractor.`);
+    if (!validDate(task.start_date) || !validDate(task.end_date) || params.date < task.start_date || params.date > task.end_date) throw new ConflictError("The task dates changed. Choose a date within the task schedule.");
+    if (!params.startTime || !params.endTime) throw new BadRequestError("Choose a start and end time for this recommendation.");
+    const requests = await bookingHistory(params.date, params.date);
+    const existing = requests.find((r) => r.taskId === task.id && ["pending", "confirmed"].includes(r.status));
+    if (existing) throw new ConflictError(`Already ${existing.status}: this task has a request for this date. Review the existing request.`);
+    const availability = await listAvailabilityForCompany(params.subCompanyId, params.date, params.date);
+    const eligible = eligibleEmployees({ employeeIds: params.employeeIds, projectId: params.projectId, date: params.date, startTime: params.startTime, endTime: params.endTime, availability, requests });
+    if (eligible.length < params.employeeIds.length) throw new ConflictError(`Only ${eligible.length} of the ${params.employeeIds.length} workers are still available. Review the recommendation before sending.`);
+  }
   // Photos must be files this server actually served: no remote URLs, no
   // path escapes, and few enough to keep the request readable.
   const imageUrls = params.imageUrls ?? [];
@@ -410,8 +442,10 @@ export async function createScheduleRequest(userId: string, params: CreateSchedu
     }
   }
 
+  await assertNoBookingConflict(params, undefined);
   return await createScheduleRequestRow({
     projectId: params.projectId,
+    taskId: params.taskId,
     requestingCompanyId: user.companyId!,
     subCompanyId: params.subCompanyId,
     employeeIds: params.employeeIds,
@@ -437,6 +471,11 @@ export async function updateScheduleRequestStatus(
   status: ScheduleRequestStatus,
   reason?: string,
 ): Promise<ScheduleRequest> {
+  const initial = await findScheduleRequestById(requestId);
+  if (!initial) throw new NotFoundError("Schedule request not found.");
+  return scheduleWrite(initial.projectId, initial.subCompanyId, () => updateValidatedStatus(userId, requestId, status, reason));
+}
+async function updateValidatedStatus(userId: string, requestId: string, status: ScheduleRequestStatus, reason?: string): Promise<ScheduleRequest> {
   const user = await requireUserWithCompany(userId);
   const req = await findScheduleRequestById(requestId);
   if (!req) throw new NotFoundError("Schedule request not found.");
@@ -469,6 +508,78 @@ export async function updateScheduleRequestStatus(
     throw new BadRequestError("Reason must be 500 characters or fewer.");
   }
 
+  if (status === "confirmed") {
+    for (const id of req.employeeIds) {
+      if ((await findEmployeeById(id))?.companyId !== user.companyId) throw new ConflictError("A worker no longer belongs to your company. Review this request.");
+    }
+    await assertNoBookingConflict(req, req.id);
+    if (req.taskId && req.startTime && req.endTime) {
+      const availability = await listAvailabilityForCompany(req.subCompanyId, req.date, req.date);
+      const requests = (await bookingHistory(req.date, req.date)).filter((r) => r.id !== req.id);
+      const eligible = eligibleEmployees({ ...req, startTime: req.startTime, endTime: req.endTime, availability, requests });
+      if (eligible.length < req.employeeIds.length) throw new ConflictError("Availability changed while this request was pending. Review the crew before confirming.");
+    }
+  }
   await updateScheduleRequestStatusRow(requestId, status, trimmed || null);
   return (await findScheduleRequestById(requestId))!;
+}
+
+/** Minimal booking facts, including other GCs' projects; never returned as raw
+ * cross-project history to the browser. The UI only receives eligible workers. */
+async function bookingHistory(start: string, end: string): Promise<ExistingScheduleRequest[]> {
+  const rows = await database.all<{ id: string; task_id: string | null; date: string; employee_ids: string; status: string; start_time: string | null; end_time: string | null }>(
+    "SELECT id, task_id, date, employee_ids, status, start_time, end_time FROM schedule_requests WHERE date BETWEEN ? AND ? AND status IN ('pending', 'confirmed')", [start, end]);
+  return rows.map((r) => ({ id: r.id, taskId: r.task_id, date: r.date, employeeIds: JSON.parse(r.employee_ids), status: r.status, startTime: r.start_time, endTime: r.end_time }));
+}
+async function assertNoBookingConflict(params: { employeeIds: string[]; date: string; startTime?: string | null; endTime?: string | null }, excludeId?: string) {
+  const requests = await bookingHistory(params.date, params.date);
+  if (requests.some((r) => r.id !== excludeId && r.employeeIds.some((id) => params.employeeIds.includes(id)) && overlaps(params.startTime, params.endTime, r.startTime, r.endTime))) throw new ConflictError("One or more workers already have an overlapping pending or confirmed request. Review the crew or choose another time.");
+}
+// SQLite has one connection; serialize scheduling writes before starting the
+// async transaction. MySQL locks the project and actual employer, protecting
+// both task duplicates and cross-project crew conflicts across API processes.
+let scheduleQueue: Promise<unknown> = Promise.resolve();
+async function scheduleWrite<T>(projectId: string, employerId: string, work: () => Promise<T>): Promise<T> {
+  const run = () => database.transaction(async () => {
+    if (database.dialect === "mysql") {
+      await database.get("SELECT id FROM projects WHERE id = ? FOR UPDATE", [projectId]);
+      await database.get("SELECT id FROM companies WHERE id = ? FOR UPDATE", [employerId]);
+    }
+    return work();
+  });
+  if (database.dialect !== "sqlite") return run();
+  const result = scheduleQueue.then(run, run);
+  scheduleQueue = result.catch(() => undefined);
+  return result;
+}
+export interface RecommendationInput { taskIds: string[]; subIds: string[]; weeks: number[]; headcount: number; startTime: string; endTime: string; date?: string }
+export async function previewScheduleRecommendations(userId: string, projectId: string, input: RecommendationInput) {
+  const user = await requireUserWithCompany(userId);
+  const project = await findProjectById(projectId);
+  if (!project || project.companyId !== user.companyId) throw new ForbiddenError("Choose one of your projects to recommend a crew.");
+  if (!(await actorHasPartialOrHigher(user))) throw new ForbiddenError("You need Partial-level access or higher to schedule people.");
+  if (!Array.isArray(input.taskIds) || !input.taskIds.length || input.taskIds.length > 200 || input.taskIds.some((id) => typeof id !== "string")) throw new BadRequestError("Select between 1 and 200 tasks.");
+  if (!Array.isArray(input.subIds) || input.subIds.some((id) => typeof id !== "string")) throw new BadRequestError("Choose connected subcontractors.");
+  if (!Array.isArray(input.weeks) || !input.weeks.length || input.weeks.some((w) => !Number.isInteger(w) || w < 1 || w > 3)) throw new BadRequestError("Choose weeks 1, 2, or 3.");
+  if (!Number.isInteger(input.headcount) || input.headcount < 1 || input.headcount > 500) throw new BadRequestError("Choose a whole crew size between 1 and 500.");
+  if (!validTime(input.startTime) || !validTime(input.endTime) || input.startTime >= input.endTime) throw new BadRequestError("Choose valid start and end times.");
+  if (input.date !== undefined) { if (!validDate(input.date)) throw new BadRequestError("Choose a valid date."); assertDateUnlocked(input.date, user); }
+  const tasks = (await database.all<RecommendationTask>("SELECT * FROM tasks WHERE project_id = ? ORDER BY sort_order, id", [projectId])).filter((t) => input.taskIds.includes(t.id));
+  if (tasks.length !== new Set(input.taskIds).size) throw new ConflictError("A selected task no longer exists. Refresh the schedule.");
+  const subs = (await listProjectConnectedCompanies(userId, projectId)).filter((c) => c.companyType === "sub");
+  if (input.subIds.some((id) => !subs.some((s) => s.id === id))) throw new ConflictError("A selected subcontractor is no longer connected. Refresh the schedule.");
+  const now = new Date();
+  const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const windowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 21);
+  const local = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const start = input.date ?? local(windowStart), end = input.date && input.date > local(windowEnd) ? input.date : local(windowEnd);
+  const selected = subs.filter((s) => input.subIds.includes(s.id));
+  const employeesByCompany: Record<string, string[]> = {};
+  const availability: Availability[] = [];
+  for (const sub of selected) {
+    employeesByCompany[sub.id] = (await listCompanyEmployees(sub.id)).map((e) => e.id);
+    availability.push(...await listAvailabilityForCompany(sub.id, start, end));
+  }
+  const requests = await bookingHistory(start, end);
+  return buildScheduleRecommendations({ tasks, subs, selectedSubs: selected, weeks: input.weeks, headcount: input.headcount, startTime: input.startTime, endTime: input.endTime, date: input.date, employeesByCompany, availability, requests, now });
 }

@@ -152,6 +152,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   end_date            VARCHAR(10)  NOT NULL,
   color               VARCHAR(50)  NULL,
   trade               VARCHAR(100) NULL,
+  duration            VARCHAR(255) NULL,
+  predecessors        TEXT NULL,
   status              VARCHAR(20)  NOT NULL DEFAULT 'pending',
   sort_order          INT          NOT NULL DEFAULT 0,
   created_at          VARCHAR(32)  NOT NULL DEFAULT (DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%d %H:%i:%s')),
@@ -393,4 +395,15 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 -- Existing rows are numbered in primary-key order; new ones in insert order.
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'seq') = 0,
   'ALTER TABLE messages ADD COLUMN seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Additive recommender/import metadata for existing databases.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schedule_requests' AND COLUMN_NAME = 'task_id') = 0,
+  'ALTER TABLE schedule_requests ADD COLUMN task_id VARCHAR(36) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'duration') = 0,
+  'ALTER TABLE tasks ADD COLUMN duration VARCHAR(255) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'predecessors') = 0,
+  'ALTER TABLE tasks ADD COLUMN predecessors TEXT NULL', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
