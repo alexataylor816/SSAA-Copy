@@ -97,11 +97,11 @@ const day = (offset: number) => {
 };
 
 // --- General contractor: your GC point of view ------------------------------
-const gc = await person("bnguye26@umd.edu", "Testudo B");
+const gc = await person("bnguye26@umd.edu", "GC Greg");
 const gcId = await company(gc, "Terrapin Builders", "gc", "7500 Baltimore Ave, College Park, MD");
 const paul = await person("paul.kim@example.com", "Paul Kim");
 await join(gc, gcId, paul, "partial");
-await titles(gc, gcId, { "Testudo B": "Owner", "Paul Kim": "Project Manager" });
+await titles(gc, gcId, { "GC Greg": "Owner", "Paul Kim": "Project Manager" });
 
 const riverside = await call("post", "/projects", gc.token, { name: "Riverside Office Build", address: "4100 River Rd, College Park, MD" });
 const mainSt = await call("post", "/projects", gc.token, { name: "Main St Retail Fit-Out", address: "120 Main St, Hyattsville, MD" });
@@ -109,14 +109,14 @@ const mainSt = await call("post", "/projects", gc.token, { name: "Main St Retail
 const elmSt = await call("post", "/projects", gc.token, { name: "Elm Street Clinic Renovation", address: "45 Elm St" });
 
 // --- Plumbing sub: your subcontractor point of view -------------------------
-const sub = await person("baotn.it@gmail.com", "Bao Nguyen");
+const sub = await person("baotn.it@gmail.com", "Subcontractor Steve");
 const plumbingId = await company(sub, "Bao Plumbing", "sub", "2100 University Blvd, Hyattsville, MD", "Plumbing");
 const mike = await person("mike.rivera@example.com", "Mike Rivera");
 const pete = await person("pete.alvarez@example.com", "Pete Alvarez");
 await join(sub, plumbingId, mike, "level_1");
 await join(sub, plumbingId, pete, "basic");
 await query(sub.token, { table: "employees", operation: "insert", data: { company_id: plumbingId, name: "Luis Ortega", job_title: "Apprentice Plumber" } });
-await titles(sub, plumbingId, { "Bao Nguyen": "Owner", "Mike Rivera": "Foreman", "Pete Alvarez": "Journeyman Plumber" });
+await titles(sub, plumbingId, { "Subcontractor Steve": "Owner", "Mike Rivera": "Foreman", "Pete Alvarez": "Journeyman Plumber" });
 await call("patch", "/auth/profile", mike.token, { employeeNumber: "BP-102", phone: "301-555-0142" });
 await call("patch", "/auth/profile", pete.token, { employeeNumber: "BP-117" });
 await call("post", "/projects/connect", sub.token, { code: riverside.connectionCode });
@@ -140,10 +140,12 @@ await call("post", "/projects/connect", erin.token, { code: riverside.connection
 await call("post", "/projects/connect", erin.token, { code: mainSt.connectionCode });
 await call("post", "/projects/connect", erin.token, { code: elmSt.connectionCode });
 
-// --- Availability next week (Tuesday left open for a live booking) -----------
+// --- Availability next week (Mike and Pete blank on Friday; Pete blank Saturday) --
 const plumbers = await roster(sub, plumbingId);
 for (const offset of [0, 1, 2, 3, 4]) {
   for (const name of ["Mike Rivera", "Pete Alvarez", "Luis Ortega"]) {
+    // Friday is left blank for Mike and Pete so their hours can be entered live.
+    if (offset === 4 && name !== "Luis Ortega") continue;
     await call("post", "/availability", sub.token, { date: day(offset), startTime: "07:00", endTime: "15:30", allProjects: true, employeeId: idOf(plumbers, name) });
   }
 }
