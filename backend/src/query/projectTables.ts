@@ -24,6 +24,9 @@ export async function ensureProjectTables(): Promise<void> {
       start_date TEXT NOT NULL,
       end_date TEXT NOT NULL,
       color TEXT,
+      trade TEXT,
+      duration TEXT,
+      predecessors TEXT,
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'complete')),
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -32,6 +35,13 @@ export async function ensureProjectTables(): Promise<void> {
   `);
   await database.exec("CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)");
   await database.exec("CREATE INDEX IF NOT EXISTS idx_tasks_dates ON tasks(start_date, end_date)");
+  if (database.dialect === "sqlite") {
+    const taskCols = await database.all<{ name: string }>("PRAGMA table_info(tasks)");
+    for (const column of ["duration", "predecessors"]) {
+      if (!taskCols.some((c) => c.name === column)) await database.exec(`ALTER TABLE tasks ADD COLUMN ${column} TEXT`);
+    }
+    if (!taskCols.some((c) => c.name === "trade")) await database.exec("ALTER TABLE tasks ADD COLUMN trade TEXT");
+  }
 
   await database.exec(`
     CREATE TABLE IF NOT EXISTS project_aliases (

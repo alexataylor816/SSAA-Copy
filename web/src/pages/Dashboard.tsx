@@ -13,6 +13,8 @@ import {
   type CalendarTask,
   type Task,
 } from "@/lib/tasks";
+import { classifyTaskTrade, tradeColor } from "@/lib/taskTrades";
+import { recommendationReason, type RecommendationSub, type ScheduleRecommendation } from "@/lib/scheduleRecommendations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +27,7 @@ import CreateTaskModal from "@/components/dashboard/CreateTaskModal";
 import EditTaskModal from "@/components/dashboard/EditTaskModal";
 import ScheduleDayDialog from "@/components/dashboard/ScheduleDayDialog";
 import LeftPanel from "@/components/dashboard/LeftPanel";
+import UploadScheduleModal, { type ReviewedScheduleTask } from "@/components/dashboard/UploadScheduleModal";
 import RightPanel from "@/components/dashboard/RightPanel";
 import {
   Dialog,
@@ -69,6 +72,8 @@ interface JoinRequest {
   userEmail: string;
   status: string;
 }
+
+interface ConnectedSub extends RecommendationSub { companyType?: string }
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
@@ -130,6 +135,9 @@ export default function Dashboard() {
   const [taskEditorOpen, setTaskEditorOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<CalendarTask | null>(null);
   const [scheduleDayOpen, setScheduleDayOpen] = useState(false);
+  const [connectedSubs, setConnectedSubs] = useState<ConnectedSub[]>([]);
+  const [draftRecommendations, setDraftRecommendations] = useState<ScheduleRecommendation[]>([]);
+  const [uploadScheduleOpen, setUploadScheduleOpen] = useState(false);
 
   const companyId = user?.companyId ?? null;
   const viewMode: "gc" | "sub" = company?.companyType === "sub" ? "sub" : "gc";
@@ -223,6 +231,16 @@ export default function Dashboard() {
     const ids = projects.map((p) => p.id);
     await loadTasks(ids);
   }, [projects, loadTasks]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDraftRecommendations([]);
+    if (!selectedProjectId) { setConnectedSubs([]); return; }
+    api.get<{ companies: Array<{ id: string; name: string; trade?: string | null; companyType?: string }> }>(`/projects/${selectedProjectId}/connections`)
+      .then(({ companies }) => { if (!cancelled) setConnectedSubs(companies.map((sub) => ({ id: sub.id, name: sub.name, trade: sub.trade ?? null, companyType: sub.companyType }))); })
+      .catch(() => { if (!cancelled) setConnectedSubs([]); });
+    return () => { cancelled = true; };
+  }, [selectedProjectId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -395,11 +413,69 @@ const handleReorderTasks = useCallback(
       // task needs one explicitly rather than landing in an arbitrary project.
       const projectId = selectedProjectId ?? projects[0]?.id;
       if (!projectId) throw new Error("Create a project before adding tasks.");
-      await createTask(projectId, { name, start_date: iso(startDate), end_date: iso(endDate) });
+      const classification = classifyTaskTrade(name);
+      await createTask(projectId, { name, start_date: iso(startDate), end_date: iso(endDate), trade: classification.trade, color: tradeColor(classification.trade) });
       await reloadTasks();
     },
     [selectedProjectId, projects, reloadTasks],
   );
+
+  const handleImportSchedule = useCallback(async (rows: ReviewedScheduleTask[]) => {
+    if (!selectedProjectId) throw new Error("Choose a project before uploading its schedule.");
+    for (const row of rows) {
+      await createTask(selectedProjectId, { name: row.name, start_date: row.start_date, end_date: row.end_date, trade: row.trade || null, color: row.color, duration: row.duration, predecessors: row.predecessors });
+    }
+    await reloadTasks();
+  }, [selectedProjectId, reloadTasks]);
+
+  const handleGenerateRecommendations = useCallback(async (input: { selectedSubs: { id: string }[]; selectedWeeks: number[]; taskIds: string[]; headcount: number; startTime: string; endTime: string }) => {
+    if (!selectedProjectId) return { message: "Select one project to generate recommendations." };
+    const result = await api.post<{ recommendations: ScheduleRecommendation[] }>(`/projects/${selectedProjectId}/recommendations`, {
+      taskIds: input.taskIds, subIds: input.selectedSubs.map((s) => s.id), weeks: input.selectedWeeks,
+      headcount: input.headcount, startTime: input.startTime, endTime: input.endTime,
+    });
+    setDraftRecommendations(result.recommendations);
+    return { message: result.recommendations.length ? `${result.recommendations.length} drafts ready. Close this window to review and send. Nothing has been sent.` : "No selected tasks fall within these weeks. Choose another week or update the task dates." };
+  }, [selectedProjectId]);
+
+  const handleUpdateRecommendation = useCallback(async (id: string, updates: Partial<Pick<ScheduleRecommendation, "trade" | "subId" | "date" | "headcount" | "startTime" | "endTime">>) => {
+    const previous = draftRecommendations.find((rec) => rec.id === id);
+    if (!previous || !selectedProjectId) return;
+    const next = { ...previous, ...updates };
+    if (updates.trade !== undefined && previous.trade !== updates.trade) {
+      await updateTask(previous.taskId, { trade: updates.trade, color: tradeColor(updates.trade) });
+      await reloadTasks();
+    }
+    const result = await api.post<{ recommendations: ScheduleRecommendation[] }>(`/projects/${selectedProjectId}/recommendations`, {
+      taskIds: [previous.taskId], subIds: connectedSubs.map((s) => s.id), weeks: [1, 2, 3],
+      date: next.date, startTime: next.startTime, endTime: next.endTime, headcount: next.headcount,
+    });
+    const refreshed = result.recommendations[0];
+    if (!refreshed) throw new Error("Choose a date within this task's schedule. Completed tasks cannot be staffed.");
+    const chosen = refreshed.candidates.find((c) => c.id === next.subId) ?? refreshed.candidates[0];
+    refreshed.subId = chosen?.id ?? "";
+    refreshed.subName = chosen?.name ?? "";
+    refreshed.availableCount = chosen?.employeeIds.length ?? 0;
+    if (!refreshed.existingStatus) refreshed.reason = recommendationReason(refreshed.trade, refreshed.candidates, refreshed.subId, refreshed.headcount);
+    refreshed.explanation = chosen ? `${chosen.name} matches ${refreshed.trade} and has ${chosen.employeeIds.length} workers available for the full requested time with no overlapping pending or confirmed requests.` : refreshed.explanation;
+    setDraftRecommendations((current) => current.map((rec) => rec.id === id ? refreshed : rec));
+  }, [connectedSubs, draftRecommendations, reloadTasks, selectedProjectId]);
+
+  const handleSendRecommendation = useCallback(async (id: string) => {
+    const rec = draftRecommendations.find((item) => item.id === id);
+    if (!rec || !selectedProjectId || rec.reason || !Number.isInteger(rec.headcount) || rec.headcount < 1) throw new Error("Review the trade, subcontractor, time, and crew size before sending.");
+    const candidate = rec.candidates.find((c) => c.id === rec.subId);
+    if (!candidate || rec.headcount > candidate.employeeIds.length) throw new Error("Review the available crew before sending.");
+    // The normal workflow validates fresh task/trade/connection/availability and
+    // bookings inside a transaction, then emits its usual events/notifications.
+    await api.post("/schedule-requests", {
+      taskId: rec.taskId, taskTrade: rec.trade, projectId: selectedProjectId, subCompanyId: rec.subId,
+      employeeIds: candidate.employeeIds.slice(0, rec.headcount), date: rec.date,
+      startTime: rec.startTime, endTime: rec.endTime, description: `${rec.taskName} · ${rec.trade}`,
+    });
+    setDraftRecommendations((current) => current.filter((item) => item.id !== id));
+    await loadScheduleRequests();
+  }, [draftRecommendations, loadScheduleRequests, selectedProjectId]);
 
   const handleUpdateTask = useCallback(
     async (
@@ -409,6 +485,7 @@ const handleReorderTasks = useCallback(
       endDate: Date,
       status: string,
       color: string,
+      trade: string | null,
     ) => {
       await updateTask(id, {
         name,
@@ -416,6 +493,7 @@ const handleReorderTasks = useCallback(
         end_date: iso(endDate),
         status,
         color,
+        trade,
       });
       await reloadTasks();
     },
@@ -592,6 +670,13 @@ const handleReorderTasks = useCallback(
                 }}
                 selectedProject={selectedProjectId ?? "master"}
                 projects={rightPanelProjects}
+                connectedSubs={connectedSubs}
+                draftRecommendations={draftRecommendations}
+                onGenerateSchedule={handleGenerateRecommendations}
+                onApproveDraft={handleSendRecommendation}
+                onDeleteDraft={(id) => setDraftRecommendations((current) => current.filter((rec) => rec.id !== id))}
+                onUpdateDraft={handleUpdateRecommendation}
+                onUploadSchedule={() => setUploadScheduleOpen(true)}
               />
               </div>
 
@@ -771,11 +856,12 @@ const handleReorderTasks = useCallback(
                   start_date: editingTask.start_date,
                   end_date: editingTask.end_date,
                   color: editingTask.color,
+                  trade: editingTask.trade,
                   status: editingTask.status ?? "pending",
                 }
               }
-              onUpdateTask={(id, name, start, end, status, color) =>
-                void handleUpdateTask(id, name, start, end, status, color)
+              onUpdateTask={(id, name, start, end, status, color, trade) =>
+                void handleUpdateTask(id, name, start, end, status, color, trade)
               }
               onDeleteTask={(id) => void handleDeleteTask(id)}
               isGCView={viewMode === "gc"}
@@ -794,6 +880,7 @@ const handleReorderTasks = useCallback(
               defaultProjectId={selectedProjectId}
               onChanged={() => void loadScheduleRequests()}
             />
+            <UploadScheduleModal open={uploadScheduleOpen} onOpenChange={setUploadScheduleOpen} onImport={handleImportSchedule} />
           </>
         )}
       </main>

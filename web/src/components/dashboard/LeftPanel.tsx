@@ -12,11 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useLanguage } from '@/contexts/LanguageContext';
 import AnchoredFirstClickTip from '@/components/onboarding/AnchoredFirstClickTip';
+import { normalizeTrade, TASK_TRADES } from '@/lib/taskTrades';
 
-const TRADES = [
-  'Drywall', 'HVAC', 'Electrical', 'Sprinkler', 'Flooring',
-  'Security', 'Masonry', 'Structural Steel', 'Plumbing', 'Air Balancer', 'Other'
-];
+import type { ScheduleRecommendation } from '@/lib/scheduleRecommendations';
+const TRADES = [...TASK_TRADES];
 
 interface Task {
   id: string;
@@ -26,6 +25,7 @@ interface Task {
   color: string;
   status?: string;
   project_id?: string;
+  trade?: string | null;
 }
 
 interface ConnectedSub {
@@ -34,16 +34,7 @@ interface ConnectedSub {
   trade?: string | null;
 }
 
-interface DraftRecommendation {
-  id: string;
-  subId: string;
-  subName: string;
-  trade: string;
-  date: string;
-  taskName: string;
-  startTime?: string | null;
-  endTime?: string | null;
-}
+type DraftRecommendation = ScheduleRecommendation;
 
 interface ProjectItem {
   id: string;
@@ -61,10 +52,10 @@ interface LeftPanelProps {
   onEditTask?: (task: Task) => void;
   connectedSubs?: ConnectedSub[];
   draftRecommendations?: DraftRecommendation[];
-  onGenerateSchedule?: (data: { selectedSubs: { id: string; trade: string }[]; selectedWeeks: number[] }) => void;
-  onApproveDraft?: (id: string) => void;
+  onGenerateSchedule?: (data: { selectedSubs: { id: string; trade: string | null }[]; selectedWeeks: number[]; taskIds: string[]; headcount: number; startTime: string; endTime: string }) => Promise<{ message?: string } | void> | { message?: string } | void;
+  onApproveDraft?: (id: string) => Promise<void>;
   onDeleteDraft?: (id: string) => void;
-  onUpdateDraft?: (id: string, updates: { subId?: string; date?: string; startTime?: string; endTime?: string; description?: string }) => void;
+  onUpdateDraft?: (id: string, updates: { subId?: string; trade?: string | null; headcount?: number; date?: string; startTime?: string; endTime?: string }) => Promise<void>;
   onUploadSchedule?: () => void;
   selectedProject?: string;
   projects?: ProjectItem[];
@@ -111,34 +102,36 @@ const LeftPanel = ({
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [selectedSubs, setSelectedSubs] = useState<Record<string, boolean>>({});
-  const [subTrades, setSubTrades] = useState<Record<string, string>>({});
   const [editDraftDialogOpen, setEditDraftDialogOpen] = useState(false);
   const [selectedDraft, setSelectedDraft] = useState<DraftRecommendation | null>(null);
   const [editSubId, setEditSubId] = useState('');
+  const [editTrade, setEditTrade] = useState('');
+  const [editHeadcount, setEditHeadcount] = useState(0);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [requestedCrew, setRequestedCrew] = useState(3);
+  const [requestedStart, setRequestedStart] = useState('08:00');
+  const [requestedEnd, setRequestedEnd] = useState('16:00');
   const [editDate, setEditDate] = useState('');
-  const [editStartTime, setEditStartTime] = useState('08:00');
-  const [editEndTime, setEditEndTime] = useState('17:00');
+  const [editStart, setEditStart] = useState('08:00');
+  const [editEnd, setEditEnd] = useState('16:00');
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  const [generationMessage, setGenerationMessage] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [sendError, setSendError] = useState('');
   const { t } = useLanguage();
 
   const isGCView = viewMode === 'gc' || viewMode === 'moa';
   const isMasterSchedule = selectedProject === 'master';
+  useEffect(() => { setSelectedTaskIds([]); setSelectedSubs({}); setGenerationMessage(''); setSendError(''); }, [selectedProject]);
+  const openDraft = (rec: DraftRecommendation) => {
+    setSelectedDraft(rec); setEditSubId(rec.subId); setEditTrade(rec.trade || '');
+    setEditHeadcount(rec.headcount); setEditDate(rec.date); setEditStart(rec.startTime); setEditEnd(rec.endTime);
+    setEditError(''); setEditDraftDialogOpen(true);
+  };
 
-  // Initialize trades from connected subs. Reads the previous trades inside the
-  // updater rather than closing over `subTrades`, so connectedSubs stays the
-  // only dependency without re-seeding trades the user already changed.
-  useEffect(() => {
-    setSubTrades(prev => {
-      let changed = false;
-      const next = { ...prev };
-      connectedSubs.forEach(sub => {
-        if (sub.trade && !next[sub.id]) {
-          next[sub.id] = sub.trade;
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
-    });
-  }, [connectedSubs]);
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDraggedIndex(index);
@@ -171,10 +164,6 @@ const LeftPanel = ({
     setSelectedSubs(prev => ({ ...prev, [subId]: checked }));
   };
 
-  const handleTradeChange = (subId: string, trade: string) => {
-    setSubTrades(prev => ({ ...prev, [subId]: trade }));
-  };
-
   const handleWeekToggle = (week: number, checked: boolean) => {
     if (checked) {
       setSelectedWeeks(prev => [...prev, week].sort());
@@ -183,45 +172,68 @@ const LeftPanel = ({
     }
   };
 
-  const handleGenerateSchedule = () => {
+  const handleGenerateSchedule = async () => {
     const selected = connectedSubs
       .filter(sub => selectedSubs[sub.id])
       .map(sub => ({
         id: sub.id,
-        trade: subTrades[sub.id] || sub.trade || ''
+        trade: sub.trade || null
       }));
-    
-    onGenerateSchedule?.({
-      selectedSubs: selected,
-      selectedWeeks
-    });
-    setAiDialogOpen(false);
+    setGenerating(true);
+    setGenerationMessage('');
+    try {
+      const result = await onGenerateSchedule?.({ selectedSubs: selected, selectedWeeks, taskIds: selectedTaskIds, headcount: requestedCrew, startTime: requestedStart, endTime: requestedEnd });
+      const message = result && typeof result === 'object' && 'message' in result ? result.message : undefined;
+      setGenerationMessage(message ?? 'Review draft recommendations below before sending.');
+    } catch (error) {
+      setGenerationMessage(error instanceof Error ? error.message : 'Could not generate recommendations.');
+    } finally { setGenerating(false); }
   };
 
   return (
     <div className="w-full min-[1400px]:w-72 space-y-3 flex-shrink-0 flex flex-col min-[1400px]:h-full order-3 min-[1400px]:order-none">
       {isGCView && !isMasterSchedule && (
         <>
-          {/* AI Schedule Recommender */}
+          {/* Schedule Recommender */}
           <Card className="border-primary/20">
             <CardHeader className="py-2 px-3">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
-                {t('left.aiScheduleRecommender')}
+                Schedule Recommender
               </CardTitle>
             </CardHeader>
             <CardContent className="px-3 pb-3">
+              {tasks.length === 0 && <p className="mb-2 text-xs text-muted-foreground">No scheduled tasks yet. Upload a CSV or add a task before generating recommendations.</p>}
               <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
                 <DialogTrigger asChild>
                   <Button className="w-full" size="sm" disabled={isReadOnlyOperator}>
                     {t('left.generateSchedule')}
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-md">
+                <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
                   <DialogHeader>
-                    <DialogTitle>{t('left.aiScheduleRecommender')}</DialogTitle>
+                    <DialogTitle>Schedule Recommender</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4 pt-4">
+                    <div className="space-y-2">
+                      <Label>1. Choose Tasks</Label>
+                      <p className="text-xs text-muted-foreground">Select the schedule tasks you want help staffing.</p>
+                      <div className="max-h-36 overflow-y-auto space-y-2 border rounded-md p-3">
+                        {tasks.filter((task) => task.status !== 'complete' && task.status !== 'completed').map((task) => <label key={task.id} className="flex items-center gap-2 text-sm">
+                          <Checkbox checked={selectedTaskIds.includes(task.id)} onCheckedChange={(checked) => setSelectedTaskIds((ids) => checked ? [...ids, task.id] : ids.filter((id) => id !== task.id))} />
+                          <span>{task.name} · {task.trade || 'Needs review'}</span>
+                        </label>)}
+                        {!tasks.length && <p className="text-xs">Upload a schedule or add tasks first.</p>}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>2. Review Trades</Label>
+                      <p className="text-xs text-muted-foreground">We identified trades for these tasks. Review anything marked Needs review.</p>
+                      {tasks.filter((task) => selectedTaskIds.includes(task.id)).map((task) => <div key={task.id} className="flex justify-between items-center text-xs gap-2">
+                        <span>{task.name}: {task.trade ? `Trade identified · ${task.trade}` : 'Needs review'}</span>
+                        <Button size="sm" variant="outline" onClick={() => { setAiDialogOpen(false); onEditTask?.(task); }}>Review trade</Button>
+                      </div>)}
+                    </div>
                     <div className="space-y-2">
                       <Label>{t('left.howFarAhead')}</Label>
                       <div className="border rounded-md p-3 space-y-2 bg-muted/30">
@@ -261,13 +273,14 @@ const LeftPanel = ({
                       )}
                     </div>
                     <div className="space-y-2">
-                      <Label>{t('left.selectSubcontractors')}</Label>
+                      <Label>3. Choose Subcontractors</Label>
+                      <p className="text-xs text-muted-foreground">Only connected companies matching a selected task trade are shown. Use Invite Subcontractor if a trade is missing.</p>
                       <ScrollArea className="h-48 border rounded-md p-3">
                         <div className="space-y-3">
                           {connectedSubs.length === 0 ? (
                             <p className="text-sm text-muted-foreground">{t('left.noConnectedSubs')}</p>
                           ) : (
-                            connectedSubs.map(sub => (
+                            connectedSubs.filter((sub) => tasks.some((task) => selectedTaskIds.includes(task.id) && !!task.trade && normalizeTrade(task.trade) === normalizeTrade(sub.trade))).map(sub => (
                               <div key={sub.id} className="space-y-2 pb-2 border-b last:border-b-0">
                                 <div className="flex items-center gap-2">
                                   <Checkbox
@@ -279,34 +292,32 @@ const LeftPanel = ({
                                     {sub.name}
                                   </label>
                                 </div>
-                                {selectedSubs[sub.id] && (
-                                  <Select
-                                    value={subTrades[sub.id] || sub.trade || ''}
-                                    onValueChange={(value) => handleTradeChange(sub.id, value)}
-                                  >
-                                    <SelectTrigger className="h-8 text-xs">
-                                      <SelectValue placeholder={t('left.selectTrade')} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {TRADES.map(trade => (
-                                        <SelectItem key={trade} value={trade}>{trade}</SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                )}
+                                {selectedSubs[sub.id] && <p className="pl-6 text-xs text-muted-foreground">{sub.trade || 'Trade not set on company profile'}</p>}
                               </div>
                             ))
                           )}
                         </div>
                       </ScrollArea>
                     </div>
-                    <Button 
-                      className="w-full" 
-                      onClick={handleGenerateSchedule}
-                      disabled={!Object.values(selectedSubs).some(Boolean) || selectedWeeks.length === 0}
+                    <div className="space-y-2">
+                      <Label>4. Check Manpower & Conflicts</Label>
+                      <p className="text-xs text-muted-foreground">Choose a starting crew size and shift. This is your requested crew, not an estimate of the labor needed to finish the task.</p>
+                      <Label htmlFor="requested-crew">Requested crew</Label>
+                      <Input id="requested-crew" type="number" min="1" max="500" step="1" value={requestedCrew} onChange={(e) => setRequestedCrew(Number(e.target.value))} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><Label htmlFor="requested-start">Start time</Label><Input id="requested-start" type="time" value={requestedStart} onChange={(e) => setRequestedStart(e.target.value)} /></div>
+                        <div><Label htmlFor="requested-end">End time</Label><Input id="requested-end" type="time" value={requestedEnd} onChange={(e) => setRequestedEnd(e.target.value)} /></div>
+                      </div>
+                    </div>
+                    <Button
+                      className="w-full"
+                      onClick={() => void handleGenerateSchedule()}
+                      disabled={generating || !selectedTaskIds.length || selectedWeeks.length === 0 || !Number.isInteger(requestedCrew) || requestedCrew < 1 || requestedCrew > 500 || !requestedStart || !requestedEnd || requestedStart >= requestedEnd}
                     >
-                      {t('left.generateRecommendations')}
+                      {generating ? 'Checking tasks and availability…' : t('left.generateRecommendations')}
                     </Button>
+                    <p className="text-xs text-muted-foreground">5. Review &amp; Send: drafts appear below. Nothing sends until you click Send Request.</p>
+                    {generationMessage && <p role="status" className="text-sm text-muted-foreground">{generationMessage}</p>}
                   </div>
                 </DialogContent>
               </Dialog>
@@ -319,47 +330,54 @@ const LeftPanel = ({
               <CardHeader className="py-2 px-3">
                 <CardTitle className="text-sm flex items-center gap-2 text-amber-700 dark:text-amber-400">
                   <Sparkles className="h-4 w-4" />
-                  {t('left.aiRecommendations')} ({draftRecommendations.length})
+                  Draft recommendations ({draftRecommendations.length})
                 </CardTitle>
               </CardHeader>
               <CardContent className="px-3 pb-3">
-                <ScrollArea className="h-48">
+                <ScrollArea className="h-80">
                   <div className="space-y-2 pr-2">
                     {draftRecommendations.map(rec => (
                       <div 
                         key={rec.id} 
                         className="p-2 bg-background rounded border text-xs space-y-1 cursor-pointer hover:border-primary/50 transition-colors"
-                        onClick={() => {
-                          setSelectedDraft(rec);
-                          setEditSubId(rec.subId);
-                          setEditDate(rec.date);
-                          setEditStartTime(rec.startTime || '08:00');
-                          setEditEndTime(rec.endTime || '17:00');
-                          setEditDraftDialogOpen(true);
-                        }}
+                        onClick={() => openDraft(rec)}
                       >
                         <div className="flex justify-between items-start">
                           <div>
-                            <div className="font-medium">{rec.subName}</div>
-                            <div className="text-muted-foreground">{rec.trade}</div>
+                            <div className="font-medium">{rec.subName || 'Choose a subcontractor'}</div>
+                            <div className="text-muted-foreground">{rec.trade || 'Needs review'} · {rec.availableCount} available</div>
                           </div>
                           <div className="text-right text-muted-foreground">
                             {rec.date}
                           </div>
                         </div>
-                        <div className="text-muted-foreground italic">{rec.taskName}</div>
+                        <div className="font-medium">Task: {rec.taskName}</div>
+                        <div>Requested crew: {rec.headcount} · {rec.startTime}–{rec.endTime}</div>
+                        <div className="text-[11px] text-muted-foreground">{rec.reason || rec.explanation}</div>
+                        {rec.nextAvailability && <p>Next availability: {rec.nextAvailability.date} · {rec.nextAvailability.count} workers (within selected weeks and task dates).</p>}
+                        {rec.availableCount > 0 && rec.headcount > rec.availableCount && !rec.existingStatus && <Button size="sm" variant="outline" className="h-7 text-xs" disabled={savingDraft || !!sendingId || isReadOnlyOperator} onClick={(e) => {
+                          e.stopPropagation(); setSavingDraft(true); setSendError('');
+                          Promise.resolve(onUpdateDraft?.(rec.id, { headcount: rec.availableCount })).catch((error) => setSendError(error.message)).finally(() => setSavingDraft(false));
+                        }}>Request {rec.availableCount} workers</Button>}
                         <div className="flex gap-1 pt-1">
                           <Button 
                             size="sm" 
                             className="flex-1 h-6 text-xs"
-                            onClick={(e) => { e.stopPropagation(); onApproveDraft?.(rec.id); }}
+                            disabled={isReadOnlyOperator || !!sendingId || savingDraft || !!rec.reason || rec.headcount < 1}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSendingId(rec.id); setSendError('');
+                              Promise.resolve(onApproveDraft?.(rec.id)).catch((error) => setSendError(error instanceof Error ? error.message : 'Could not send this request.')).finally(() => setSendingId(null));
+                            }}
                           >
-                            {t('common.send')}
+                            {sendingId === rec.id ? 'Sending…' : 'Send Request'}
                           </Button>
+                          <Button size="sm" variant="outline" className="h-6 text-xs" disabled={!!sendingId || savingDraft} onClick={(e) => { e.stopPropagation(); openDraft(rec); }}>Edit</Button>
                           <Button 
                             size="sm" 
                             variant="outline" 
                             className="flex-1 h-6 text-xs"
+                            disabled={!!sendingId || savingDraft}
                             onClick={(e) => { e.stopPropagation(); onDeleteDraft?.(rec.id); }}
                           >
                             {t('common.delete')}
@@ -368,6 +386,7 @@ const LeftPanel = ({
                       </div>
                     ))}
                   </div>
+                  {sendError && <p role="alert" className="text-sm text-destructive">{sendError}</p>}
                 </ScrollArea>
               </CardContent>
             </Card>
@@ -375,7 +394,7 @@ const LeftPanel = ({
 
           {/* Edit Draft Dialog */}
           <Dialog open={editDraftDialogOpen} onOpenChange={setEditDraftDialogOpen}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{t('left.editRecommendation')}</DialogTitle>
               </DialogHeader>
@@ -386,76 +405,60 @@ const LeftPanel = ({
                     <p className="text-sm text-muted-foreground">{selectedDraft.taskName}</p>
                   </div>
                   <div className="space-y-2">
+                    <Label>Trade</Label>
+                    <Select value={editTrade || 'unassigned'} onValueChange={(value) => { setEditTrade(value === 'unassigned' ? '' : value); setEditSubId(''); }}>
+                      <SelectTrigger><SelectValue placeholder="Choose trade" /></SelectTrigger>
+                      <SelectContent><SelectItem value="unassigned">Choose trade</SelectItem>{TRADES.map((trade) => <SelectItem key={trade} value={trade}>{trade}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
                     <Label>{t('left.subcontractor')}</Label>
-                    <Select value={editSubId} onValueChange={setEditSubId}>
+                    <Select value={editSubId || 'unassigned'} onValueChange={(value) => setEditSubId(value === 'unassigned' ? '' : value)}>
                       <SelectTrigger>
-                        <SelectValue />
+                        <SelectValue placeholder="Choose subcontractor" />
                       </SelectTrigger>
                       <SelectContent>
-                        {connectedSubs.map(sub => (
+                        <SelectItem value="unassigned">Choose subcontractor</SelectItem>
+                        {connectedSubs.filter((candidate) => normalizeTrade(candidate.trade) === normalizeTrade(editTrade)).map(sub => (
                           <SelectItem key={sub.id} value={sub.id}>
-                            {sub.name} {sub.trade ? `(${sub.trade})` : ''}
+                            {sub.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>{t('left.date')}</Label>
-                    <Input
-                      type="date"
-                      value={editDate} 
-                      onChange={(e) => setEditDate(e.target.value)}
-                    />
+                    <Label>Requested crew size</Label>
+                    <Input type="number" min="1" max="500" step="1" value={editHeadcount} onChange={(e) => setEditHeadcount(Number(e.target.value))} />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>{t('left.startTime')}</Label>
-                      <Input
-                        type="time"
-                        value={editStartTime} 
-                        onChange={(e) => setEditStartTime(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>{t('left.endTime')}</Label>
-                      <Input
-                        type="time"
-                        value={editEndTime} 
-                        onChange={(e) => setEditEndTime(e.target.value)}
-                      />
-                    </div>
+                  <div className="space-y-2"><Label>Schedule date</Label><Input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} /></div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><Label>Start time</Label><Input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} /></div>
+                    <div><Label>End time</Label><Input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} /></div>
                   </div>
+                  <p className="text-xs text-muted-foreground">Save to check availability again for this crew and time. Nothing is sent.</p>
+                  {editError && <p role="alert" className="text-sm text-destructive">{editError}</p>}
                   <div className="flex gap-2 pt-2">
                     <Button 
                       className="flex-1"
-                      onClick={() => {
-                        onUpdateDraft?.(selectedDraft.id, {
-                          subId: editSubId,
-                          date: editDate,
-                          startTime: editStartTime,
-                          endTime: editEndTime
-                        });
-                        setEditDraftDialogOpen(false);
+                      disabled={savingDraft || !Number.isInteger(editHeadcount) || editHeadcount < 1 || editHeadcount > 500 || !editDate || !editStart || !editEnd || editStart >= editEnd}
+                      onClick={async () => {
+                        setSavingDraft(true); setEditError('');
+                        try {
+                          await onUpdateDraft?.(selectedDraft.id, { subId: editSubId, trade: editTrade || null, headcount: editHeadcount, date: editDate, startTime: editStart, endTime: editEnd });
+                          setEditDraftDialogOpen(false);
+                        } catch (error) { setEditError(error instanceof Error ? error.message : 'Could not update this draft.'); }
+                        finally { setSavingDraft(false); }
                       }}
                     >
                       {t('left.saveChanges')}
                     </Button>
                     <Button 
-                      variant="default"
+                      variant="outline"
                       className="flex-1"
-                      onClick={() => {
-                        onUpdateDraft?.(selectedDraft.id, {
-                          subId: editSubId,
-                          date: editDate,
-                          startTime: editStartTime,
-                          endTime: editEndTime
-                        });
-                        onApproveDraft?.(selectedDraft.id);
-                        setEditDraftDialogOpen(false);
-                      }}
+                      onClick={() => setEditDraftDialogOpen(false)}
                     >
-                      {t('left.saveSend')}
+                      Done
                     </Button>
                   </div>
                 </div>
@@ -475,7 +478,7 @@ const LeftPanel = ({
               <CardContent className="px-3 pb-3">
                 <AnchoredFirstClickTip
                   tipKey="upload_schedule"
-                  copy="Upload a schedule document (PDF, image, or spreadsheet) and our AI will parse it into draft tasks for your review and approval."
+                  copy="Upload a CSV schedule with task names and dates. Review task trades before saving."
                   as="div"
                 >
                   <div
@@ -561,6 +564,7 @@ const LeftPanel = ({
                                 {getStatusIcon(task.status)}
                                 <div className="flex-1 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:opacity-0 hover:[&::-webkit-scrollbar]:opacity-100 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/30 [&::-webkit-scrollbar-thumb]:rounded-full">
                                   <span className="text-xs whitespace-nowrap">{task.name}</span>
+                                  <span className="ml-1 shrink-0 text-[10px] text-muted-foreground">{task.trade || 'Needs review'}</span>
                                 </div>
                               </div>
                             ))}
@@ -613,6 +617,7 @@ const LeftPanel = ({
                     {getStatusIcon(task.status)}
                     <div className="flex-1 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:opacity-0 hover:[&::-webkit-scrollbar]:opacity-100 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/30 [&::-webkit-scrollbar-thumb]:rounded-full transition-opacity">
                       <span className="text-xs whitespace-nowrap">{task.name}</span>
+                      <span className="ml-1 shrink-0 text-[10px] text-muted-foreground">{task.trade || 'Needs review'}</span>
                     </div>
                   </div>
                 ))

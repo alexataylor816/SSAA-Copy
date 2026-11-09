@@ -36,6 +36,7 @@ interface AvailabilityRow {
 interface ScheduleRequestRow {
   id: string;
   project_id: string;
+  task_id: string | null;
   requesting_company_id: string;
   sub_company_id: string;
   employee_ids: string; // JSON array
@@ -92,6 +93,7 @@ export async function ensureSchedulingTables(): Promise<void> {
     CREATE TABLE IF NOT EXISTS schedule_requests (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      task_id TEXT,
       requesting_company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       sub_company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       employee_ids TEXT NOT NULL DEFAULT '[]',
@@ -115,6 +117,7 @@ export async function ensureSchedulingTables(): Promise<void> {
     const columns = new Set(
       (await database.all<{ name: string }>("PRAGMA table_info(schedule_requests)")).map((c) => c.name),
     );
+    if (!columns.has("task_id")) await database.exec("ALTER TABLE schedule_requests ADD COLUMN task_id TEXT");
     if (!columns.has("image_urls")) {
       await database.exec("ALTER TABLE schedule_requests ADD COLUMN image_urls TEXT NOT NULL DEFAULT '[]'");
     }
@@ -326,6 +329,7 @@ function mapAvailabilityRow(row: AvailabilityRow): Availability {
 
 export async function createScheduleRequestRow(params: {
   projectId: string;
+  taskId?: string;
   requestingCompanyId: string;
   subCompanyId: string;
   employeeIds: string[];
@@ -338,11 +342,12 @@ export async function createScheduleRequestRow(params: {
   const id = crypto.randomUUID();
   await database.run(
     `INSERT INTO schedule_requests
-       (id, project_id, requesting_company_id, sub_company_id, employee_ids, date, start_time, end_time, description, image_urls)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, project_id, task_id, requesting_company_id, sub_company_id, employee_ids, date, start_time, end_time, description, image_urls)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       params.projectId,
+      params.taskId ?? null,
       params.requestingCompanyId,
       params.subCompanyId,
       JSON.stringify(params.employeeIds),
@@ -389,6 +394,7 @@ async function mapScheduleRequestRow(row: ScheduleRequestRow): Promise<ScheduleR
   return {
     id: row.id,
     projectId: row.project_id,
+    taskId: row.task_id ?? null,
     requestingCompanyId: row.requesting_company_id,
     subCompanyId: row.sub_company_id,
     employeeIds,

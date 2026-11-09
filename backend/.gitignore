@@ -7,3 +7,4 @@ uploads/
 *.db
 *.db-wal
 *.db-shm
+vitest.config.*.timestamp-*.mjs

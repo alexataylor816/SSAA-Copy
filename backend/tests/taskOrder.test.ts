@@ -30,7 +30,7 @@ async function projectAndToken(label: string) {
   return { token, projectId: res.body.id as string };
 }
 
-type TaskRow = { id: string; name: string; sort_order: number };
+type TaskRow = { id: string; name: string; sort_order: number; trade?: string | null };
 
 async function insertTask(token: string, projectId: string, name: string, extra: Record<string, unknown> = {}) {
   const res = await query(token)({
@@ -79,6 +79,16 @@ describe("tasks sort_order", () => {
     const { token, projectId } = await projectAndToken("explicit");
     const row = await insertTask(token, projectId, "Explicit", { sort_order: 42 });
     expect(row.sort_order).toBe(42);
+  });
+
+  it("persists a reviewed task trade and allows the GC to correct it", async () => {
+    const { token, projectId } = await projectAndToken("trade");
+    const row = await insertTask(token, projectId, "Electrical Layout", { trade: "Electrical", color: "#ca8a04" });
+    expect(row.trade).toBe("Electrical");
+    const updated = await query(token)({ table: "tasks", operation: "update", data: { id: row.id, trade: "HVAC", color: "#0891b2" } });
+    expect(updated.status).toBe(200);
+    const rows = await listTasks(token, projectId);
+    expect(rows.find((task) => task.id === row.id)).toMatchObject({ trade: "HVAC" });
   });
 
   it("round-trips a full reorder the way the LeftPanel sends it", async () => {

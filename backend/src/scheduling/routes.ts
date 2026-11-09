@@ -10,6 +10,7 @@ import {
   previewProjectByCode,
   createProject,
   createScheduleRequest,
+  previewScheduleRecommendations,
   deleteAvailability,
   deleteProject,
   listAvailability,
@@ -171,10 +172,12 @@ schedulingRouter.get(
 schedulingRouter.post(
   "/schedule-requests",
   route(async (req, res) => {
-    const { projectId, subCompanyId, employeeIds, date, startTime, endTime, description, imageUrls } =
+    const { projectId, subCompanyId, employeeIds, date, startTime, endTime, description, imageUrls, taskId, taskTrade } =
       req.body ?? {};
     const request = await createScheduleRequest(req.userId!, {
       projectId,
+      taskId,
+      taskTrade,
       subCompanyId,
       employeeIds,
       date,
@@ -206,3 +209,7 @@ schedulingRouter.patch(
     res.json(request);
   }),
 );
+
+schedulingRouter.post("/projects/:id/recommendations", route(async (req, res) => {
+  res.json({ recommendations: await previewScheduleRecommendations(req.userId!, req.params.id, req.body ?? {}) });
+}));

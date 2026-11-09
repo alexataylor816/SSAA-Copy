@@ -23,6 +23,8 @@ const lanAddress = Object.values(os.networkInterfaces())
 export default defineConfig({
   server: {
     host: "::",
+    // Share pure scheduling rules with the API.
+    fs: { allow: [path.resolve(__dirname, "..")] },
     port: 8082,
     // Vite refuses unknown Host headers; allow the Codespaces forwarding domain.
     allowedHosts: inCodespace ? [".app.github.dev"] : undefined,

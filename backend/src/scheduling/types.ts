@@ -45,6 +45,7 @@ export type ScheduleRequestStatus = "pending" | "confirmed" | "rejected" | "canc
 export interface ScheduleRequest {
   id: string;
   projectId: string;
+  taskId: string | null;
   requestingCompanyId: string;
   subCompanyId: string;
   employeeIds: string[];
