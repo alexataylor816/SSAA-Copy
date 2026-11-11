@@ -10,8 +10,10 @@ import AuthLayout from "@/components/AuthLayout";
 import { peekNext } from "@/lib/share";
 import GoogleSignInButton, { googleSignInEnabled } from "@/components/GoogleSignInButton";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 export default function SignIn() {
+  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -49,13 +51,13 @@ export default function SignIn() {
     <AuthLayout>
       <Card className="w-full max-w-md border-primary/20 shadow-lg">
         <CardHeader className="text-center pb-2">
-          <CardTitle className="text-2xl font-bold">Welcome Back</CardTitle>
-          <p className="text-muted-foreground text-sm mt-1">Sign in to access your dashboard</p>
+          <CardTitle className="text-2xl font-bold">{t("signIn.welcomeBack")}</CardTitle>
+          <p className="text-muted-foreground text-sm mt-1">{t("signIn.signInToAccessYourDashboard")}</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("common.email")}</Label>
               <Input
                 id="email"
                 type="email"
@@ -68,7 +70,7 @@ export default function SignIn() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("signIn.password")}</Label>
               <div className="relative">
                 <Input
                   id="password"
@@ -83,7 +85,7 @@ export default function SignIn() {
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? t("signIn.hidePassword") : t("signIn.showPassword")}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -98,7 +100,8 @@ export default function SignIn() {
 
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Sign In
+              
+              {t("signIn.signIn")}
             </Button>
 
             {googleSignInEnabled && (
@@ -121,14 +124,17 @@ export default function SignIn() {
 
           <div className="mt-6 text-center space-y-3">
             <Link to="/signup" className="text-sm font-medium text-primary hover:text-primary/80">
-              Don&apos;t have an account? Sign Up
+              
+              {t("signIn.donTHaveAnAccountSign")}
             </Link>
             <div className="flex justify-center gap-4 text-sm">
               <Link to="/forgot-username" className="text-muted-foreground hover:text-primary transition-colors">
-                Forgot Username?
+                
+                {t("signIn.forgotUsername")}
               </Link>
               <Link to="/forgot-password" className="text-muted-foreground hover:text-primary transition-colors">
-                Forgot Password?
+                
+                {t("signIn.forgotPassword")}
               </Link>
             </div>
           </div>

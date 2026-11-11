@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/toaster";
 import MessageAlerts from "@/components/MessageAlerts";
+import ViewAsBanner from "@/components/ViewAsBanner";
 import { peekNext } from "@/lib/share";
 
 // Route-level code splitting: each page (and its heavy deps like the matrix
@@ -54,6 +55,7 @@ function Protected({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <>
+      <ViewAsBanner />
       <Suspense fallback={<FullPageSpinner />}>
       <Routes>
         <Route
@@ -147,13 +149,14 @@ export default function App() {
           }
         />
         <Route
-          path="/admin"
+          path="/operator"
           element={
             <Protected>
               <Admin />
             </Protected>
           }
         />
+        <Route path="/admin" element={<Navigate to="/operator" replace />} />
 
         {/* Invite links: open signed in or out; the pages walk people through what's missing. */}
         <Route path="/join/project/:code" element={<JoinProject />} />

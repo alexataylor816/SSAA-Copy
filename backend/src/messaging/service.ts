@@ -241,6 +241,12 @@ async function requireConversation(conversationId: string, user: User): Promise<
   return conv;
 }
 
+/** Throws "not found" unless this user can read the conversation (used by message translation). */
+export async function requireReadableConversation(conversationId: string, userId: string): Promise<void> {
+  const user = await requireUser(userId);
+  await requireConversation(conversationId, user);
+}
+
 /** can_post_in_project_conversation: subs below partial read the channel but can't post. */
 async function canPost(conv: ConversationRow, user: User): Promise<boolean> {
   if (user.isAdmin || conv.type !== "project" || !user.companyId) return true;

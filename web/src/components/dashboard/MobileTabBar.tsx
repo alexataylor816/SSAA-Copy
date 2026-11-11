@@ -7,6 +7,7 @@ import { useConversations } from "@/hooks/useMessaging";
 import { useLanguage } from "@/contexts/LanguageContext";
 import ManageProfileDialog from "@/components/dashboard/ManageProfileDialog";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { tr } from "@/i18n/runtime";
 
 interface TabProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   active: boolean;
@@ -46,11 +47,11 @@ const Tab = forwardRef<HTMLButtonElement, TabProps>(({ active, label, icon: Icon
 Tab.displayName = "Tab";
 
 const LEVEL_LABEL: Record<string, string> = {
-  account_holder: "Account holder",
-  full: "Full access",
-  partial: "Partial access",
-  level_1: "Foreman",
-  basic: "Crew member",
+  get account_holder() { return tr("mobileTabBar.levelLabel.accountHolder"); },
+  get full() { return tr("mobileTabBar.levelLabel.full"); },
+  get partial() { return tr("mobileTabBar.levelLabel.partial"); },
+  get level_1() { return tr("mobileTabBar.levelLabel.level1"); },
+  get basic() { return tr("mobileTabBar.levelLabel.basic"); },
 };
 
 function SheetRow({
@@ -122,23 +123,23 @@ export default function MobileTabBar({ pendingJoinCount = 0 }: { pendingJoinCoun
     <>
       <div aria-hidden className="h-[calc(4rem+env(safe-area-inset-bottom))] shrink-0 lg:hidden" />
       <nav
-        aria-label="Main"
+        aria-label={t("mobileTabBar.main")}
         className="fixed inset-x-0 bottom-0 z-40 bg-primary pb-[env(safe-area-inset-bottom)] text-primary-foreground shadow-[0_-4px_16px_rgba(0,0,0,0.12)] lg:hidden"
       >
         <div className="mx-auto flex max-w-lg px-1">
-          <Tab active={path.startsWith("/dashboard")} label="Calendar" icon={CalendarDays} onClick={() => navigate("/dashboard")} />
-          <Tab active={path.startsWith("/matrix")} label="Weekly" icon={CalendarRange} onClick={() => navigate("/matrix")} />
+          <Tab active={path.startsWith("/dashboard")} label={t("mobileTabBar.calendar")} icon={CalendarDays} onClick={() => navigate("/dashboard")} />
+          <Tab active={path.startsWith("/matrix")} label={t("mobileTabBar.weekly")} icon={CalendarRange} onClick={() => navigate("/matrix")} />
           <Tab
             active={path.startsWith("/messages")}
-            label="Messages"
+            label={t("mobileTabBar.messages")}
             icon={MessageSquare}
             badge={totalUnread}
-            aria-label={totalUnread > 0 ? `Messages, ${totalUnread} unread` : "Messages"}
+            aria-label={totalUnread > 0 ? t("mobileTabBar.messagesUnread", { totalUnread: totalUnread }) : t("mobileTabBar.messages")}
             onClick={() => navigate("/messages")}
           />
           <Tab
             active={settingsOpen || path.startsWith("/settings") || path.startsWith("/admin")}
-            label="Settings"
+            label={t("mobileTabBar.settings")}
             icon={Settings}
             dot={showJoinDot}
             onClick={() => setSettingsOpen(true)}
@@ -160,7 +161,7 @@ export default function MobileTabBar({ pendingJoinCount = 0 }: { pendingJoinCoun
               </span>
             )}
             <div className="min-w-0">
-              <SheetTitle className="truncate text-base">{user?.fullName || "Your account"}</SheetTitle>
+              <SheetTitle className="truncate text-base">{user?.fullName || t("mobileTabBar.yourAccount")}</SheetTitle>
               <SheetDescription className="truncate text-sm">
                 {user?.email}
                 {permissionLevel && ` · ${LEVEL_LABEL[permissionLevel] ?? permissionLevel}`}
@@ -177,9 +178,9 @@ export default function MobileTabBar({ pendingJoinCount = 0 }: { pendingJoinCoun
                 onClick={() => go(() => navigate("/settings/company"))}
               />
             )}
-            {isMOA && <SheetRow icon={ShieldCheck} label="Admin" onClick={() => go(() => navigate("/admin"))} />}
+            {isMOA && <SheetRow icon={ShieldCheck} label={t("mobileTabBar.operatorDashboard")} onClick={() => go(() => navigate("/operator"))} />}
             <div className="my-2 border-t" />
-            <SheetRow icon={LogOut} label="Sign out" danger onClick={() => go(() => void signOut())} />
+            <SheetRow icon={LogOut} label={t("common.signOut")} danger onClick={() => go(() => void signOut())} />
           </div>
         </SheetContent>
       </Sheet>

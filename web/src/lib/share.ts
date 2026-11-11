@@ -9,7 +9,10 @@ export function shareOrigin(): string {
   const configured = import.meta.env.VITE_PUBLIC_URL as string | undefined;
   if (configured) return configured.replace(/\/+$/, "");
   const { hostname, origin } = window.location;
-  if ((hostname === "localhost" || hostname === "127.0.0.1") && __SSAA_LAN_ORIGIN__) return __SSAA_LAN_ORIGIN__;
+  // Injected by vite.config.ts. A dev server that restarted without it must
+  // not take the page down: fall back to this page's own address.
+  const lan = typeof __SSAA_LAN_ORIGIN__ === "string" ? __SSAA_LAN_ORIGIN__ : "";
+  if ((hostname === "localhost" || hostname === "127.0.0.1") && lan) return lan;
   return origin;
 }
 

@@ -19,7 +19,9 @@ async function company(token: string, name: string, companyType: "gc" | "sub", a
   return res.body.company.id as string;
 }
 
-describe("company search", () => {
+// Signs up many users (password hashing is slow on purpose); with every file running at once
+// that can pass vitest's 5 s default without anything being wrong.
+describe("company search", { timeout: 20_000 }, () => {
   it("never hands out the whole directory", async () => {
     const token = await signUp(`search-none-${tag}@example.com`);
     for (const q of [undefined, "", "ab", "  ab  "]) {

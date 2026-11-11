@@ -15,6 +15,7 @@ import {
   sendMessage,
   type MessageView,
 } from "./service.js";
+import { translateMessageFor, translationAvailable } from "./translate.js";
 
 /** Every participant hears about a new message in their own room. */
 function broadcast(message: MessageView, recipientIds: string[]) {
@@ -113,5 +114,23 @@ messagingRouter.get(
   requireAuth,
   route(async (req, res) => {
     res.json({ contacts: await listContacts(req.userId!) });
+  }),
+);
+
+/** Whether the Translate button should show (the server has an AI key). */
+messagingRouter.get(
+  "/messages/translation",
+  requireAuth,
+  route(async (_req, res) => {
+    res.json({ available: translationAvailable() });
+  }),
+);
+
+/** Translate one message into the reader's language (or `to`: "en" | "es"). */
+messagingRouter.post(
+  "/messages/:id/translate",
+  requireAuth,
+  route(async (req, res) => {
+    res.json(await translateMessageFor(req.userId!, req.params.id, req.body?.to));
   }),
 );

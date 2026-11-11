@@ -7,6 +7,9 @@ import { clearNext, rememberNext } from "@/lib/share";
 import AuthLayout from "@/components/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { tradeLabel } from "@/i18n/labels";
+import { tr } from "@/i18n/runtime";
 
 interface CompanySummary {
   id: string;
@@ -21,6 +24,7 @@ interface CompanySummary {
  * approves it and chooses their access level.
  */
 export default function JoinCompany() {
+  const { t } = useLanguage();
   const { companyId = "" } = useParams();
   const { user, initializing, refreshProfile } = useAuth();
   const navigate = useNavigate();
@@ -37,7 +41,7 @@ export default function JoinCompany() {
     api
       .get<{ company: CompanySummary }>(`/companies/${encodeURIComponent(companyId)}/summary`)
       .then((res) => !cancelled && setCompany(res.company))
-      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Could not open that invite."));
+      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : tr("joinCompany.couldNotOpenInvite")));
     return () => {
       cancelled = true;
     };
@@ -52,13 +56,13 @@ export default function JoinCompany() {
       await refreshProfile();
       setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send the request.");
+      setError(err instanceof Error ? err.message : tr("joinCompany.couldNotSendRequest"));
     } finally {
       setBusy(false);
     }
   }
 
-  const kind = company?.companyType === "gc" ? "General contractor" : company?.trade ? `${company.trade} subcontractor` : "Subcontractor";
+  const kind = company?.companyType === "gc" ? t("common.generalContractor") : company?.trade ? t("joinCompany.tradeSubcontractor", { trade: tradeLabel(company.trade) }) : t("common.subcontractor");
 
   let body: React.ReactNode;
   if (initializing) {
@@ -67,14 +71,16 @@ export default function JoinCompany() {
     body = (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          You&apos;ve been invited to join a company&apos;s team on SSAA. Create your account, or sign in if you
-          already have one. You&apos;ll come right back here.
+          
+          {t("joinCompany.youVeBeenInvitedToJoin")}
         </p>
         <Button className="w-full" size="lg" onClick={() => (rememberNext(here), navigate("/signup"))}>
-          Create my account
+          
+          {t("joinCompany.createMyAccount")}
         </Button>
         <Button className="w-full" size="lg" variant="outline" onClick={() => (rememberNext(here), navigate("/signin"))}>
-          I already have an account
+          
+          {t("joinCompany.iAlreadyHaveAnAccount")}
         </Button>
       </div>
     );
@@ -85,7 +91,8 @@ export default function JoinCompany() {
           {error}
         </p>
         <Button className="w-full" variant="outline" onClick={() => (clearNext(), navigate("/dashboard"))}>
-          Go to my dashboard
+          
+          {t("joinCompany.goToMyDashboard")}
         </Button>
       </div>
     ) : (
@@ -105,9 +112,10 @@ export default function JoinCompany() {
       body = (
         <div className="space-y-4">
           {companyCard}
-          <p className="text-sm text-muted-foreground">You&apos;re already on this team.</p>
+          <p className="text-sm text-muted-foreground">{t("joinCompany.youReAlreadyOnThisTeam")}</p>
           <Button className="w-full" size="lg" onClick={() => (clearNext(), navigate("/dashboard"))}>
-            Go to my dashboard
+            
+            {t("joinCompany.goToMyDashboard")}
           </Button>
         </div>
       );
@@ -116,11 +124,12 @@ export default function JoinCompany() {
         <div className="space-y-4">
           {companyCard}
           <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-            Your account already belongs to another company. Each account is on one company&apos;s team; use a
-            different account to join this one.
+            
+            {t("joinCompany.yourAccountAlreadyBelongsToAnother")}
           </p>
           <Button className="w-full" variant="outline" onClick={() => (clearNext(), navigate("/dashboard"))}>
-            Go to my dashboard
+            
+            {t("joinCompany.goToMyDashboard")}
           </Button>
         </div>
       );
@@ -130,13 +139,15 @@ export default function JoinCompany() {
           {companyCard}
           <p className="flex items-center justify-center gap-2 text-sm font-medium text-green-700">
             <CheckCircle2 className="h-5 w-5" />
-            Request sent
+            
+            {t("joinCompany.requestSent")}
           </p>
           <p className="text-sm text-muted-foreground">
-            {company.name}&apos;s owner will approve you and set what you can do. You&apos;ll get a notification.
+            {company.name}{t("joinCompany.sOwnerWillApproveYouAnd")}
           </p>
           <Button className="w-full" size="lg" onClick={() => navigate("/dashboard", { state: { pendingJoinRequest: true } })}>
-            Continue
+            
+            {t("common.continue")}
           </Button>
         </div>
       );
@@ -146,7 +157,8 @@ export default function JoinCompany() {
           {companyCard}
           <Button className="w-full" size="lg" disabled={busy} onClick={() => void requestToJoin()}>
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Ask to join {company.name}
+            
+            {t("joinCompany.askToJoin")}{" "}{company.name}
           </Button>
           {error && (
             <p role="alert" className="text-sm text-destructive">
@@ -162,7 +174,7 @@ export default function JoinCompany() {
     <AuthLayout>
       <Card className="w-full max-w-md border-primary/20 text-center shadow-lg">
         <CardHeader className="pb-2">
-          <CardTitle className="text-2xl font-bold">Join a team</CardTitle>
+          <CardTitle className="text-2xl font-bold">{t("joinCompany.joinATeam")}</CardTitle>
         </CardHeader>
         <CardContent>{body}</CardContent>
       </Card>

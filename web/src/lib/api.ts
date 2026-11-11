@@ -4,6 +4,8 @@
  */
 
 import { getToken, setToken } from "./supabase";
+import { getLanguage } from "@/i18n/runtime";
+import { tr } from "@/i18n/runtime";
 
 export class ApiError extends Error {
   constructor(
@@ -21,6 +23,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      // The server answers errors in this language.
+      "Accept-Language": getLanguage(),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init.headers ?? {}),
     },
@@ -28,7 +32,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await res.text();
   const payload = text ? JSON.parse(text) : {};
   if (!res.ok) {
-    throw new ApiError(payload.error ?? `Request failed with ${res.status}.`, res.status);
+    throw new ApiError(payload.error ?? tr("api.requestFailedWith", { status: res.status }), res.status);
   }
   return payload as T;
 }
@@ -39,6 +43,8 @@ export const api = {
     request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
   patch: <T,>(path: string, body?: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
+  put: <T,>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),
   delete: <T,>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 

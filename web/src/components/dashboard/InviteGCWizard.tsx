@@ -13,6 +13,9 @@ import {
 import { Loader2, Mail } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase';
+import { useLanguage } from "@/contexts/LanguageContext";
+import { jobTitleLabel } from "@/i18n/labels";
+import { tr } from "@/i18n/runtime";
 
 const JOB_TITLE_PRESETS = [
   'Senior Project Manager',
@@ -59,6 +62,7 @@ const resolveJobTitle = (inv: Invitee): string => {
 };
 
 const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Props) => {
+  const { t } = useLanguage();
   const [step, setStep] = useState<1 | 2>(1);
   const [count, setCount] = useState(1);
   const [sharedCompanyName, setSharedCompanyName] = useState('');
@@ -94,16 +98,16 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
 
   const handleSend = async () => {
     if (!projectName.trim()) {
-      toast({ title: 'Project name required', variant: 'destructive' });
+      toast({ title: t("inviteGCWizard.projectNameRequired"), variant: 'destructive' });
       return;
     }
     if (!sharedCompanyName.trim()) {
-      toast({ title: 'GC Company Name is required', variant: 'destructive' });
+      toast({ title: t("inviteGCWizard.gcCompanyNameIsRequired"), variant: 'destructive' });
       return;
     }
     const validInvitees = invitees.filter((i) => i.email.trim() && i.full_name.trim());
     if (validInvitees.length === 0) {
-      toast({ title: 'At least one invitee with name + email is required', variant: 'destructive' });
+      toast({ title: t("inviteGCWizard.atLeastOneInviteeWithName"), variant: 'destructive' });
       return;
     }
     const badEmails = validInvitees
@@ -111,8 +115,8 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
       .filter((e) => !EMAIL_RE.test(e));
     if (badEmails.length > 0) {
       toast({
-        title: 'Invalid email address',
-        description: `Please fix: ${badEmails.join(', ')}. Email addresses can't contain parentheses or spaces.`,
+        title: t("inviteGCWizard.invalidEmailAddress"),
+        description: t("inviteGCWizard.pleaseFixEmailAddressesCanT", { join: badEmails.join(', ') }),
         variant: 'destructive',
       });
       return;
@@ -228,7 +232,7 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
 
         if (pfErr || !prefill) {
           console.error('prefill insert error', pfErr);
-          failures.push({ email: emailLower, reason: 'Could not create invite record' });
+          failures.push({ email: emailLower, reason: t("inviteGCWizard.couldNotCreateInviteRecord") });
           continue;
         }
 
@@ -253,24 +257,24 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
           const reason =
             (sendData as any)?.error ||
             sendErr?.message ||
-            'Email provider rejected the address';
+            tr("inviteGCWizard.providerRejected");
           failures.push({ email: emailLower, reason });
         }
       }
 
       const failedDesc =
         failures.length > 0
-          ? ` Failed: ${failures.map((f) => `${f.email} (${f.reason})`).join('; ')}.`
+          ? t("inviteGCWizard.failed", { join: failures.map((f) => `${f.email} (${f.reason})`).join('; ') })
           : '';
 
       toast({
-        title: `Sent ${successCount} invitation${successCount === 1 ? '' : 's'}${failures.length ? `, ${failures.length} failed` : ''}`,
+        title: t(successCount === 1 ? "inviteGCWizard.sentInvitation.one" : "inviteGCWizard.sentInvitation.other", { count: successCount, failed: failures.length ? t("inviteGCWizard.failedCount", { count: failures.length }) : "" }),
         description:
           successCount > 0
             ? (existingUserCount > 0
-                ? `${existingUserCount} recipient${existingUserCount === 1 ? ' already has' : 's already have'} an SSAA account and received a sign-in + connection code email. The rest received the full welcome email.`
-                : 'Recipients can click the email link to set up their account in one step.') + failedDesc
-            : `No invitations could be sent — please review the form and try again.${failedDesc}`,
+                ? t(existingUserCount === 1 ? "inviteGCWizard.existingAccounts.one" : "inviteGCWizard.existingAccounts.other", { count: existingUserCount })
+                : t("inviteGCWizard.recipientsCanClickTheEmailLink")) + failedDesc
+            : t("inviteGCWizard.noInvitationsCouldBeSentPlease", { failedDesc: failedDesc }),
         variant: failures.length > 0 ? 'destructive' : 'default',
       });
 
@@ -282,7 +286,7 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
 
     } catch (e: any) {
       console.error(e);
-      toast({ title: 'Failed to send', description: e.message, variant: 'destructive' });
+      toast({ title: t("inviteGCWizard.failedToSend"), description: e.message, variant: 'destructive' });
     } finally {
       setSending(false);
     }
@@ -298,13 +302,13 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
     >
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Invite General Contractor(s) to SSAA</DialogTitle>
+          <DialogTitle>{t("inviteGCWizard.inviteGeneralContractorSToSsaa")}</DialogTitle>
         </DialogHeader>
 
         {step === 1 && (
           <div className="space-y-4 pt-4">
             <div className="space-y-2">
-              <Label>How many people would you like to invite?</Label>
+              <Label>{t("inviteGCWizard.howManyPeopleWouldYouLike")}</Label>
               <Input
                 type="number"
                 min={1}
@@ -312,35 +316,37 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
                 value={count}
                 onChange={(e) => handleCountChange(parseInt(e.target.value || '1', 10))}
               />
-              <p className="text-xs text-muted-foreground">Up to 10 people per batch.</p>
+              <p className="text-xs text-muted-foreground">{t("inviteGCWizard.upTo10PeoplePerBatch")}</p>
             </div>
 
             <div className="space-y-2">
-              <Label>GC Company Name *</Label>
+              <Label>{t("inviteGCWizard.gcCompanyName")}</Label>
               <Input
                 value={sharedCompanyName}
                 onChange={(e) => setSharedCompanyName(e.target.value)}
                 placeholder="Acme Construction"
               />
               <p className="text-xs text-muted-foreground">
-                All invitees in this batch will be grouped under this company.
+                
+                {t("inviteGCWizard.allInviteesInThisBatchWill")}
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Project Name *</Label>
+                <Label>{t("inviteGCWizard.projectName")}</Label>
                 <Input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Downtown Office Build" />
               </div>
               <div className="space-y-2">
-                <Label>Project Address</Label>
+                <Label>{t("inviteGCWizard.projectAddress")}</Label>
                 <Input value={projectAddress} onChange={(e) => setProjectAddress(e.target.value)} placeholder="123 Main St" />
               </div>
             </div>
 
             <div className="flex justify-end pt-2">
               <Button onClick={() => setStep(2)} disabled={!projectName.trim() || !sharedCompanyName.trim()}>
-                Next
+                
+                {t("inviteGCWizard.next")}
               </Button>
             </div>
           </div>
@@ -349,35 +355,37 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
         {step === 2 && (
           <div className="space-y-4 pt-4">
             <p className="text-sm text-muted-foreground">
-              Fill in details for each invitee. Name and email are required.
+              
+              {t("inviteGCWizard.fillInDetailsForEachInvitee")}
             </p>
 
             {invitees.map((inv, i) => (
               <div key={i} className="border rounded-lg p-3 space-y-3 bg-muted/30">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-medium text-sm">Invitee #{i + 1}</h4>
+                  <h4 className="font-medium text-sm">{t("inviteGCWizard.invitee")}{i + 1}</h4>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-xs">Full Name *</Label>
+                    <Label className="text-xs">{t("inviteGCWizard.fullName")}</Label>
                     <Input value={inv.full_name} onChange={(e) => updateInvitee(i, { full_name: e.target.value })} />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Email *</Label>
+                    <Label className="text-xs">{t("inviteGCWizard.email")}</Label>
                     <Input type="email" value={inv.email} onChange={(e) => updateInvitee(i, { email: e.target.value })} />
                     {inv.email.trim() && !EMAIL_RE.test(inv.email.trim()) && (
                       <p className="text-xs text-destructive">
-                        Invalid email — no parentheses, spaces, or special characters allowed.
+                        
+                        {t("inviteGCWizard.invalidEmailNoParenthesesSpacesOr")}
                       </p>
                     )}
                   </div>
 
                   <div className="space-y-1">
-                    <Label className="text-xs">Phone</Label>
+                    <Label className="text-xs">{t("inviteGCWizard.phone")}</Label>
                     <Input value={inv.phone} onChange={(e) => updateInvitee(i, { phone: e.target.value })} />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Job Title</Label>
+                    <Label className="text-xs">{t("inviteGCWizard.jobTitle")}</Label>
                     <Select
                       value={inv.job_title_preset}
                       onValueChange={(value) =>
@@ -389,12 +397,12 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select a job title" />
+                        <SelectValue placeholder={t("inviteGCWizard.selectAJobTitle")} />
                       </SelectTrigger>
                       <SelectContent>
                         {JOB_TITLE_PRESETS.map((title) => (
                           <SelectItem key={title} value={title}>
-                            {title}
+                            {jobTitleLabel(title)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -402,11 +410,11 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
                   </div>
                   {inv.job_title_preset === 'Other' && (
                     <div className="space-y-1 md:col-span-2">
-                      <Label className="text-xs">Custom Job Title</Label>
+                      <Label className="text-xs">{t("inviteGCWizard.customJobTitle")}</Label>
                       <Input
                         value={inv.job_title_custom}
                         onChange={(e) => updateInvitee(i, { job_title_custom: e.target.value })}
-                        placeholder="Enter job title"
+                        placeholder={t("inviteGCWizard.enterJobTitle")}
                       />
                     </div>
                   )}
@@ -416,18 +424,21 @@ const InviteGCWizard = ({ open, onOpenChange, subCompanyId, subCompanyName }: Pr
 
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={() => setStep(1)} disabled={sending}>
-                Back
+                
+                {t("common.back")}
               </Button>
               <Button onClick={handleSend} disabled={sending}>
                 {sending ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Sending...
+                    
+                    {t("inviteGCWizard.sending")}
                   </>
                 ) : (
                   <>
                     <Mail className="h-4 w-4 mr-2" />
-                    Send {invitees.filter((i) => i.email && i.full_name).length} Invitation
+                    
+                    {t("common.send")}{" "}{invitees.filter((i) => i.email && i.full_name).length} {" "}{t("inviteGCWizard.invitation")}
                     {invitees.filter((i) => i.email && i.full_name).length === 1 ? '' : 's'}
                   </>
                 )}

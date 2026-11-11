@@ -10,12 +10,15 @@ import { healthRouter } from "./routes/health.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { queryRouter } from "./query/routes.js";
 import { schedulingRouter } from "./scheduling/routes.js";
+import { aiRouter } from "./ai/routes.js";
 import { messagingRouter } from "./messaging/routes.js";
 import { contractorsRouter } from "./contractors/routes.js";
 import { adminRouter } from "./admin/routes.js";
 import { notificationsRouter } from "./notifications/routes.js";
 import { profileRouter } from "./routes/profile.js";
 import { attachRealtime } from "./realtime/index.js";
+import { languageMiddleware, say } from "./i18n/index.js";
+import { localizeJsonErrors } from "./i18n/middleware.js";
 
 export async function createApp() {
   await ensureSchema();
@@ -28,6 +31,10 @@ export async function createApp() {
     }),
   );
   app.use(express.json());
+  // Accept-Language from the web app: errors (and messages built from pieces) come back in Spanish
+  // for Spanish users. No header means English, as before.
+  app.use(languageMiddleware);
+  app.use(localizeJsonErrors);
 
   app.get("/", (_req, res) => {
     res.json({ service: "ssaa-backend", status: "ok" });
@@ -44,11 +51,12 @@ export async function createApp() {
   app.use(queryRouter);
   app.use(contractorsRouter);
   app.use(adminRouter);
+  app.use(aiRouter);
 
   // Anything thrown that isn't an HttpError used to reach Express's default
   // HTML error page; the SPA can't read that, so always answer with JSON.
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    const message = err instanceof Error ? err.message : "Unexpected server error.";
+    const message = err instanceof Error ? err.message : say("Unexpected server error.");
     if (res.headersSent) return;
     res.status(500).json({ error: message });
   });

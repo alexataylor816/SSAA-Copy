@@ -46,7 +46,7 @@ if (Number(existing) > 0) {
 }
 
 // --- Helpers ---------------------------------------------------------------
-async function call(method: "get" | "post" | "patch", url: string, token?: string, body?: Json): Promise<Json> {
+async function call(method: "get" | "post" | "patch" | "put", url: string, token?: string, body?: Json): Promise<Json> {
   let req = request(app)[method](url);
   if (token) req = req.set("Authorization", `Bearer ${token}`);
   const res = await (body ? req.send(body) : req);
@@ -184,6 +184,21 @@ const declined = await call("post", "/schedule-requests", gc.token, {
 });
 await call("patch", `/schedule-requests/${declined.id}`, erin.token, { status: "rejected", statusReason: "Crew is on another job that day" });
 
+// --- Project assignments (Weekly view: dropping someone elsewhere gets a red outline) --
+// Bao Plumbing's whole crew works Riverside only, so putting anyone on Main St asks first.
+await call("put", `/projects/${riverside.id}/assignments`, sub.token, { employeeIds: plumbers.map((e) => e.id) });
+await call("put", `/projects/${riverside.id}/assignments`, dana.token, { employeeIds: [idOf(drywall, "Marco Diaz")] });
+for (const project of [riverside, mainSt]) {
+  await call("put", `/projects/${project.id}/assignments`, erin.token, { employeeIds: [idOf(electricians, "Dev Patel")] });
+}
+
+// --- Steve already put Mike on Main St for Tuesday: Greg sees it as "Edited" ------
+await call("post", "/schedule-requests/batch", sub.token, {
+  create: [{ projectId: mainSt.id, subCompanyId: plumbingId, employeeIds: [idOf(plumbers, "Mike Rivera")], date: day(1), startTime: "07:00", endTime: "15:30" }],
+  cancel: [],
+  allowUnassigned: true,
+});
+
 // --- Tasks on Riverside ---------------------------------------------------------
 for (const [name, start, end, color, status] of [
   ["Site prep & layout", day(-7), day(-3), "#64748b", "complete"],
@@ -206,13 +221,46 @@ await call("post", `/conversations/${dm.conversationId}/messages`, paul.token, {
 const group = await call("post", "/conversations/group", gc.token, { title: "Riverside coordination", userIds: [paul.id, sub.id, dana.id, erin.id] });
 await call("post", `/conversations/${group.conversationId ?? group.id}/messages`, gc.token, { body: "Weekly sync Friday 7am at the trailer." });
 
+// --- A bigger world to test with: more GCs, projects, trade subs, crews, tasks, requests --
+// (skip with --small for just the scripted scenario)
+let bulk: Record<string, number> | null = null;
+if (!process.argv.includes("--small")) {
+  const { seedBulk } = await import("./seed-bulk.js");
+  bulk = await seedBulk({
+    call,
+    query,
+    person,
+    company,
+    join,
+    roster,
+    day,
+    gc,
+    gcProjects: [riverside, mainSt, elmSt],
+    elmStId: elmSt.id,
+    showcaseSubs: [
+      { owner: sub, companyId: plumbingId, trade: "Plumbing" },
+      { owner: dana, companyId: drywallId, trade: "Drywall" },
+      { owner: erin, companyId: electricId, trade: "Electrical" },
+    ],
+    reservedEmployeeIds: new Set([...plumbers, ...drywall, ...electricians].map((e) => e.id)),
+  });
+}
+
+// --- The SSAA operator (Luke's role): no company, sees everything, can "view as" anyone --
+const operator = await person("operator@example.com", "SSAA Operator");
+await database.run("UPDATE users SET is_admin = 1, operator_level = 'main_operator' WHERE id = ?", [operator.id]);
+// GC Greg's account is also the owner operator: it runs Terrapin Builders and opens the Operator Dashboard
+// from the header. (Operators can't "view as" each other, so view Greg's company by signing in as Greg.)
+await database.run("UPDATE users SET is_admin = 1, operator_level = 'owner' WHERE id = ?", [gc.id]);
+
 // --- One person waiting to join Bao Plumbing (approve it from the sub's view) ----
 const sam = await person("sam.okafor@example.com", "Sam Okafor");
 await call("post", `/companies/${plumbingId}/join-requests`, sam.token);
 
-const everyone = [gc, paul, sub, mike, pete, dana, marco, erin, dev, sam];
+const everyone = [operator, gc, paul, sub, mike, pete, dana, marco, erin, dev, sam];
 console.log(`Demo data ready. Password for every account: ${PASSWORD}`);
+if (bulk) console.log(`Plus: ${Object.entries(bulk).map(([k, v]) => `${v} ${k}`).join(", ")}`);
 console.log(`Elm Street Clinic Renovation (Bao Plumbing joins live): code ${elmSt.connectionCode}`);
-console.log(`Dates: Monday ${day(0)}, Wednesday ${day(2)}, Saturday ${day(5)}`);
+console.log(`Dates: Monday ${day(0)}, Tuesday ${day(1)} (Mike on Main St, "Edited"), Wednesday ${day(2)}, Saturday ${day(5)}`);
 for (const p of everyone) console.log(`  ${p.email.padEnd(26)} ${p.fullName}`);
 process.exit(0);

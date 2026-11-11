@@ -7,6 +7,7 @@ import NotificationBell from "@/components/dashboard/NotificationBell";
 import ManageProfileDialog from "@/components/dashboard/ManageProfileDialog";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Button } from "@/components/ui/button";
+import LanguageToggle from "@/components/LanguageToggle";
 
 /**
  * The GC/sub branch of Lovable's DashboardHeader. Operator (MOA) tabs and
@@ -36,10 +37,10 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
 
   const path = location.pathname;
   const viewToggle = (
-    <div className="flex items-center gap-1 rounded-lg bg-primary-foreground/15 p-0.5" role="group" aria-label="Calendar view">
+    <div className="flex items-center gap-1 rounded-lg bg-primary-foreground/15 p-0.5" role="group" aria-label={t("dashboardHeader.calendarView")}>
       {[
-        { label: "Monthly", to: "/dashboard" },
-        { label: "Weekly", to: "/matrix" },
+        { label: t("dashboardHeader.monthly"), to: "/dashboard" },
+        { label: t("dashboardHeader.weekly"), to: "/matrix" },
       ].map((option) => {
         const active = path.startsWith(option.to);
         return (
@@ -84,7 +85,9 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               </Button>
             )}
 
-            {/* Below lg only the bell stays up here; everything else is in MobileTabBar at the bottom. */}
+            <LanguageToggle tone="onPrimary" />
+
+            {/* Below lg only the bell and language stay up here; everything else is in MobileTabBar at the bottom. */}
             <NotificationBell />
 
             <Button
@@ -95,7 +98,7 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               className="relative hidden text-primary-foreground hover:bg-primary-foreground/10 lg:flex"
             >
               <MessageSquare className="h-4 w-4 lg:mr-2" />
-              <span className="hidden lg:inline">{t("header.messages") || "Messages"}</span>
+              <span className="hidden lg:inline">{t("header.messages") || t("dashboardHeader.messages")}</span>
               {totalUnread > 0 && (
                 <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
                   {totalUnread > 99 ? "99+" : totalUnread}
@@ -118,12 +121,12 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => navigate("/admin")}
+                onClick={() => navigate("/operator")}
                 className="hidden text-primary-foreground hover:bg-primary-foreground/10 lg:flex"
-                aria-label="Administration"
+                aria-label={t("dashboardHeader.operatorDashboard")}
               >
                 <ShieldCheck className="h-4 w-4 lg:mr-2" />
-                <span className="hidden lg:inline">Admin</span>
+                <span className="hidden lg:inline">{t("dashboardHeader.operatorDashboard")}</span>
               </Button>
             )}
 
@@ -131,7 +134,7 @@ export default function DashboardHeader({ pendingJoinCount = 0 }: DashboardHeade
               variant="ghost"
               size="icon"
               onClick={() => void signOut()}
-              aria-label="Sign out"
+              aria-label={t("common.signOut")}
               className="hidden text-primary-foreground hover:bg-primary-foreground/10 lg:flex"
             >
               <LogOut className="h-5 w-5" />

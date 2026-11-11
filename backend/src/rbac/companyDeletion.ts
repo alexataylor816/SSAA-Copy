@@ -189,6 +189,7 @@ export async function executeCompanyDeletion(companyId: string): Promise<void> {
     await database.run("DELETE FROM user_roles WHERE company_id = ?", [companyId]);
     await database.run("DELETE FROM user_project_assignments WHERE company_id = ?", [companyId]);
     await database.run("DELETE FROM employee_project_assignments WHERE company_id = ?", [companyId]);
+    await database.run("DELETE FROM ai_trade_answers WHERE company_id = ?", [companyId]);
     await database.run("DELETE FROM company_join_requests WHERE company_id = ?", [companyId]);
     await database.run("DELETE FROM project_connections WHERE project_id NOT IN (SELECT id FROM projects)");
     await database.run("UPDATE users SET company_id = NULL WHERE company_id = ?", [companyId]);

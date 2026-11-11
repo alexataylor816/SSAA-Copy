@@ -11,9 +11,10 @@ import {
   updateUserPassword,
   type User,
 } from "../models/users.js";
-import { sendPasswordResetEmail, sendUsernameReminderEmail } from "../services/email.js";
+import { sendTemplatedEmail } from "../notifications/correspondence.js";
 import { hashPassword, verifyPassword } from "../services/passwords.js";
 import { signToken, verifyToken } from "../services/tokens.js";
+import { asLang } from "../i18n/index.js";
 
 export const authRouter = Router();
 
@@ -66,6 +67,9 @@ authRouter.post("/auth/signin", handle(async (req, res) => {
   if (!user || !verifyPassword(password, user.passwordHash)) {
     return res.status(401).json({ error: "Invalid email or password." });
   }
+  if (user.suspendedAt) {
+    return res.status(403).json({ error: "This account is suspended. Contact SSAA support." });
+  }
 
   const token = signToken({ sub: user.id, email: user.email });
   res.json({ token, user: serializeUser(user) });
@@ -86,7 +90,8 @@ authRouter.post("/auth/request-password-reset", handle(async (req, res) => {
   if (user) {
     const code = await createResetCode(user.id);
     try {
-      const sent = await sendPasswordResetEmail(user.email, code);
+      const sent =
+        (await sendTemplatedEmail({ eventType: "password_reset", to: user.email, vars: { code, email: user.email }, recipientUserId: user.id, lang: asLang(user.language) })) === "sent";
       if (!sent) {
         devCode = code;
         console.log(`[dev] password reset code for ${user.email}: ${code}`);
@@ -141,7 +146,14 @@ authRouter.post("/auth/request-username-reminder", handle(async (req, res) => {
   let delivered = false;
   if (user) {
     try {
-      delivered = await sendUsernameReminderEmail(user.email, user.fullName);
+      delivered =
+        (await sendTemplatedEmail({
+          eventType: "username_reminder",
+          to: user.email,
+          vars: { user_name: user.fullName, email: user.email },
+          recipientUserId: user.id,
+          lang: asLang(user.language),
+        })) === "sent";
     } catch (err) {
       console.error(`Failed to send username reminder to ${user.email}:`, err);
     }
@@ -214,6 +226,9 @@ authRouter.post("/auth/google", handle(async (req, res) => {
     created = true;
     if (sub) await linkGoogleSub(user.id, sub);
   }
+  if (user.suspendedAt) {
+    return res.status(403).json({ error: "This account is suspended. Contact SSAA support." });
+  }
 
   const token = signToken({ sub: user.id, email: user.email });
   res.json({ token, user: serializeUser(user), created });
@@ -228,7 +243,11 @@ authRouter.post("/auth/change-password", handle(async (req, res) => {
 
   let userId: string;
   try {
-    userId = verifyToken(token).sub;
+    const payload = verifyToken(token);
+    if (payload.act) {
+      return res.status(403).json({ error: "You're viewing the app as someone else. Exit \"view as\" to do that." });
+    }
+    userId = payload.sub;
   } catch {
     return res.status(401).json({ error: "Invalid or expired token." });
   }
@@ -268,7 +287,17 @@ authRouter.get("/auth/me", async (req, res) => {
     if (!user) {
       return res.status(401).json({ error: "Invalid token." });
     }
-    res.json({ user: serializeUser(user) });
+    if (user.suspendedAt && !payload.act) {
+      return res.status(401).json({ error: "This account is suspended. Contact SSAA support." });
+    }
+    // A "view as" session says whose it really is, so the app can show the banner and the way back.
+    const operator = payload.act ? await findUserById(payload.act) : undefined;
+    res.json({
+      user: serializeUser(user),
+      viewingAs: operator
+        ? { operatorId: operator.id, operatorEmail: operator.email, operatorName: operator.fullName, readOnly: !!payload.ro }
+        : null,
+    });
   } catch {
     res.status(401).json({ error: "Invalid or expired token." });
   }

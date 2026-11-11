@@ -6,6 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { statusLabel } from "@/i18n/labels";
+import { tr } from "@/i18n/runtime";
 
 interface Connection {
   id: string;
@@ -52,6 +55,7 @@ interface Link {
  * sharing, and two-step role swaps.
  */
 export default function ConnectedCompaniesCard({ companyId }: { companyId: string }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -86,12 +90,12 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
       setLinks(Object.fromEntries(linkEntries));
     } catch (err) {
       toast({
-        title: "Could not load connected companies",
+        title: t("connectedCompaniesCard.couldNotLoadConnectedCompanies"),
         description: err instanceof Error ? err.message : undefined,
         variant: "destructive",
       });
     }
-  }, [toast]);
+  }, [toast, t]);
 
   useEffect(() => {
     void load();
@@ -150,13 +154,13 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">Connected companies</CardTitle>
+        <CardTitle className="text-lg">{t("connectedCompaniesCard.connectedCompanies")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {connections.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No standing connections yet. Connect with companies you work with regularly — separate from
-            per-project connection codes.
+            
+            {t("connectedCompaniesCard.noStandingConnectionsYetConnectWith")}
           </p>
         ) : (
           <ul className="divide-y">
@@ -168,49 +172,51 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                 <li key={conn.id} className="space-y-2 py-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="font-medium">{conn.otherCompanyName ?? "Unknown company"}</p>
+                      <p className="font-medium">{conn.otherCompanyName ?? t("connectedCompaniesCard.unknownCompany")}</p>
                       <p className="text-sm text-muted-foreground">
                         {conn.status === "accepted"
                           ? iAmMain
-                            ? "They work under you on shared projects"
-                            : "You work under them on shared projects"
+                            ? t("connectedCompaniesCard.theyWorkUnderYouOnShared")
+                            : t("connectedCompaniesCard.youWorkUnderThemOnShared")
                           : conn.direction === "incoming"
-                            ? "Wants to connect — you proposed as main"
-                            : "Request sent — waiting on them"}
+                            ? t("connectedCompaniesCard.wantsToConnectYouProposedAs")
+                            : t("connectedCompaniesCard.requestSentWaitingOnThem")}
                         {pendingSwap && (
                           <>
                             {" · "}
-                            {swapMine ? "you asked to flip roles" : "they asked to flip roles"}
+                            {swapMine ? t("connectedCompaniesCard.youAskedToFlipRoles") : t("connectedCompaniesCard.theyAskedToFlipRoles")}
                           </>
                         )}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant={conn.status === "accepted" ? "secondary" : "outline"}>{conn.status}</Badge>
+                      <Badge variant={conn.status === "accepted" ? "secondary" : "outline"}>{statusLabel(conn.status)}</Badge>
                       {conn.status === "pending" && conn.direction === "incoming" && (
                         <>
                           <Button
                             size="sm"
                             disabled={busy}
                             onClick={() =>
-                              void run("Connection accepted", () =>
+                              void run(tr("connectedCompaniesCard.connectionAccepted"), () =>
                                 api.post(`/contractor-connections/${conn.id}/respond`, { accept: true }),
                               )
                             }
                           >
-                            Accept
+                            
+                            {t("connectedCompaniesCard.accept")}
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
                             disabled={busy}
                             onClick={() =>
-                              void run("Connection declined", () =>
+                              void run(tr("connectedCompaniesCard.connectionDeclined"), () =>
                                 api.post(`/contractor-connections/${conn.id}/respond`, { accept: false }),
                               )
                             }
                           >
-                            Decline
+                            
+                            {t("common.decline")}
                           </Button>
                         </>
                       )}
@@ -219,10 +225,11 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                         variant="ghost"
                         disabled={busy}
                         onClick={() =>
-                          void run("Connection removed", () => api.delete(`/contractor-connections/${conn.id}`))
+                          void run(tr("connectedCompaniesCard.connectionRemoved"), () => api.delete(`/contractor-connections/${conn.id}`))
                         }
                       >
-                        Remove
+                        
+                        {t("common.remove")}
                       </Button>
                     </div>
                   </div>
@@ -234,10 +241,10 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                           {(links[conn.id] ?? []).map((link) => (
                             <li key={link.projectId} className="flex items-center justify-between gap-2 text-sm">
                               <span>
-                                {projectNames.get(link.projectId) ?? "Project"}
+                                {projectNames.get(link.projectId) ?? t("common.project")}
                                 {link.shared ? (
                                   <Badge variant="secondary" className="ml-2">
-                                    shared
+                                    {tr("connectedCompaniesCard.shared")}
                                   </Badge>
                                 ) : null}
                               </span>
@@ -247,12 +254,13 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                                   variant="ghost"
                                   disabled={busy}
                                   onClick={() =>
-                                    void run("Project unlinked", () =>
+                                    void run(tr("connectedCompaniesCard.projectUnlinked"), () =>
                                       api.delete(`/contractor-connections/${conn.id}/projects/${link.projectId}`),
                                     )
                                   }
                                 >
-                                  Unlink
+                                  
+                                  {t("connectedCompaniesCard.unlink")}
                                 </Button>
                               )}
                             </li>
@@ -262,14 +270,14 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                       {iAmMain && ownProjects.length > 0 && (
                         <div className="flex flex-wrap items-end gap-2">
                           <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-1">
-                            <Label htmlFor={`link-${conn.id}`}>Share a project</Label>
+                            <Label htmlFor={`link-${conn.id}`}>{t("connectedCompaniesCard.shareAProject")}</Label>
                             <select
                               id={`link-${conn.id}`}
                               value={linkProject[conn.id] ?? ""}
                               onChange={(e) => setLinkProject((m) => ({ ...m, [conn.id]: e.target.value }))}
                               className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                             >
-                              <option value="">Select a project</option>
+                              <option value="">{t("connectedCompaniesCard.selectAProject")}</option>
                               {ownProjects.map((p) => (
                                 <option key={p.id} value={p.id}>
                                   {p.name}
@@ -281,7 +289,7 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                             size="sm"
                             disabled={busy || !linkProject[conn.id]}
                             onClick={() =>
-                              void run("Project shared", () =>
+                              void run(tr("connectedCompaniesCard.projectShared"), () =>
                                 api.post(`/contractor-connections/${conn.id}/projects`, {
                                   projectId: linkProject[conn.id],
                                   shared: true,
@@ -289,7 +297,8 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                               )
                             }
                           >
-                            Share
+                            
+                            {t("connectedCompaniesCard.share")}
                           </Button>
                         </div>
                       )}
@@ -299,14 +308,14 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                           variant="outline"
                           disabled={busy}
                           onClick={() =>
-                            void run(pendingSwap && !swapMine ? "Roles swapped" : "Role swap requested", () =>
+                            void run(pendingSwap && !swapMine ? tr("connectedCompaniesCard.rolesSwapped") : tr("connectedCompaniesCard.roleSwapRequested"), () =>
                               api.post(`/contractor-connections/${conn.id}/role-swap`, {
                                 proposedMainCompanyId: iAmMain ? conn.otherCompanyId : companyId,
                               }),
                             )
                           }
                         >
-                          {pendingSwap && !swapMine ? "Confirm role swap" : iAmMain ? "Offer them the lead" : "Ask for the lead"}
+                          {pendingSwap && !swapMine ? t("connectedCompaniesCard.confirmRoleSwap") : iAmMain ? t("connectedCompaniesCard.offerThemTheLead") : t("connectedCompaniesCard.askForTheLead")}
                         </Button>
                       </div>
                     </div>
@@ -320,16 +329,16 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
         <div className="space-y-2 border-t pt-4">
           <div className="flex flex-wrap items-end gap-2">
             <div className="w-full sm:w-auto sm:min-w-40 sm:flex-1 space-y-2">
-              <Label htmlFor="connectSearch">Connect with another company</Label>
+              <Label htmlFor="connectSearch">{t("connectedCompaniesCard.connectWithAnotherCompany")}</Label>
               <Input
                 id="connectSearch"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Type a company name"
+                placeholder={t("connectedCompaniesCard.typeACompanyName")}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="proposedRole">Propose us as</Label>
+              <Label htmlFor="proposedRole">{t("connectedCompaniesCard.proposeUsAs")}</Label>
               <select
                 id="proposedRole"
                 value={proposedRole}
@@ -337,18 +346,18 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                 className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
                 <option value="sub">Sub</option>
-                <option value="main">Main</option>
+                <option value="main">{t("connectedCompaniesCard.main")}</option>
               </select>
             </div>
           </div>
           {query.length > 0 && query.length < SEARCH_MIN && (
-            <p className="text-xs text-muted-foreground">Type at least {SEARCH_MIN} letters of the name.</p>
+            <p className="text-xs text-muted-foreground">{t("connectedCompaniesCard.typeAtLeast")}{" "}{SEARCH_MIN} {" "}{t("connectedCompaniesCard.lettersOfTheName")}</p>
           )}
           {query.length >= SEARCH_MIN && (
             <ul className="divide-y rounded-md border">
               {candidates.length === 0 ? (
                 <li className="p-3 text-sm text-muted-foreground">
-                  {searching ? "Searching..." : "No company by that name."}
+                  {searching ? t("connectedCompaniesCard.searching") : t("connectedCompaniesCard.noCompanyByThatName")}
                 </li>
               ) : (
                 candidates.map((c) => (
@@ -356,14 +365,14 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{c.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {c.companyType === "gc" ? "General contractor" : "Subcontractor"}
+                        {c.companyType === "gc" ? t("common.generalContractor") : t("common.subcontractor")}
                       </p>
                     </div>
                     <Button
                       size="sm"
                       disabled={busy}
                       onClick={() =>
-                        void run("Connection requested", () =>
+                        void run(tr("connectedCompaniesCard.connectionRequested"), () =>
                           api.post("/contractor-connections", {
                             otherCompanyId: c.id,
                             proposedRole,
@@ -371,7 +380,8 @@ export default function ConnectedCompaniesCard({ companyId }: { companyId: strin
                         ).then(() => setSearch(""))
                       }
                     >
-                      Connect
+                      
+                      {t("common.connect")}
                     </Button>
                   </li>
                 ))

@@ -10,6 +10,8 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOf
 import { useLanguage } from '@/contexts/LanguageContext';
 import AnchoredFirstClickTip from '@/components/onboarding/AnchoredFirstClickTip';
 import type { TooltipKey } from '@/components/onboarding/TooltipFlagsProvider';
+import { tradeLabel } from "@/i18n/labels";
+import { tr } from "@/i18n/runtime";
 
 interface Company {
   id: string;
@@ -65,7 +67,7 @@ const SubOverlayPanel = ({
   onSelectedSubIdsChange,
   title,
   tipKey = 'sub_availability_overlay',
-  tipCopy = 'Turn on Sub Availability to see, in real time, how many workers each of your connected subcontractors has available on any given day.',
+  tipCopy = tr("subOverlayPanel.tip"),
 }: SubOverlayPanelProps) => {
   const { t } = useLanguage();
 
@@ -159,7 +161,7 @@ const SubOverlayPanel = ({
                     </label>
                     {sub.trade && (
                       <Badge variant="secondary" className="text-[10px] px-1 py-0">
-                        {sub.trade}
+                        {tradeLabel(sub.trade)}
                       </Badge>
                     )}
                   </div>

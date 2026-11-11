@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { Download } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface RosterEmployee {
   id: string;
@@ -49,6 +50,7 @@ function fmt12(hhmm: string): string {
  * entirely client-side on top of existing list endpoints.
  */
 export default function TimesheetDownloadCard({ employees }: { employees: RosterEmployee[] }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [weeks, setWeeks] = useState("1");
   const [customStart, setCustomStart] = useState("");
@@ -57,7 +59,7 @@ export default function TimesheetDownloadCard({ employees }: { employees: Roster
 
   async function handleDownload() {
     if (employees.length === 0) {
-      toast({ title: "No Employees", description: "There are no employees to generate timesheets for.", variant: "destructive" });
+      toast({ title: t("timesheetDownloadCard.noEmployees"), description: t("timesheetDownloadCard.thereAreNoEmployeesToGenerate"), variant: "destructive" });
       return;
     }
     const now = new Date();
@@ -66,7 +68,7 @@ export default function TimesheetDownloadCard({ employees }: { employees: Roster
     let label: string;
     if (customStart && customEnd) {
       if (customStart > customEnd) {
-        toast({ title: "Invalid range", description: "Start date must be before end date.", variant: "destructive" });
+        toast({ title: t("timesheetDownloadCard.invalidRange"), description: t("timesheetDownloadCard.startDateMustBeBeforeEnd"), variant: "destructive" });
         return;
       }
       start = customStart;
@@ -91,7 +93,7 @@ export default function TimesheetDownloadCard({ employees }: { employees: Roster
       const names = new Map(employees.map((e) => [e.id, e.name]));
       const hrIds = new Map(employees.map((e) => [e.id, e.employeeNumber ?? ""]));
 
-      const rows = ["Employee ID,Employee Name,Date,Start Time,End Time,Hours,Job Name,General Contractor"];
+      const rows = [t("timesheetDownloadCard.csvHeader")];
       for (const req of requestsRes.requests) {
         if (req.status !== "confirmed" || !req.startTime || !req.endTime) continue;
         const [sh, sm] = req.startTime.split(":").map(Number);
@@ -116,7 +118,7 @@ export default function TimesheetDownloadCard({ employees }: { employees: Roster
       }
 
       if (rows.length === 1) {
-        toast({ title: "No Data", description: "No timesheet records found for the selected period." });
+        toast({ title: t("timesheetDownloadCard.noData"), description: t("timesheetDownloadCard.noTimesheetRecordsFoundForThe") });
         return;
       }
 
@@ -127,11 +129,11 @@ export default function TimesheetDownloadCard({ employees }: { employees: Roster
       a.download = `timesheets_${label}_${iso(now)}.csv`;
       a.click();
       URL.revokeObjectURL(url);
-      toast({ title: "Download Complete", description: `${rows.length - 1} timesheet records exported.` });
+      toast({ title: t("timesheetDownloadCard.downloadComplete"), description: t(rows.length - 1 === 1 ? "timesheetDownloadCard.recordsExported.one" : "timesheetDownloadCard.recordsExported.other", { count: rows.length - 1 }) });
     } catch (err) {
       toast({
         title: "Error",
-        description: err instanceof Error ? err.message : "Failed to download timesheets.",
+        description: err instanceof Error ? err.message : t("timesheetDownloadCard.failedToDownloadTimesheets"),
         variant: "destructive",
       });
     } finally {
@@ -144,36 +146,37 @@ export default function TimesheetDownloadCard({ employees }: { employees: Roster
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           <Download className="h-4 w-4" />
-          Download Timesheets
+          
+          {t("timesheetDownloadCard.downloadTimesheets")}
         </CardTitle>
-        <CardDescription>Export confirmed schedule hours as CSV</CardDescription>
+        <CardDescription>{t("timesheetDownloadCard.exportConfirmedScheduleHoursAsCsv")}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="flex flex-wrap items-end gap-2">
           <div className="space-y-2">
-            <Label htmlFor="ts-weeks">Period</Label>
+            <Label htmlFor="ts-weeks">{t("timesheetDownloadCard.period")}</Label>
             <select
               id="ts-weeks"
               value={weeks}
               onChange={(e) => setWeeks(e.target.value)}
               className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
             >
-              <option value="1">Last week</option>
-              <option value="2">Last 2 weeks</option>
-              <option value="4">Last 4 weeks</option>
+              <option value="1">{t("timesheetDownloadCard.lastWeek")}</option>
+              <option value="2">{t("timesheetDownloadCard.last2Weeks")}</option>
+              <option value="4">{t("timesheetDownloadCard.last4Weeks")}</option>
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="ts-start">Custom start (optional)</Label>
+            <Label htmlFor="ts-start">{t("timesheetDownloadCard.customStartOptional")}</Label>
             <Input id="ts-start" type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="ts-end">Custom end (optional)</Label>
+            <Label htmlFor="ts-end">{t("timesheetDownloadCard.customEndOptional")}</Label>
             <Input id="ts-end" type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
           </div>
           <Button onClick={() => void handleDownload()} disabled={downloading}>
             <Download className="mr-2 h-4 w-4" />
-            {downloading ? "Preparing…" : "Download CSV"}
+            {downloading ? t("timesheetDownloadCard.preparing") : t("timesheetDownloadCard.downloadCsv")}
           </Button>
         </div>
       </CardContent>
