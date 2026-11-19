@@ -12,7 +12,7 @@ import { findUserById } from "../models/users.js";
 import { findCompanyById, findEmployeeById, findJoinRequestById } from "../rbac/models.js";
 import { logCorrespondence, renderPush, sendTemplatedEmail } from "./correspondence.js";
 import type { ScheduleRequest } from "../scheduling/types.js";
-import { asLang, clockLabel, dayLabel, requestedLang, say, type Lang } from "../i18n/index.js";
+import { asLang, clockLabel, dayLabel, dayList, requestedLang, say, type Lang } from "../i18n/index.js";
 import { translateStoredNotification } from "./translateStored.js";
 
 export async function ensureNotificationTables(): Promise<void> {
@@ -355,7 +355,7 @@ export async function notifyMatrixPublish(
       company_name: actorName(lang),
       change_count: changes(n, lang),
       project_names: projectIds.map((id) => nameOf(id, lang)).join(", "),
-      dates: [...new Set(reqs.map((r) => r.date))].sort().map((d) => dayLabel(d, lang)).join(", "),
+      dates: dayList([...new Set(reqs.map((r) => r.date))].sort(), lang),
     });
     const en = vars("en");
     const fallback = {

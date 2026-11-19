@@ -4,20 +4,20 @@
  * are then put into the Spanish wording. Text an operator customised, or anything that doesn't match,
  * is left as it was.
  */
-import { say } from "../i18n/index.js";
+import { say, spanishDay } from "../i18n/index.js";
 import { ENGLISH_PUSH, SPANISH_TEMPLATES } from "./templates.js";
 
-const WEEKDAYS: Record<string, string> = { Sun: "dom", Mon: "lun", Tue: "mar", Wed: "mié", Thu: "jue", Fri: "vie", Sat: "sáb" };
-const MONTHS: Record<string, string> = {
-  Jan: "ene", Feb: "feb", Mar: "mar", Apr: "abr", May: "may", Jun: "jun", Jul: "jul", Aug: "ago", Sep: "sept", Oct: "oct", Nov: "nov", Dec: "dic",
-};
+const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+const MONTH_INDEX: Record<string, number> = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
 
 /** Dates, times, counts and fallback words inside a value, from English to Spanish. */
 function valueToSpanish(value: string): string {
   const exact = say(value, undefined, "es");
   if (exact !== value) return exact;
   return value
-    .replace(/\b(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2})\b/g, (_m, wd: string, mo: string, d: string) => `${WEEKDAYS[wd]}, ${d} ${MONTHS[mo]}`)
+    .replace(/\b(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2})\b/g, (_m, wd: string, mo: string, d: string) =>
+      spanishDay(WEEKDAY_INDEX[wd], Number(d), MONTH_INDEX[mo]),
+    )
     .replace(/\b(\d{1,2}:\d{2}) (AM|PM)\b/g, (_m, t: string, p: string) => `${t} ${p === "AM" ? "a.m." : "p.m."}`)
     .replace(/^1 person$/, "1 persona")
     .replace(/^(\d+) people$/, "$1 personas")

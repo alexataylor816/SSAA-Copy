@@ -48,7 +48,8 @@ describe("Spanish: API errors follow Accept-Language", () => {
   });
 
   it("formats dates and times the Mexican way", () => {
-    expect(dayLabel("2026-10-23", "es")).toMatch(/vie.*23.*oct/i);
+    expect(dayLabel("2026-10-23", "es")).toBe("vie, 23 de octubre");
+    expect(dayLabel("2099-03-03", "es")).toBe("mar, 3 de marzo");
     expect(dayLabel("2026-10-23", "en")).toBe("Fri, Oct 23");
     expect(clockLabel("07:00", "es")).toBe("7:00 a.m.");
     expect(clockLabel("15:30", "en")).toBe("3:30 PM");
@@ -215,14 +216,14 @@ describe("Spanish: the bell follows the reader's current language", async () => 
   it("translates notifications saved in English before both languages were kept", () => {
     expect(translateStoredNotification("schedule_created", "New schedule request", "Terrapin Builders requested 2 people for Mon, Nov 2 on Riverside Office Build.")).toEqual({
       title: "Nueva solicitud de programación",
-      body: "Terrapin Builders solicitó 2 personas para el lun, 2 nov en Riverside Office Build.",
+      body: "Terrapin Builders solicitó 2 personas para el lun, 2 de noviembre en Riverside Office Build.",
     });
     expect(translateStoredNotification("join_request", "New join request", "Sam Okafor asked to join Bao Plumbing.")).toEqual({
       title: "Nueva solicitud de ingreso",
       body: "Sam Okafor pidió unirse a Bao Plumbing.",
     });
     expect(translateStoredNotification("schedule_rejected", "Request declined", "Keystone declined Fri, Nov 13 on Clinic. Reason: Crew is out")?.body).toBe(
-      "Keystone rechazó el vie, 13 nov en Clinic. Motivo: Crew is out",
+      "Keystone rechazó el vie, 13 de noviembre en Clinic. Motivo: Crew is out",
     );
     // Customised wording that doesn't match is left as it was.
     expect(translateStoredNotification("join_request", "Heads up", "Something custom")).toEqual({ title: "Heads up", body: "Something custom" });

@@ -94,11 +94,28 @@ export function translateMessage(message: string, lang: Lang = requestLang()): s
   return message;
 }
 
-/** "2026-10-23" → "Fri, Oct 23" / "vie, 23 oct" */
+const ES_WEEKDAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+const ES_MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+/**
+ * Spanish short date, the same on every computer: "mar, 3 de marzo". Built by hand because the
+ * system's es-MX format varies (macOS gives "mar 3 de mar", where "mar" is both martes and marzo).
+ */
+export function spanishDay(weekday: number, day: number, month: number): string {
+  return `${ES_WEEKDAYS[weekday]}, ${day} de ${ES_MONTHS[month]}`;
+}
+
+/** "2026-10-23" → "Fri, Oct 23" / "vie, 23 de octubre" */
 export function dayLabel(iso: string, lang: Lang = requestLang()): string {
   const [y, m, d] = iso.split("-").map(Number);
   const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString(lang === "es" ? "es-MX" : "en-US", { weekday: "short", month: "short", day: "numeric" });
+  if (lang === "es") return spanishDay(date.getDay(), d, m - 1);
+  return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
+/** Several days in one sentence: commas in English, semicolons in Spanish (its dates contain commas). */
+export function dayList(isos: string[], lang: Lang = requestLang()): string {
+  return isos.map((d) => dayLabel(d, lang)).join(lang === "es" ? "; " : ", ");
 }
 
 /** "07:00" → "7:00 AM" / "7:00 a.m." */
