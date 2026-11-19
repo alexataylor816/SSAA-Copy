@@ -9,6 +9,7 @@ import { asLang, type Lang } from "../i18n/index.js";
 import { findUserById } from "../models/users.js";
 import { BadRequestError, HttpError, NotFoundError } from "../rbac/errors.js";
 import { requireReadableConversation } from "./service.js";
+import { messageTranslationEnabled } from "../admin/settings.js";
 
 export async function ensureMessageTranslationTables(): Promise<void> {
   await database.exec(`
@@ -33,8 +34,9 @@ export function setTranslationConfiguredForTests(fn: (() => boolean) | null): vo
   configured = fn ?? claudeConfigured;
 }
 
-export function translationAvailable(): boolean {
-  return configured();
+/** Whether the Translate button shows: the server has an AI key and an operator hasn't turned it off. */
+export async function translationAvailable(): Promise<boolean> {
+  return configured() && (await messageTranslationEnabled());
 }
 
 export async function translateMessageFor(
@@ -61,6 +63,8 @@ export async function translateMessageFor(
   ]);
   if (saved) return { messageId: message.id, lang, body: saved.body, cached: true };
 
+  // Already-saved translations stay readable; only new ones (which cost money) stop when switched off.
+  if (!(await messageTranslationEnabled())) throw new HttpError(403, "Message translation is turned off.");
   if (!configured()) throw new HttpError(503, "Translation isn't set up on this server yet.");
   let body: string;
   try {

@@ -22,6 +22,7 @@ import { ensureAiTables } from "../ai/recommender.js";
 import { ensureCorrespondenceTables } from "../notifications/correspondence.js";
 import { ensureOperatorTables } from "../admin/operators.js";
 import { ensureMessageTranslationTables } from "../messaging/translate.js";
+import { ensurePlatformSettingsTables } from "../admin/settings.js";
 
 export async function ensureSchema(): Promise<void> {
   if (database.dialect === "mysql") {
@@ -45,6 +46,7 @@ export async function ensureSchema(): Promise<void> {
   await ensureCorrespondenceTables();
   await ensureOperatorTables();
   await ensureMessageTranslationTables();
+  await ensurePlatformSettingsTables();
 }
 
 export * from "./users.js";

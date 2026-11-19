@@ -157,3 +157,39 @@ export async function translateChat(text: string, to: "en" | "es"): Promise<stri
     .join("")
     .trim();
 }
+
+const TemplateTranslation = z.object({
+  subject: z.string(),
+  bodyHtml: z.string(),
+  pushTitle: z.string(),
+  pushBody: z.string(),
+});
+export type TemplateText = z.infer<typeof TemplateTranslation>;
+
+/**
+ * Manage Correspondence → "Translate to Spanish": one call per click, never when a message is sent.
+ * Returns the four fields in formal Mexican Spanish with every {placeholder} and HTML tag kept as written.
+ * Empty fields come back empty.
+ */
+export async function translateTemplate(english: TemplateText): Promise<TemplateText> {
+  if (!claudeConfigured()) throw new Error("Claude is not configured.");
+  const response = await anthropic().beta.messages.parse({
+    model: MODEL,
+    max_tokens: 16000,
+    ...FALLBACK,
+    output_config: { effort: "low", format: betaZodOutputFormat(TemplateTranslation) },
+    system: `You translate the automatic emails and push notifications of SSAA, a construction scheduling app used by US general contractors and (mostly Mexican) subcontractor crews, into Spanish.
+
+Rules:
+- Formal Mexican Spanish: address the reader as "usted".
+- Construction vocabulary the way crews say it: obra, cuadrilla, maestro de obra, contratista general, subcontratista, programación (schedule).
+- Keep every {placeholder} exactly as written, braces and spelling included, and use each one that the English uses. Move it within the sentence if Spanish word order needs it.
+- Keep every HTML tag and attribute exactly as written (same tags, same order, same links); translate only the visible text between tags.
+- Keep "SSAA", company names, product names and email addresses in English.
+- Push titles stay short (under about 60 characters). Same tone and length as the English.
+- Return the same four fields you were given. A field that is empty in English stays empty.`,
+    messages: [{ role: "user", content: JSON.stringify(english, null, 2) }],
+  });
+  if (response.stop_reason === "refusal" || !response.parsed_output) throw new Error("No translation returned.");
+  return response.parsed_output;
+}

@@ -325,6 +325,14 @@ CREATE TABLE IF NOT EXISTS message_translations (
   CONSTRAINT fk_message_translations_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- Operator-controlled switches (Manage SSAA), e.g. message_translation_enabled.
+CREATE TABLE IF NOT EXISTS platform_settings (
+  setting_key VARCHAR(64)  NOT NULL PRIMARY KEY,
+  value       TEXT         NULL,
+  updated_at  VARCHAR(32)  NULL,
+  updated_by  VARCHAR(36)  NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS message_reads (
   conversation_id VARCHAR(36) NOT NULL,
   user_id         VARCHAR(36) NOT NULL,

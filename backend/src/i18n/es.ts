@@ -197,6 +197,11 @@ export const ES: Record<string, string> = {
   "Message not found.": "No se encontró el mensaje.",
   "Translation isn't set up on this server yet.": "La traducción aún no está configurada en este servidor.",
   "Couldn't translate that message. Try again in a moment.": "No se pudo traducir ese mensaje. Inténtelo de nuevo en un momento.",
+  "There's no English text to translate.": "No hay texto en inglés para traducir.",
+  "The email is too long to translate.": "El correo es demasiado largo para traducirlo.",
+  "Couldn't translate the template. Try again in a moment.": "No se pudo traducir la plantilla. Inténtelo de nuevo en un momento.",
+  "Message translation is turned off.": "La traducción de mensajes está desactivada.",
+  "messageTranslationEnabled must be true or false.": "messageTranslationEnabled debe ser true o false.",
 
   // ---- AI schedule helper
   "Reading schedules needs the AI helper, which isn't set up on this server yet.": "Para leer programas se necesita el asistente de IA, que aún no está configurado en este servidor.",

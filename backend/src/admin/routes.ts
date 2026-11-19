@@ -14,6 +14,9 @@ import { emailTransportName } from "../services/email.js";
 import { signToken } from "../services/tokens.js";
 import { OPERATOR_LEVELS, audit, listAudit, ownerExists, requireOperator } from "./operators.js";
 import { asLang } from "../i18n/index.js";
+import { getPlatformSettings, updatePlatformSettings } from "./settings.js";
+import { claudeConfigured } from "../ai/claude.js";
+import { templateTranslationAvailable, translateTemplateDraft } from "../notifications/templateTranslate.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth);
@@ -410,7 +413,7 @@ adminRouter.get(
   "/admin/templates",
   route(async (req, res) => {
     await requireOperator(req);
-    res.json({ templates: await listTemplates(), email: emailTransportName() });
+    res.json({ templates: await listTemplates(), email: emailTransportName(), translation: templateTranslationAvailable() });
   }),
 );
 
@@ -418,12 +421,17 @@ adminRouter.patch(
   "/admin/templates/:id",
   route(async (req, res) => {
     const me = await requireOperator(req, "change");
-    const { displayName, description, subject, bodyHtml, channel, isActive, pushTitle, pushBody, pushActive } = req.body ?? {};
-    const updated = await updateTemplate(req.params.id, { displayName, description, subject, bodyHtml, channel, isActive, pushTitle, pushBody, pushActive });
+    const { displayName, description, subject, bodyHtml, channel, isActive, pushTitle, pushBody, pushActive, subjectEs, bodyHtmlEs, pushTitleEs, pushBodyEs } =
+      req.body ?? {};
+    const updated = await updateTemplate(req.params.id, {
+      displayName, description, subject, bodyHtml, channel, isActive, pushTitle, pushBody, pushActive, subjectEs, bodyHtmlEs, pushTitleEs, pushBodyEs,
+    });
     if (!updated) throw new NotFoundError("Template not found.");
     const what = [
       subject !== undefined || bodyHtml !== undefined ? "email text" : null,
       pushTitle !== undefined || pushBody !== undefined ? "push text" : null,
+      subjectEs !== undefined || bodyHtmlEs !== undefined ? "Spanish email text" : null,
+      pushTitleEs !== undefined || pushBodyEs !== undefined ? "Spanish push text" : null,
       isActive !== undefined ? `email ${isActive ? "on" : "off"}` : null,
       pushActive !== undefined ? `push ${pushActive ? "on" : "off"}` : null,
       displayName !== undefined ? "name" : null,
@@ -431,6 +439,42 @@ adminRouter.patch(
     ].filter(Boolean);
     await audit(me.id, "edit_template", `Edited "${updated.displayName ?? updated.eventType}" (${what.join(", ") || "no change"})`, { type: "template", id: updated.id });
     res.json(updated);
+  }),
+);
+
+/** "Translate to Spanish": translates the editor's current English draft once; the editor saves it. */
+adminRouter.post(
+  "/admin/templates/:id/translate",
+  route(async (req, res) => {
+    const me = await requireOperator(req, "change");
+    const template = await findTemplateById(req.params.id);
+    if (!template) throw new NotFoundError("Template not found.");
+    const result = await translateTemplateDraft(req.body ?? {});
+    await audit(me.id, "translate_template", `Translated "${template.displayName ?? template.eventType}" to Spanish`, { type: "template", id: template.id });
+    res.json(result);
+  }),
+);
+
+/** Platform switches (Manage SSAA). `aiConfigured` says whether the server has an AI key at all. */
+adminRouter.get(
+  "/admin/settings",
+  route(async (req, res) => {
+    await requireOperator(req);
+    res.json({ settings: await getPlatformSettings(), aiConfigured: claudeConfigured() });
+  }),
+);
+
+adminRouter.patch(
+  "/admin/settings",
+  route(async (req, res) => {
+    const me = await requireOperator(req, "change");
+    const { messageTranslationEnabled } = req.body ?? {};
+    if (messageTranslationEnabled !== undefined && typeof messageTranslationEnabled !== "boolean") {
+      throw new BadRequestError("messageTranslationEnabled must be true or false.");
+    }
+    const { changed, settings } = await updatePlatformSettings({ messageTranslationEnabled }, me.id);
+    for (const summary of changed) await audit(me.id, "edit_settings", summary);
+    res.json({ settings, aiConfigured: claudeConfigured() });
   }),
 );
 

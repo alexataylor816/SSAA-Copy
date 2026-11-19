@@ -117,12 +117,12 @@ messagingRouter.get(
   }),
 );
 
-/** Whether the Translate button should show (the server has an AI key). */
+/** Whether the Translate button should show (AI key present and not switched off by an operator). */
 messagingRouter.get(
   "/messages/translation",
   requireAuth,
   route(async (_req, res) => {
-    res.json({ available: translationAvailable() });
+    res.json({ available: await translationAvailable() });
   }),
 );
 
