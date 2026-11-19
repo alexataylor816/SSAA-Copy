@@ -6,7 +6,7 @@
  */
 import { buildModel, draftId, type Draft, type FreeSlot, type Placement } from "./useMatrixDrafts";
 import type { MatrixData } from "@/lib/matrixApi";
-import { dateLocale, tr } from "@/i18n/runtime";
+import { tr, formatDate } from "@/i18n/runtime";
 
 export type DragSource =
   | { kind: "side"; slot: FreeSlot }
@@ -32,7 +32,7 @@ export function isLockedDate(date: string, now = new Date()): boolean {
 }
 
 export const dayLabel = (date: string) =>
-  new Date(`${date}T00:00:00`).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric" });
+  formatDate(new Date(`${date}T00:00:00`), { weekday: "short", month: "short", day: "numeric" });
 
 /** "07:00" -> "7a", "15:30" -> "3:30p". */
 export function shortTime(t: string): string {

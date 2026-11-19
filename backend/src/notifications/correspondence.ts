@@ -7,7 +7,7 @@
 import crypto from "node:crypto";
 import { database } from "../db.js";
 import { emailTransportName, sendEmail, styledHtml } from "../services/email.js";
-import { fillPlaceholders, findTemplate, SPANISH_TEMPLATES } from "./templates.js";
+import { fillPlaceholders, findTemplate } from "./templates.js";
 import { say, type Lang } from "../i18n/index.js";
 
 export type Channel = "email" | "push" | "chat";
@@ -79,30 +79,34 @@ type Vars = Record<string, string | number | null | undefined>;
  * The push (bell / chat) text for an event, from its template; `fallback` when it has none. Spanish
  * recipients get the Spanish wording; the on/off switch is the operator's either way.
  */
+/** The saved Spanish text when there is some, otherwise the English (a Spanish reader never gets a blank). */
+const pick = (lang: Lang, es: string | null | undefined, en: string | null | undefined) =>
+  lang === "es" && es != null && es.trim() !== "" ? es : en;
+
+/**
+ * A notification's push/bell text in one language. Spanish comes from the template's saved Spanish
+ * fields (edited in Manage Correspondence), field by field falling back to English. The operator's
+ * on/off switch applies to both languages.
+ */
 export async function renderPush(eventType: string, vars: Vars, fallback: { title: string; body: string }, lang: Lang = "en") {
   const t = await findTemplate(eventType);
-  const es = lang === "es" ? SPANISH_TEMPLATES[eventType]?.push : undefined;
-  if (es) {
-    return {
-      title: fillPlaceholders(es.title, vars).trim(),
-      body: fillPlaceholders(es.body, vars).replace(/\s+/g, " ").trim(),
-      active: t ? t.pushActive : true,
-    };
-  }
-  if (!t || t.pushTitle == null) return { ...fallback, active: true };
+  if (!t) return { ...fallback, active: true };
+  const title = pick(lang, t.pushTitleEs, t.pushTitle);
+  const body = pick(lang, t.pushBodyEs, t.pushBody);
+  if (title == null && body == null) return { ...fallback, active: t.pushActive };
   return {
-    title: fillPlaceholders(t.pushTitle, vars).trim() || fallback.title,
-    body: fillPlaceholders(t.pushBody ?? "", vars).replace(/\s+/g, " ").trim() || fallback.body,
+    title: fillPlaceholders(title ?? "", vars).trim() || fallback.title,
+    body: fillPlaceholders(body ?? "", vars).replace(/\s+/g, " ").trim() || fallback.body,
     active: t.pushActive,
   };
 }
 
+/** An email's subject and body in one language, from the saved template (Spanish falls back per field). */
 export async function renderEmail(eventType: string, vars: Vars, lang: Lang = "en") {
   const t = await findTemplate(eventType);
   if (!t) return undefined;
-  const es = lang === "es" ? SPANISH_TEMPLATES[eventType] : undefined;
-  const subject = es?.subject ?? t.subject;
-  const body = es?.bodyHtml ?? t.bodyHtml;
+  const subject = pick(lang, t.subjectEs, t.subject) ?? t.subject;
+  const body = pick(lang, t.bodyHtmlEs, t.bodyHtml) ?? t.bodyHtml;
   return { subject: fillPlaceholders(subject, vars), html: fillPlaceholders(body, vars, true), active: t.isActive };
 }
 

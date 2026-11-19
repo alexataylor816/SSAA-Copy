@@ -92,8 +92,28 @@ export interface Template {
   pushTitle: string | null;
   pushBody: string | null;
   pushActive: boolean;
+  /** Spanish version (null = not written; Spanish readers then get the English). */
+  subjectEs: string | null;
+  bodyHtmlEs: string | null;
+  pushTitleEs: string | null;
+  pushBodyEs: string | null;
+  /** The English changed after the Spanish was last saved. */
+  spanishOutdated: boolean;
   placeholderVariables: string[];
   updatedAt: string;
+}
+
+/** POST /admin/templates/:id/translate: the Spanish for the current English draft (not saved). */
+export interface TemplateTranslation {
+  subject: string;
+  bodyHtml: string;
+  pushTitle: string;
+  pushBody: string;
+  missingPlaceholders: string[];
+}
+
+export interface PlatformSettings {
+  messageTranslationEnabled: boolean;
 }
 
 export interface Operator {

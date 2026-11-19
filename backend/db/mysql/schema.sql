@@ -325,6 +325,14 @@ CREATE TABLE IF NOT EXISTS message_translations (
   CONSTRAINT fk_message_translations_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- Operator-controlled switches (Manage SSAA), e.g. message_translation_enabled.
+CREATE TABLE IF NOT EXISTS platform_settings (
+  setting_key VARCHAR(64)  NOT NULL PRIMARY KEY,
+  value       TEXT         NULL,
+  updated_at  VARCHAR(32)  NULL,
+  updated_by  VARCHAR(36)  NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS message_reads (
   conversation_id VARCHAR(36) NOT NULL,
   user_id         VARCHAR(36) NOT NULL,
@@ -470,6 +478,26 @@ SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEM
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'push_active') = 0,
   'ALTER TABLE notification_templates ADD COLUMN push_active TINYINT NOT NULL DEFAULT 1', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Spanish wording per template (Manage Correspondence), and which side was saved last.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'subject_es') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN subject_es VARCHAR(300) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'body_html_es') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN body_html_es MEDIUMTEXT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'push_title_es') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN push_title_es VARCHAR(120) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'push_body_es') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN push_body_es TEXT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'en_updated_at') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN en_updated_at VARCHAR(32) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_templates' AND COLUMN_NAME = 'es_updated_at') = 0,
+  'ALTER TABLE notification_templates ADD COLUMN es_updated_at VARCHAR(32) NULL', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 CREATE TABLE IF NOT EXISTS notification_log (
   id                   VARCHAR(36)  NOT NULL PRIMARY KEY,

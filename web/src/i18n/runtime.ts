@@ -69,9 +69,13 @@ export function dateFnsLocale(lang: Language = current) {
   return lang === "es" ? dateFnsEs : undefined;
 }
 
-/** Formats a date with Intl in the current language. */
+/**
+ * Formats a date with Intl in the current language. In Spanish a short weekday next to a short month
+ * reads "mar 3 de mar" (martes / marzo), so with a weekday the month is spelled out: "mar, 3 de marzo".
+ */
 export function formatDate(d: Date, options: Intl.DateTimeFormatOptions): string {
-  return d.toLocaleDateString(dateLocale(), options);
+  const opts = current === "es" && options.weekday && options.month === "short" ? { ...options, month: "long" as const } : options;
+  return d.toLocaleDateString(dateLocale(), opts);
 }
 
 /** "9:51 PM" / "9:51 p.m." */

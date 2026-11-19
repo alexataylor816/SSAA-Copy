@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Bell, Loader2, Mail, RefreshCw, Save, Search, Send, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Bell, Languages, Loader2, Mail, RefreshCw, Save, Search, Send, Undo2 } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   STATUS_LABEL,
@@ -9,6 +9,7 @@ import {
   type CorrespondenceEntry,
   type EmailTransport,
   type Template,
+  type TemplateTranslation,
 } from "@/lib/operatorApi";
 import EmailEditor from "@/components/operator/EmailEditor";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +31,30 @@ import { tr } from "@/i18n/runtime";
  */
 
 type Channel = "email" | "push";
-type Draft = Pick<Template, "subject" | "bodyHtml" | "pushTitle" | "pushBody">;
+type Draft = Pick<Template, "subject" | "bodyHtml" | "pushTitle" | "pushBody"> & {
+  subjectEs: string;
+  bodyHtmlEs: string;
+  pushTitleEs: string;
+  pushBodyEs: string;
+};
+type DraftField = keyof Draft;
+
+/** The fields each editor saves: English first, then the Spanish version. */
+const FIELDS: Record<Channel, { en: DraftField[]; es: DraftField[] }> = {
+  email: { en: ["subject", "bodyHtml"], es: ["subjectEs", "bodyHtmlEs"] },
+  push: { en: ["pushTitle", "pushBody"], es: ["pushTitleEs", "pushBodyEs"] },
+};
+
+const toDraft = (t: Template): Draft => ({
+  subject: t.subject,
+  bodyHtml: t.bodyHtml,
+  pushTitle: t.pushTitle,
+  pushBody: t.pushBody,
+  subjectEs: t.subjectEs ?? "",
+  bodyHtmlEs: t.bodyHtmlEs ?? "",
+  pushTitleEs: t.pushTitleEs ?? "",
+  pushBodyEs: t.pushBodyEs ?? "",
+});
 
 const fill = (text: string, samples: Record<string, string>) =>
   text.replace(/\{\{?\s*([a-z_][a-z0-9_]*)\s*\}?\}/gi, (_m, n: string) => samples[n] ?? `[${n}]`);
@@ -67,6 +91,11 @@ export default function CorrespondenceDialog({
   const [descDraft, setDescDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const pushBody = useRef<HTMLTextAreaElement>(null);
+  const pushBodyEs = useRef<HTMLTextAreaElement>(null);
+  // "Translate to Spanish" needs the server's AI key; it fills the Spanish draft and saves nothing.
+  const [translationReady, setTranslationReady] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [missingPlaceholders, setMissingPlaceholders] = useState<string[]>([]);
 
   const [entries, setEntries] = useState<CorrespondenceEntry[]>([]);
   const [logChannel, setLogChannel] = useState("");
@@ -75,8 +104,9 @@ export default function CorrespondenceDialog({
   const [logLoading, setLogLoading] = useState(false);
 
   const loadTemplates = useCallback(async () => {
-    const res = await api.get<{ templates: Template[] }>("/admin/templates");
+    const res = await api.get<{ templates: Template[]; translation?: boolean }>("/admin/templates");
     setTemplates(res.templates);
+    setTranslationReady(!!res.translation);
     return res.templates;
   }, []);
 
@@ -112,7 +142,8 @@ export default function CorrespondenceDialog({
 
   function startEdit(template: Template, channel: Channel) {
     setEditing({ template, channel });
-    setDraft({ subject: template.subject, bodyHtml: template.bodyHtml, pushTitle: template.pushTitle, pushBody: template.pushBody });
+    setDraft(toDraft(template));
+    setMissingPlaceholders([]);
     setRenaming(false);
     setEditingDesc(false);
   }
@@ -155,14 +186,46 @@ export default function CorrespondenceDialog({
   async function saveTemplate() {
     if (!editing || !draft) return;
     const t = editing.template;
-    const ok =
-      editing.channel === "email"
-        ? await patch(t, { subject: draft.subject, bodyHtml: draft.bodyHtml }, tr("correspondenceDialog.templateSaved"), { subject: t.subject, bodyHtml: t.bodyHtml })
-        : await patch(t, { pushTitle: draft.pushTitle ?? "", pushBody: draft.pushBody ?? "" }, tr("correspondenceDialog.templateSaved"), {
-            pushTitle: t.pushTitle ?? "",
-            pushBody: t.pushBody ?? "",
-          });
+    const saved = toDraft(t);
+    const { en, es } = FIELDS[editing.channel];
+    // Only what changed is sent, so editing just the English marks the Spanish as possibly out of date.
+    const body: Record<string, string> = {};
+    const undo: Record<string, string> = {};
+    for (const f of [...en, ...es]) {
+      if ((draft[f] ?? "") !== (saved[f] ?? "")) {
+        body[f] = draft[f] ?? "";
+        undo[f] = saved[f] ?? "";
+      }
+    }
+    if (Object.keys(body).length === 0) {
+      setEditing(null);
+      return;
+    }
+    const ok = await patch(t, body as Partial<Template>, tr("correspondenceDialog.templateSaved"), undo as Partial<Template>);
     if (ok) setEditing(null);
+  }
+
+  async function translateToSpanish() {
+    if (!editing || !draft) return;
+    const channel = editing.channel;
+    // Only this editor's English is sent; the other channel's Spanish is left alone.
+    const english =
+      channel === "email"
+        ? { subject: draft.subject, bodyHtml: draft.bodyHtml, pushTitle: "", pushBody: "" }
+        : { subject: "", bodyHtml: "", pushTitle: draft.pushTitle ?? "", pushBody: draft.pushBody ?? "" };
+    setTranslating(true);
+    try {
+      const res = await api.post<TemplateTranslation>(`/admin/templates/${editing.template.id}/translate`, english);
+      setDraft((d) =>
+        d ? (channel === "email" ? { ...d, subjectEs: res.subject, bodyHtmlEs: res.bodyHtml } : { ...d, pushTitleEs: res.pushTitle, pushBodyEs: res.pushBody }) : d,
+      );
+      setMissingPlaceholders(res.missingPlaceholders ?? []);
+      toast({ title: t("correspondenceDialog.spanishFilledIn"), description: t("correspondenceDialog.reviewThenSave") });
+    } catch (err) {
+      toast({ title: t("correspondenceDialog.couldNotTranslate"), description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    } finally {
+      setTranslating(false);
+    }
   }
 
   async function sendTest() {
@@ -189,12 +252,12 @@ export default function CorrespondenceDialog({
     }
   }
 
-  function insertIntoPush(token: string) {
-    const el = pushBody.current;
-    const current = draft?.pushBody ?? "";
+  function insertIntoPush(token: string, field: "pushBody" | "pushBodyEs" = "pushBody") {
+    const el = field === "pushBody" ? pushBody.current : pushBodyEs.current;
+    const current = draft?.[field] ?? "";
     const start = el?.selectionStart ?? current.length;
     const end = el?.selectionEnd ?? current.length;
-    setDraft((d) => (d ? { ...d, pushBody: current.slice(0, start) + token + current.slice(end) } : d));
+    setDraft((d) => (d ? { ...d, [field]: current.slice(0, start) + token + current.slice(end) } : d));
     requestAnimationFrame(() => {
       el?.focus();
       el?.setSelectionRange(start + token.length, start + token.length);
@@ -285,6 +348,84 @@ export default function CorrespondenceDialog({
       <p className="text-sm text-muted-foreground">{editing.template.description}</p>
     ) : null);
 
+  const emailPreview = (subject: string, bodyHtml: string, lang: "en" | "es") => (
+    <div className="rounded-md border" lang={lang}>
+      <div className="border-b px-4 py-2 text-xs">
+        <div className="text-muted-foreground">{t("correspondenceDialog.recipientPreviewPlaceholdersFilledWithSa")}</div>
+        <div className="mt-1 font-medium">{t("correspondenceDialog.subject2")}{" "}{fill(subject, samples)}</div>
+      </div>
+      <div
+        className="max-h-[320px] overflow-y-auto rounded-b-md bg-white p-5 text-sm text-neutral-900 [&_a]:text-blue-700 [&_a]:underline [&_h1]:text-xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-2 [&_ul]:list-disc"
+        // Preview only: the operator's own template HTML with fixed sample values.
+        dangerouslySetInnerHTML={{ __html: fill(bodyHtml, samples) || `<p style="color:#888;font-style:italic">${tr("correspondenceDialog.emptyEmail")}</p>` }}
+      />
+    </div>
+  );
+
+  const pushPreview = (title: string, body: string, lang: "en" | "es") => (
+    <div className="rounded-md border p-4" lang={lang}>
+      <div className="mb-2 text-xs font-medium text-muted-foreground">{t("correspondenceDialog.livePreview")}</div>
+      <div className="max-w-md rounded-2xl bg-primary/10 px-4 py-3 text-sm">
+        <div className="font-medium">{fill(title, samples)}</div>
+        <div className="whitespace-pre-wrap">{fill(body, samples) || <span className="italic text-muted-foreground">{t("correspondenceDialog.emptyMessage")}</span>}</div>
+      </div>
+    </div>
+  );
+
+  const placeholderButtons = (onPick: (token: string) => void) =>
+    editing && (
+      <div className="flex flex-wrap gap-1.5">
+        {editing.template.placeholderVariables.map((v) => (
+          <button
+            key={v}
+            type="button"
+            disabled={!canChange}
+            onClick={() => onPick(`{${v}}`)}
+            className="rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 font-mono text-[11px] text-primary hover:bg-primary/10"
+          >
+            {`{${v}}`}
+          </button>
+        ))}
+      </div>
+    );
+
+  const sectionTitle = (text: string) => <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{text}</h4>;
+
+  /** Heading of the Spanish half: the translate button and any warnings. */
+  const spanishHeading = editing && (
+    <div className="space-y-2 border-t pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {sectionTitle(t("correspondenceDialog.spanishVersion"))}
+        {canChange && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || translating || !translationReady}
+            title={translationReady ? undefined : t("correspondenceDialog.translationNotSetUp")}
+            onClick={() => void translateToSpanish()}
+          >
+            {translating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Languages className="mr-2 h-4 w-4" />}
+            {translating ? t("correspondenceDialog.translating") : t("correspondenceDialog.translateToSpanish")}
+          </Button>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">{t("correspondenceDialog.spanishHelp")}</p>
+      {canChange && !translationReady && <p className="text-xs text-muted-foreground">{t("correspondenceDialog.translationNotSetUp")}</p>}
+      {editing.template.spanishOutdated && (
+        <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {t("correspondenceDialog.spanishOutdated")}
+        </p>
+      )}
+      {missingPlaceholders.length > 0 && (
+        <p className="flex items-start gap-1.5 text-xs text-destructive">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {t("correspondenceDialog.missingPlaceholders", { list: missingPlaceholders.map((p) => `{${p}}`).join(", ") })}
+        </p>
+      )}
+    </div>
+  );
+
   const list = (items: Template[], channel: Channel) => (
     <div className="space-y-2">
       {items.map((tpl) => {
@@ -362,6 +503,7 @@ export default function CorrespondenceDialog({
                 <div className="space-y-4">
                   {heading}
                   {description}
+                  {sectionTitle(t("correspondenceDialog.englishVersion"))}
                   <div className="space-y-2">
                     <Label htmlFor="tpl-subject">{t("correspondenceDialog.subjectLine")}</Label>
                     <Input id="tpl-subject" value={draft.subject} disabled={!canChange} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} />
@@ -370,17 +512,24 @@ export default function CorrespondenceDialog({
                     <Label>{t("correspondenceDialog.emailBody")}</Label>
                     <EmailEditor value={draft.bodyHtml} onChange={(html) => setDraft((d) => (d ? { ...d, bodyHtml: html } : d))} placeholders={editing.template.placeholderVariables} />
                   </div>
-                  <div className="rounded-md border">
-                    <div className="border-b px-4 py-2 text-xs">
-                      <div className="text-muted-foreground">{t("correspondenceDialog.recipientPreviewPlaceholdersFilledWithSa")}</div>
-                      <div className="mt-1 font-medium">{t("correspondenceDialog.subject2")}{" "}{fill(draft.subject, samples)}</div>
-                    </div>
-                    <div
-                      className="max-h-[320px] overflow-y-auto rounded-b-md bg-white p-5 text-sm text-neutral-900 [&_a]:text-blue-700 [&_a]:underline [&_h1]:text-xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-2 [&_ul]:list-disc"
-                      // Preview only: the operator's own template HTML with fixed sample values.
-                      dangerouslySetInnerHTML={{ __html: fill(draft.bodyHtml, samples) || '<p style="color:#888;font-style:italic">Empty email</p>' }}
+                  {emailPreview(draft.subject, draft.bodyHtml, "en")}
+
+                  {spanishHeading}
+                  <div className="space-y-2" lang="es">
+                    <Label htmlFor="tpl-subject-es">{t("correspondenceDialog.subjectLineSpanish")}</Label>
+                    <Input
+                      id="tpl-subject-es"
+                      value={draft.subjectEs}
+                      disabled={!canChange}
+                      placeholder={draft.subject}
+                      onChange={(e) => setDraft({ ...draft, subjectEs: e.target.value })}
                     />
                   </div>
+                  <div className="space-y-2" lang="es">
+                    <Label>{t("correspondenceDialog.emailBodySpanish")}</Label>
+                    <EmailEditor value={draft.bodyHtmlEs} onChange={(html) => setDraft((d) => (d ? { ...d, bodyHtmlEs: html } : d))} placeholders={editing.template.placeholderVariables} />
+                  </div>
+                  {emailPreview(draft.subjectEs || draft.subject, draft.bodyHtmlEs || draft.bodyHtml, "es")}
                   {canChange && (
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <Button onClick={() => void saveTemplate()} disabled={busy} className="flex-1">
@@ -406,6 +555,7 @@ export default function CorrespondenceDialog({
                 <div className="space-y-4">
                   {heading}
                   {description}
+                  {sectionTitle(t("correspondenceDialog.englishVersion"))}
                   <div className="space-y-2">
                     <Label htmlFor="tpl-push-title">{t("correspondenceDialog.pushNotificationTitle")}</Label>
                     <Input
@@ -418,23 +568,10 @@ export default function CorrespondenceDialog({
                   </div>
                   <div className="space-y-2">
                     <Label>{t("correspondenceDialog.insertPlaceholder")}</Label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {editing.template.placeholderVariables.map((v) => (
-                        <button
-                          key={v}
-                          type="button"
-                          disabled={!canChange}
-                          onClick={() => insertIntoPush(`{${v}}`)}
-                          className="rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 font-mono text-[11px] text-primary hover:bg-primary/10"
-                        >
-                          {`{${v}}`}
-                        </button>
-                      ))}
-                    </div>
+                    {placeholderButtons((token) => insertIntoPush(token, "pushBody"))}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="tpl-push-body">
-                      
                       {t("correspondenceDialog.messageBody")}{" "}{editing.template.eventType === "schedule_assigned" ? t("correspondenceDialog.alsoSentAsAMessageIn") : t("correspondenceDialog.shownUnderTheBell")}
                     </Label>
                     <Textarea
@@ -448,13 +585,38 @@ export default function CorrespondenceDialog({
                     />
                     <p className="text-xs text-muted-foreground">{(draft.pushBody ?? "").length}{t("correspondenceDialog.n1600Characters")}</p>
                   </div>
-                  <div className="rounded-md border p-4">
-                    <div className="mb-2 text-xs font-medium text-muted-foreground">{t("correspondenceDialog.livePreview")}</div>
-                    <div className="max-w-md rounded-2xl bg-primary/10 px-4 py-3 text-sm">
-                      <div className="font-medium">{fill(draft.pushTitle ?? "", samples)}</div>
-                      <div className="whitespace-pre-wrap">{fill(draft.pushBody ?? "", samples) || <span className="italic text-muted-foreground">{t("correspondenceDialog.emptyMessage")}</span>}</div>
-                    </div>
+                  {pushPreview(draft.pushTitle ?? "", draft.pushBody ?? "", "en")}
+
+                  {spanishHeading}
+                  <div className="space-y-2" lang="es">
+                    <Label htmlFor="tpl-push-title-es">{t("correspondenceDialog.pushTitleSpanish")}</Label>
+                    <Input
+                      id="tpl-push-title-es"
+                      value={draft.pushTitleEs}
+                      maxLength={120}
+                      disabled={!canChange}
+                      placeholder={draft.pushTitle ?? ""}
+                      onChange={(e) => setDraft({ ...draft, pushTitleEs: e.target.value })}
+                    />
                   </div>
+                  <div className="space-y-2">
+                    <Label>{t("correspondenceDialog.insertPlaceholder")}</Label>
+                    {placeholderButtons((token) => insertIntoPush(token, "pushBodyEs"))}
+                  </div>
+                  <div className="space-y-2" lang="es">
+                    <Label htmlFor="tpl-push-body-es">{t("correspondenceDialog.pushBodySpanish")}</Label>
+                    <Textarea
+                      id="tpl-push-body-es"
+                      ref={pushBodyEs}
+                      value={draft.pushBodyEs}
+                      onChange={(e) => setDraft({ ...draft, pushBodyEs: e.target.value })}
+                      rows={5}
+                      maxLength={1600}
+                      disabled={!canChange}
+                    />
+                    <p className="text-xs text-muted-foreground">{draft.pushBodyEs.length}{t("correspondenceDialog.n1600Characters")}</p>
+                  </div>
+                  {pushPreview(draft.pushTitleEs || (draft.pushTitle ?? ""), draft.pushBodyEs || (draft.pushBody ?? ""), "es")}
                   {canChange && (
                     <Button onClick={() => void saveTemplate()} disabled={busy} className="w-full">
                       {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}

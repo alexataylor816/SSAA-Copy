@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { dateLocale, tr } from "@/i18n/runtime";
+import { tr, formatDate } from "@/i18n/runtime";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { tradeLabel } from "@/i18n/labels";
 
@@ -79,7 +79,7 @@ const TRADE_COLORS: Record<string, string> = {
   Carpentry: "#a16207",
 };
 
-const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric" });
+const day = (d: string) => formatDate(new Date(`${d}T00:00:00`), { weekday: "short", month: "short", day: "numeric" });
 
 export default function AiSchedulePanel({
   projects,

@@ -22,6 +22,17 @@ export interface NotificationTemplate {
   pushTitle: string | null;
   pushBody: string | null;
   pushActive: boolean;
+  /**
+   * Spanish wording, sent to people whose language is Spanish. Operators edit it in Manage
+   * Correspondence (filled once by "Translate to Spanish", then editable). An empty field falls back to
+   * the English one when sending, so nobody gets a blank message.
+   */
+  subjectEs: string | null;
+  bodyHtmlEs: string | null;
+  pushTitleEs: string | null;
+  pushBodyEs: string | null;
+  /** True when the English was saved after the Spanish, so the Spanish may be out of date. */
+  spanishOutdated: boolean;
   placeholderVariables: string[];
   createdAt: string;
   updatedAt: string;
@@ -39,6 +50,12 @@ interface Row {
   push_title: string | null;
   push_body: string | null;
   push_active: number | null;
+  subject_es: string | null;
+  body_html_es: string | null;
+  push_title_es: string | null;
+  push_body_es: string | null;
+  en_updated_at: string | null;
+  es_updated_at: string | null;
   placeholder_variables: string;
   created_at: string;
   updated_at: string;
@@ -208,6 +225,9 @@ export async function ensureTemplateTables(): Promise<void> {
   if (!columns.has("push_title")) await database.exec("ALTER TABLE notification_templates ADD COLUMN push_title TEXT");
   if (!columns.has("push_body")) await database.exec("ALTER TABLE notification_templates ADD COLUMN push_body TEXT");
   if (!columns.has("push_active")) await database.exec("ALTER TABLE notification_templates ADD COLUMN push_active INTEGER NOT NULL DEFAULT 1");
+  for (const column of SPANISH_COLUMNS) {
+    if (!columns.has(column)) await database.exec(`ALTER TABLE notification_templates ADD COLUMN ${column} TEXT`);
+  }
   await seedNotificationTemplates();
 }
 
@@ -237,8 +257,18 @@ export async function seedNotificationTemplates(): Promise<void> {
     if (row.push_title == null && s.push) {
       await database.run("UPDATE notification_templates SET push_title = ?, push_body = ? WHERE id = ?", [s.push.title, s.push.body, row.id]);
     }
+    // Spanish starts as the built-in wording, once. After that it's the operator's: never overwritten.
+    const es = SPANISH_TEMPLATES[s.eventType];
+    if (es && row.subject_es == null && row.body_html_es == null && row.push_title_es == null && row.push_body_es == null) {
+      await database.run(
+        "UPDATE notification_templates SET subject_es = ?, body_html_es = ?, push_title_es = ?, push_body_es = ? WHERE id = ?",
+        [es.subject, es.bodyHtml, es.push?.title ?? null, es.push?.body ?? null, row.id],
+      );
+    }
   }
 }
+
+const SPANISH_COLUMNS = ["subject_es", "body_html_es", "push_title_es", "push_body_es", "en_updated_at", "es_updated_at"];
 
 function mapRow(r: Row): NotificationTemplate {
   return {
@@ -253,6 +283,11 @@ function mapRow(r: Row): NotificationTemplate {
     pushTitle: r.push_title,
     pushBody: r.push_body,
     pushActive: r.push_active == null ? true : Number(r.push_active) === 1,
+    subjectEs: r.subject_es ?? null,
+    bodyHtmlEs: r.body_html_es ?? null,
+    pushTitleEs: r.push_title_es ?? null,
+    pushBodyEs: r.push_body_es ?? null,
+    spanishOutdated: !!r.en_updated_at && (!r.es_updated_at || r.en_updated_at > r.es_updated_at),
     placeholderVariables: JSON.parse(r.placeholder_variables) as string[],
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -284,6 +319,10 @@ export interface TemplateUpdate {
   pushTitle?: string;
   pushBody?: string;
   pushActive?: boolean;
+  subjectEs?: string | null;
+  bodyHtmlEs?: string | null;
+  pushTitleEs?: string | null;
+  pushBodyEs?: string | null;
 }
 
 export async function updateTemplate(id: string, updates: TemplateUpdate): Promise<NotificationTemplate | undefined> {
@@ -307,6 +346,24 @@ export async function updateTemplate(id: string, updates: TemplateUpdate): Promi
   text("body_html", updates.bodyHtml, 50_000);
   text("push_title", updates.pushTitle, 120);
   text("push_body", updates.pushBody, 1600);
+  const englishChanged = sets.some((s) => /^(subject|body_html|push_title|push_body) =/.test(s));
+  const before = sets.length;
+  text("subject_es", updates.subjectEs, 300, true);
+  text("body_html_es", updates.bodyHtmlEs, 50_000, true);
+  text("push_title_es", updates.pushTitleEs, 120, true);
+  text("push_body_es", updates.pushBodyEs, 1600, true);
+  const spanishChanged = sets.length > before;
+  // Which side was saved last tells the editor whether the Spanish may be out of date. Saving both
+  // together counts as up to date.
+  const stamp = new Date().toISOString();
+  if (englishChanged) {
+    sets.push("en_updated_at = ?");
+    values.push(stamp);
+  }
+  if (spanishChanged) {
+    sets.push("es_updated_at = ?");
+    values.push(stamp);
+  }
   if (updates.channel !== undefined) {
     if (updates.channel !== "email" && updates.channel !== "sms" && updates.channel !== "bell") {
       throw new BadRequestError("channel must be email, sms, or bell.");
@@ -345,9 +402,8 @@ export function fillPlaceholders(text: string, vars: Record<string, string | num
 }
 
 /**
- * Spanish versions of the default templates, used when the recipient's language is Spanish. The on/off
- * switches still come from the operator's template rows. (The Correspondence screen edits the English
- * text only for now; these are the Spanish wording until it gets a Spanish tab.)
+ * The built-in Spanish for the default templates. It seeds each template's Spanish fields once
+ * (seedNotificationTemplates); after that the saved, operator-editable Spanish is what gets sent.
  */
 export const SPANISH_TEMPLATES: Record<string, { subject: string; bodyHtml: string; push?: { title: string; body: string } }> = {
   schedule_created: {

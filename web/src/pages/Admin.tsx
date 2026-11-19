@@ -31,6 +31,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import OverviewTab from "@/components/operator/OverviewTab";
 import CorrespondenceDialog from "@/components/operator/CorrespondenceDialog";
+import MessageTranslationSetting from "@/components/operator/MessageTranslationSetting";
 import { AuditLogDialog, CancellationsDialog, OperatorsDialog } from "@/components/operator/ManageDialogs";
 import { CompanySheet, UserSheet } from "@/components/operator/DetailSheets";
 import { Button } from "@/components/ui/button";
@@ -253,6 +254,7 @@ export default function Admin() {
                       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                     </button>
                   ))}
+                  <MessageTranslationSetting canChange={canChange} />
                   <div className="flex items-center gap-3 rounded-lg border border-dashed p-4 text-left">
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/20 text-muted-foreground">
                       <CreditCard className="h-5 w-5" />
